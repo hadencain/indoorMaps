@@ -95,6 +95,48 @@ body {
   width: 100%;
 }
 
+button.wide {
+  width: 100%;
+  background: #10161e;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 9px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+button.wide.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button.wide.ghost {
+  color: var(--dim);
+  text-align: center;
+}
+
+.roomlist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.roomlist input {
+  background: #10161e;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.roomlist input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .readout {
   font-size: 13px;
   line-height: 1.9;

@@ -9,6 +9,13 @@ export function m2ll(origin: LngLat, x: number, y: number): LngLat {
   return [lng0 + x / mPerDegLng, lat0 + y / M_PER_DEG_LAT];
 }
 
+/** Inverse of m2ll: project a [lng, lat] back to local metres. */
+export function ll2m(origin: LngLat, lng: number, lat: number): MetreXY {
+  const [lng0, lat0] = origin;
+  const mPerDegLng = M_PER_DEG_LAT * Math.cos((lat0 * Math.PI) / 180);
+  return [(lng - lng0) * mPerDegLng, (lat - lat0) * M_PER_DEG_LAT];
+}
+
 /** Euclidean distance between two local-metre points, in metres. */
 export function distM(a: MetreXY, b: MetreXY): number {
   const dx = a[0] - b[0];

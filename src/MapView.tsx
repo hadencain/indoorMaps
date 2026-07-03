@@ -1,32 +1,46 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import type { Building } from "./types";
+import type { Building, MetreXY } from "./types";
 import type { FC, RoutePoint } from "./render";
 import { unitsToGeoJSON } from "./render";
+import { ll2m, rectRing } from "./geo";
+import { normaliseRect } from "./building";
 
 const EMPTY: FC = { type: "FeatureCollection", features: [] };
 
 interface Props {
   building: Building;
   ordinal: number;
+  editMode: boolean;
   routeLines: FC;
   routePoints: RoutePoint[];
+  onAddRoom: (rect: [number, number, number, number], ordinal: number) => void;
 }
 
-/** Renders the building + route in MapLibre, filtered to the active floor. */
-export default function MapView({ building, ordinal, routeLines, routePoints }: Props) {
+/** Renders the building + route in MapLibre; supports drawing rooms in edit mode. */
+export default function MapView({
+  building,
+  ordinal,
+  editMode,
+  routeLines,
+  routePoints,
+  onAddRoom,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const [ready, setReady] = useState(false);
+
+  // Latest props for the once-bound draw handlers to read.
+  const live = useRef({ building, ordinal, editMode, onAddRoom });
+  live.current = { building, ordinal, editMode, onAddRoom };
 
   // Initialise the map once.
   useEffect(() => {
     if (!containerRef.current) return;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      // No basemap: a self-contained empty style — no tiles, glyphs, or fonts,
-      // so nothing leaves the machine and there are no external requests.
+      // Self-contained empty style — no tiles, glyphs, or fonts, no external requests.
       style: {
         version: 8,
         sources: {},
@@ -41,6 +55,7 @@ export default function MapView({ building, ordinal, routeLines, routePoints }: 
     map.on("load", () => {
       map.addSource("units", { type: "geojson", data: unitsToGeoJSON(building) });
       map.addSource("route", { type: "geojson", data: EMPTY });
+      map.addSource("draft", { type: "geojson", data: EMPTY });
 
       map.addLayer({
         id: "unit-fill",
@@ -52,7 +67,7 @@ export default function MapView({ building, ordinal, routeLines, routePoints }: 
             ["get", "category"],
             "corridor", "#1a2230",
             "elevator", "#0e3b3a",
-            /* room */ "#171f2b",
+            "#171f2b",
           ],
           "fill-opacity": 0.9,
         },
@@ -70,15 +85,28 @@ export default function MapView({ building, ordinal, routeLines, routePoints }: 
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": "#00d7cd", "line-width": 4 },
       });
+      map.addLayer({
+        id: "draft-fill",
+        type: "fill",
+        source: "draft",
+        paint: { "fill-color": "#00d7cd", "fill-opacity": 0.18 },
+      });
+      map.addLayer({
+        id: "draft-line",
+        type: "line",
+        source: "draft",
+        paint: { "line-color": "#00d7cd", "line-width": 1.5, "line-dasharray": [2, 2] },
+      });
 
-      // Fit to the building footprint.
       const b = new maplibregl.LngLatBounds();
       for (const f of unitsToGeoJSON(building).features) {
-        const ring = (f.geometry as GeoJSON.Polygon).coordinates[0];
-        for (const c of ring) b.extend(c as [number, number]);
+        for (const c of (f.geometry as GeoJSON.Polygon).coordinates[0]) {
+          b.extend(c as [number, number]);
+        }
       }
       map.fitBounds(b, { padding: 60, duration: 0 });
 
+      bindDrawing(map);
       setReady(true);
     });
 
@@ -86,42 +114,42 @@ export default function MapView({ building, ordinal, routeLines, routePoints }: 
       map.remove();
       mapRef.current = null;
     };
-    // building is static for the lifetime of the app.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Rebuild the unit source whenever the building changes (rooms added/renamed).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    (map.getSource("units") as maplibregl.GeoJSONSource | undefined)?.setData(
+      unitsToGeoJSON(building),
+    );
+  }, [ready, building]);
 
   // React to floor / route changes: filter layers and rebuild HTML markers.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
 
-    const floorFilter: maplibregl.FilterSpecification = [
-      "==",
-      ["get", "ordinal"],
-      ordinal,
-    ];
+    const floorFilter: maplibregl.FilterSpecification = ["==", ["get", "ordinal"], ordinal];
     map.setFilter("unit-fill", floorFilter);
     map.setFilter("unit-outline", floorFilter);
     map.setFilter("route-line", floorFilter);
 
     (map.getSource("route") as maplibregl.GeoJSONSource | undefined)?.setData(routeLines);
 
-    // Clear old markers.
     for (const m of markersRef.current) m.remove();
     markersRef.current = [];
 
-    // Unit labels for the active floor.
     for (const f of unitsToGeoJSON(building).features) {
       const props = f.properties as { ordinal: number; name: string; category: string };
       if (props.ordinal !== ordinal || props.category === "corridor") continue;
-      const ring = (f.geometry as GeoJSON.Polygon).coordinates[0];
-      const c = ringCentroid(ring as [number, number][]);
+      const c = ringCentroid((f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][]);
       markersRef.current.push(
         new maplibregl.Marker({ element: labelEl(props.name, "label") }).setLngLat(c).addTo(map),
       );
     }
 
-    // Route markers for the active floor.
     for (const p of routePoints) {
       if (p.ordinal !== ordinal) continue;
       markersRef.current.push(
@@ -132,11 +160,64 @@ export default function MapView({ building, ordinal, routeLines, routePoints }: 
     }
   }, [ready, ordinal, routeLines, routePoints, building]);
 
+  // Toggle the draw cursor / pan behaviour with edit mode.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    map.getCanvas().style.cursor = editMode ? "crosshair" : "";
+  }, [ready, editMode]);
+
   return <div ref={containerRef} className="map" />;
+
+  // --- drawing (bound once; reads live.current for latest props) ---
+  function bindDrawing(map: maplibregl.Map) {
+    let start: MetreXY | null = null;
+
+    const draft = () => map.getSource("draft") as maplibregl.GeoJSONSource;
+    const toMetre = (ll: maplibregl.LngLat): MetreXY =>
+      ll2m(live.current.building.origin, ll.lng, ll.lat);
+    const draftFC = (rect: [number, number, number, number]): FC => ({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: {},
+          geometry: {
+            type: "Polygon",
+            coordinates: [rectRing(live.current.building.origin, rect)],
+          },
+        },
+      ],
+    });
+
+    map.on("mousedown", (e) => {
+      if (!live.current.editMode) return;
+      e.preventDefault();
+      map.dragPan.disable();
+      start = toMetre(e.lngLat);
+    });
+
+    map.on("mousemove", (e) => {
+      if (!live.current.editMode || !start) return;
+      draft().setData(draftFC(normaliseRect(start, toMetre(e.lngLat))));
+    });
+
+    const finish = (e: maplibregl.MapMouseEvent) => {
+      if (!start) return;
+      const rect = normaliseRect(start, toMetre(e.lngLat));
+      start = null;
+      draft().setData(EMPTY);
+      map.dragPan.enable();
+      // Ignore accidental clicks / tiny drags (< ~2m on a side).
+      if (rect[2] - rect[0] >= 2 && rect[3] - rect[1] >= 2) {
+        live.current.onAddRoom(rect, live.current.ordinal);
+      }
+    };
+    map.on("mouseup", finish);
+  }
 }
 
 function ringCentroid(ring: [number, number][]): [number, number] {
-  // Average of the 4 distinct corners (ring is closed, so drop the last).
   const pts = ring.slice(0, -1);
   let x = 0;
   let y = 0;

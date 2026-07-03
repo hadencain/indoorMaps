@@ -1,4 +1,4 @@
-import type { Building } from "./types";
+import type { Building, MetreXY } from "./types";
 
 // Hand-authored two-floor building, designed in local metres.
 // Ground (ordinal 0): Lobby / Cafe / Office 101 off a central corridor + elevator.
@@ -9,7 +9,7 @@ const CORRIDOR_G: [number, number, number, number] = [0, 18, 40, 22];
 const CORRIDOR_1: [number, number, number, number] = [0, 18, 40, 22];
 const ELEVATOR: [number, number, number, number] = [18, 22, 22, 26];
 
-export const building: Building = {
+export const initialBuilding: Building = {
   // Near the Empire State Building — arbitrary, just somewhere real-feeling.
   origin: [-73.9857, 40.7484],
   levels: [
@@ -48,4 +48,33 @@ export const building: Building = {
 /** Rooms a user can pick as a start/destination (excludes corridors/elevators). */
 export function selectableUnits(b: Building) {
   return b.units.filter((u) => u.category === "room");
+}
+
+/**
+ * Place a door for a freshly-drawn room: on the room edge nearest the corridor,
+ * horizontally centred on the room but clamped to the corridor's extent.
+ * Good enough for the spike; a real authoring tool would let you drag the door.
+ */
+export function doorForRoom(
+  b: Building,
+  rect: [number, number, number, number],
+  ordinal: number,
+): MetreXY | null {
+  const corridor = b.units.find((u) => u.category === "corridor" && u.ordinal === ordinal);
+  if (!corridor) return null;
+  const [cx0, cy0, cx1, cy1] = corridor.rect;
+  const [x0, y0, x1, y1] = rect;
+  const cx = Math.min(Math.max((x0 + x1) / 2, cx0), cx1);
+  // Below the corridor band -> door on corridor's bottom edge; above -> top edge.
+  if (y1 <= cy0) return [cx, cy0];
+  if (y0 >= cy1) return [cx, cy1];
+  return [cx, cy0];
+}
+
+/** Normalise a drag (any two corners) into an ordered rect [x0<x1, y0<y1]. */
+export function normaliseRect(
+  a: MetreXY,
+  b: MetreXY,
+): [number, number, number, number] {
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
 }
