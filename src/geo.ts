@@ -23,22 +23,56 @@ export function distM(a: MetreXY, b: MetreXY): number {
   return Math.hypot(dx, dy);
 }
 
-/** Centre of an axis-aligned rectangle [x0,y0,x1,y1]. */
-export function rectCentre(rect: [number, number, number, number]): MetreXY {
-  return [(rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2];
+/** Area-weighted centroid of a polygon (open ring). Falls back to the vertex
+ *  mean for degenerate/near-zero-area rings. */
+export function polygonCentroid(pts: MetreXY[]): MetreXY {
+  let a = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x0, y0] = pts[i];
+    const [x1, y1] = pts[(i + 1) % pts.length];
+    const cross = x0 * y1 - x1 * y0;
+    a += cross;
+    cx += (x0 + x1) * cross;
+    cy += (y0 + y1) * cross;
+  }
+  a *= 0.5;
+  if (Math.abs(a) < 1e-6 || pts.length < 3) {
+    let sx = 0;
+    let sy = 0;
+    for (const [x, y] of pts) {
+      sx += x;
+      sy += y;
+    }
+    return [sx / pts.length, sy / pts.length];
+  }
+  return [cx / (6 * a), cy / (6 * a)];
 }
 
-/** Closed ring (lng/lat) for a rectangle, ready for a GeoJSON Polygon. */
-export function rectRing(
-  origin: LngLat,
-  rect: [number, number, number, number],
-): LngLat[] {
-  const [x0, y0, x1, y1] = rect;
-  return [
-    m2ll(origin, x0, y0),
-    m2ll(origin, x1, y0),
-    m2ll(origin, x1, y1),
-    m2ll(origin, x0, y1),
-    m2ll(origin, x0, y0),
-  ];
+/** Axis-aligned bounds [x0,y0,x1,y1] of a set of metre points. */
+export function bbox(pts: MetreXY[]): [number, number, number, number] {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [x, y] of pts) {
+    x0 = Math.min(x0, x);
+    y0 = Math.min(y0, y);
+    x1 = Math.max(x1, x);
+    y1 = Math.max(y1, y);
+  }
+  return [x0, y0, x1, y1];
+}
+
+/** Metre points -> lng/lat points (open, not closed). */
+export function pointsToLL(origin: LngLat, pts: MetreXY[]): LngLat[] {
+  return pts.map((p) => m2ll(origin, p[0], p[1]));
+}
+
+/** Closed ring (lng/lat) for a polygon, ready for a GeoJSON Polygon. */
+export function polygonRing(origin: LngLat, pts: MetreXY[]): LngLat[] {
+  const ring = pointsToLL(origin, pts);
+  if (ring.length > 0) ring.push(ring[0]);
+  return ring;
 }

@@ -19,8 +19,8 @@ export interface Unit {
   ordinal: number;
   name: string;
   category: Category;
-  /** [x0, y0, x1, y1] axis-aligned rectangle in local metres */
-  rect: [number, number, number, number];
+  /** Polygon outline in local metres, as an open ring (no repeated last point). */
+  polygon: MetreXY[];
 }
 
 /** A door: connects `unit` to the corridor on the same ordinal at point `at`. */

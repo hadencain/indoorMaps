@@ -1,5 +1,5 @@
 import type { Building, Graph, LngLat } from "./types";
-import { rectRing, distM } from "./geo";
+import { polygonRing, distM } from "./geo";
 
 export type FC = GeoJSON.FeatureCollection;
 
@@ -10,7 +10,7 @@ export function unitsToGeoJSON(b: Building): FC {
     features: b.units.map((u) => ({
       type: "Feature",
       properties: { id: u.id, ordinal: u.ordinal, category: u.category, name: u.name },
-      geometry: { type: "Polygon", coordinates: [rectRing(b.origin, u.rect)] },
+      geometry: { type: "Polygon", coordinates: [polygonRing(b.origin, u.polygon)] },
     })),
   };
 }

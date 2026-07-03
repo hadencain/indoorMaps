@@ -123,7 +123,13 @@ button.wide.ghost {
   gap: 6px;
 }
 
-.roomlist input {
+.roomrow {
+  display: flex;
+  gap: 6px;
+}
+
+.roomrow input {
+  flex: 1;
   background: #10161e;
   color: var(--text);
   border: 1px solid var(--line);
@@ -132,9 +138,25 @@ button.wide.ghost {
   font-size: 13px;
 }
 
-.roomlist input:focus {
+.roomrow input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.roomrow .del {
+  flex: 0 0 auto;
+  width: 30px;
+  background: #10161e;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.roomrow .del:hover {
+  color: #ff5c5c;
+  border-color: #ff5c5c;
 }
 
 .readout {

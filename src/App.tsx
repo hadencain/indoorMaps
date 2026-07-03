@@ -1,20 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import MapView from "./MapView";
+import type { DrawTool } from "./MapView";
 import { initialBuilding, selectableUnits, doorForRoom } from "./building";
 import { buildGraph } from "./graph";
 import { findRoute } from "./astar";
 import { routeToGeometry } from "./render";
 import type { FC } from "./render";
-import type { Building } from "./types";
+import type { Building, MetreXY } from "./types";
 
-const STORAGE_KEY = "indoormaps:building:v1";
+// v2: unit geometry migrated from `rect` to `polygon`. Old v1 data is ignored.
+const STORAGE_KEY = "indoormaps:building:v2";
 
 function loadBuilding(): Building {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const b = JSON.parse(raw) as Building;
-      if (Array.isArray(b.units) && Array.isArray(b.levels)) return b;
+      const shapeOk =
+        Array.isArray(b.units) &&
+        Array.isArray(b.levels) &&
+        b.units.every((u) => Array.isArray(u.polygon));
+      if (shapeOk) return b;
     }
   } catch {
     /* fall through to the seed */
@@ -27,7 +33,7 @@ let roomSeq = 0;
 export default function App() {
   const [building, setBuilding] = useState<Building>(loadBuilding);
   const [ordinal, setOrdinal] = useState(0);
-  const [editMode, setEditMode] = useState(false);
+  const [drawTool, setDrawTool] = useState<DrawTool>("none");
   const [startId, setStartId] = useState("lobby");
   const [goalId, setGoalId] = useState("lab");
 
@@ -57,14 +63,14 @@ export default function App() {
   );
   const empty: FC = { type: "FeatureCollection", features: [] };
 
-  function addRoom(rect: [number, number, number, number], ord: number) {
+  function addRoom(polygon: MetreXY[], ord: number) {
     setBuilding((prev) => {
       const id = `room-${Date.now()}-${roomSeq++}`;
       const name = `Room ${prev.units.filter((u) => u.category === "room").length + 1}`;
-      const door = doorForRoom(prev, rect, ord);
+      const door = doorForRoom(prev, polygon, ord);
       return {
         ...prev,
-        units: [...prev.units, { id, ordinal: ord, name, category: "room", rect }],
+        units: [...prev.units, { id, ordinal: ord, name, category: "room", polygon }],
         openings: door ? [...prev.openings, { unit: id, at: door }] : prev.openings,
       };
     });
@@ -74,6 +80,15 @@ export default function App() {
     setBuilding((prev) => ({
       ...prev,
       units: prev.units.map((u) => (u.id === id ? { ...u, name } : u)),
+    }));
+  }
+
+  function deleteRoom(id: string) {
+    setBuilding((prev) => ({
+      ...prev,
+      units: prev.units.filter((u) => u.id !== id),
+      openings: prev.openings.filter((o) => o.unit !== id),
+      verticals: prev.verticals.filter((v) => v.a !== id && v.b !== id),
     }));
   }
 
@@ -107,17 +122,28 @@ export default function App() {
         </section>
 
         <section>
-          <label>Edit</label>
-          <button
-            className={`wide ${editMode ? "active" : ""}`}
-            onClick={() => setEditMode((v) => !v)}
-          >
-            {editMode ? "◼ Drawing rooms — click to stop" : "✎ Draw a room"}
-          </button>
-          {editMode && (
+          <label>Draw a room on {levelName(ordinal)}</label>
+          <div className="floors">
+            <button
+              className={drawTool === "rect" ? "active" : ""}
+              onClick={() => setDrawTool((t) => (t === "rect" ? "none" : "rect"))}
+            >
+              ▢ Rectangle
+            </button>
+            <button
+              className={drawTool === "polygon" ? "active" : ""}
+              onClick={() => setDrawTool((t) => (t === "polygon" ? "none" : "polygon"))}
+            >
+              ⬡ Polygon
+            </button>
+          </div>
+          {drawTool === "rect" && (
+            <p className="hint">Drag a rectangle. Releases into a routable room.</p>
+          )}
+          {drawTool === "polygon" && (
             <p className="hint">
-              Drag a rectangle on <b>{levelName(ordinal)}</b> to add a room. A door
-              auto-connects it to the corridor, and it becomes routable immediately.
+              Click to drop vertices. Click the first point again (or press Enter) to
+              close; Esc cancels.
             </p>
           )}
         </section>
@@ -167,11 +193,16 @@ export default function App() {
             <label>Rooms on {levelName(ordinal)}</label>
             <div className="roomlist">
               {roomsOnFloor.map((r) => (
-                <input
-                  key={r.id}
-                  value={r.name}
-                  onChange={(e) => renameRoom(r.id, e.target.value)}
-                />
+                <div className="roomrow" key={r.id}>
+                  <input value={r.name} onChange={(e) => renameRoom(r.id, e.target.value)} />
+                  <button
+                    className="del"
+                    title="Delete room"
+                    onClick={() => deleteRoom(r.id)}
+                  >
+                    ✕
+                  </button>
+                </div>
               ))}
             </div>
           </section>
@@ -187,7 +218,7 @@ export default function App() {
       <MapView
         building={building}
         ordinal={ordinal}
-        editMode={editMode}
+        drawTool={drawTool}
         routeLines={geom?.lines ?? empty}
         routePoints={geom?.points ?? []}
         onAddRoom={addRoom}

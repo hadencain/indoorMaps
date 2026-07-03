@@ -1,5 +1,5 @@
 import type { Building, Edge, Graph, MetreXY, NodeMeta } from "./types";
-import { distM, m2ll, rectCentre } from "./geo";
+import { distM, m2ll, polygonCentroid } from "./geo";
 
 /** Extra cost (metres-equivalent) to traverse one vertical connection. */
 const VERTICAL_COST = 6;
@@ -24,7 +24,7 @@ export function buildGraph(b: Building): Graph {
 
   // Unit nodes.
   for (const u of b.units) {
-    const xy = rectCentre(u.rect);
+    const xy = polygonCentroid(u.polygon);
     nodes.set(u.id, {
       id: u.id,
       ordinal: u.ordinal,
