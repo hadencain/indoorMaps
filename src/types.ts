@@ -7,7 +7,7 @@
 export type LngLat = [number, number];
 export type MetreXY = [number, number];
 
-export type Category = "room" | "corridor" | "elevator";
+export type Category = "room" | "corridor" | "elevator" | "stairs";
 
 export interface Level {
   ordinal: number;

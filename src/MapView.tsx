@@ -161,6 +161,7 @@ export default function MapView({
             ["get", "category"],
             "corridor", "#1a2230",
             "elevator", "#0e3b3a",
+            "stairs", "#3a2e14",
             "#171f2b",
           ],
           "fill-opacity": 0.9,
@@ -477,6 +478,7 @@ export default function MapView({
             <option value="room">room</option>
             <option value="corridor">corridor</option>
             <option value="elevator">elevator</option>
+            <option value="stairs">stairs</option>
           </select>
           <button
             className="wide ghost danger"

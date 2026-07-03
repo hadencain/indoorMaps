@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/mapview.tsx","./src/astar.ts","./src/building.ts","./src/format.ts","./src/geo.ts","./src/graph.ts","./src/main.tsx","./src/render.ts","./src/svgimport.ts","./src/types.ts"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/mapview.tsx","./src/astar.ts","./src/building.ts","./src/format.ts","./src/geo.ts","./src/graph.ts","./src/imdf.ts","./src/main.tsx","./src/render.ts","./src/svgimport.ts","./src/types.ts"],"version":"5.9.3"}

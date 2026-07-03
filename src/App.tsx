@@ -11,6 +11,7 @@ import { bbox, polygonArea, polygonPerimeter } from "./geo";
 import { formatLength, formatArea } from "./format";
 import type { Unit } from "./format";
 import { parseSvgShapes } from "./svgImport";
+import { buildingToGeoJSON, geoJSONToBuilding } from "./imdf";
 
 // v3: openings carry a stable `id` (for door dragging). Older data is ignored.
 const STORAGE_KEY = "indoormaps:building:v3";
@@ -159,11 +160,12 @@ export default function App() {
         (v) => (v.a === a && v.b === b) || (v.a === b && v.b === a),
       );
       if (exists) return prev;
-      // Auto-apply the elevator visual to both endpoints so the link reads.
+      // Auto-apply the matching category so the link reads visually.
+      const cat: Category = linkKind === "Stairs" ? "stairs" : "elevator";
       return {
         ...prev,
         units: prev.units.map((u) =>
-          u.id === a || u.id === b ? { ...u, category: "elevator" as Category } : u,
+          u.id === a || u.id === b ? { ...u, category: cat } : u,
         ),
         verticals: [...prev.verticals, { a, b, name: linkKind }],
       };
@@ -305,6 +307,31 @@ export default function App() {
     } catch {
       setImportMsg("Could not parse that file as SVG.");
     }
+  }
+
+  function exportGeoJSON() {
+    const text = JSON.stringify(buildingToGeoJSON(building), null, 2);
+    const url = URL.createObjectURL(new Blob([text], { type: "application/geo+json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "building.geojson";
+    a.click();
+    URL.revokeObjectURL(url);
+    setImportMsg(`Exported ${building.units.length} units as GeoJSON.`);
+  }
+
+  async function onLoadGeoJSON(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const loaded = geoJSONToBuilding(await file.text());
+    if (!loaded) {
+      setImportMsg("Not an indoorMaps GeoJSON export (missing metadata).");
+      return;
+    }
+    setBuilding(loaded);
+    setSelectedId(null);
+    setImportMsg(`Loaded building: ${loaded.units.length} units.`);
   }
 
   const selectedUnit = building.units.find((u) => u.id === selectedId) ?? null;
@@ -581,6 +608,22 @@ export default function App() {
             Parses rect/polygon/path shapes into rooms, scaled to the width above.
             Curves flatten to endpoints; element transforms are ignored. Tip: Reset or
             clear the floor first for a clean import.
+          </p>
+        </section>
+
+        <section>
+          <label>Export / load</label>
+          <button className="wide" onClick={exportGeoJSON}>
+            ⭳ Export IMDF GeoJSON
+          </button>
+          <label className="filebtn" style={{ marginTop: 8 }}>
+            Load building GeoJSON…
+            <input type="file" accept=".geojson,.json" onChange={onLoadGeoJSON} hidden />
+          </label>
+          <p className="hint">
+            Exports units/openings/vertical links as one IMDF-flavored GeoJSON
+            FeatureCollection (real lng/lat) — viewable in QGIS/Mapbox and reloadable
+            here.
           </p>
         </section>
 
