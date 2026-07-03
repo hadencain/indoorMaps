@@ -71,6 +71,32 @@ export function bbox(pts: MetreXY[]): [number, number, number, number] {
   return [x0, y0, x1, y1];
 }
 
+/** Closest point to `p` on segment a→b. */
+export function projectOnSegment(p: MetreXY, a: MetreXY, b: MetreXY): MetreXY {
+  const abx = b[0] - a[0];
+  const aby = b[1] - a[1];
+  const len2 = abx * abx + aby * aby;
+  if (len2 === 0) return [a[0], a[1]];
+  let t = ((p[0] - a[0]) * abx + (p[1] - a[1]) * aby) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return [a[0] + t * abx, a[1] + t * aby];
+}
+
+/** Closest point to `p` anywhere on a polygon's boundary (its walls). */
+export function nearestPointOnPolygon(p: MetreXY, poly: MetreXY[]): MetreXY {
+  let best: MetreXY = poly[0];
+  let bestD = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const q = projectOnSegment(p, poly[i], poly[(i + 1) % poly.length]);
+    const d = distM(p, q);
+    if (d < bestD) {
+      bestD = d;
+      best = q;
+    }
+  }
+  return best;
+}
+
 /** Absolute polygon area in m² (shoelace), for an open ring. */
 export function polygonArea(pts: MetreXY[]): number {
   if (pts.length < 3) return 0;

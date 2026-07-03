@@ -46,7 +46,9 @@ export default function App() {
   const [showGrid, setShowGrid] = useState(false);
   const [gridSize, setGridSize] = useState(1);
   const [linkMode, setLinkMode] = useState(false);
+  const [linkKind, setLinkKind] = useState("Elevator");
   const [pendingLink, setPendingLink] = useState<{ id: string; ordinal: number } | null>(null);
+  const [vertexEdit, setVertexEdit] = useState(false);
   const [planWidth, setPlanWidth] = useState(40);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [startId, setStartId] = useState("lobby");
@@ -115,11 +117,12 @@ export default function App() {
     }));
   }
 
-  // Draw tools and link mode are mutually exclusive interaction modes.
+  // Draw / link / vertex-edit are mutually exclusive interaction modes.
   function pickDrawTool(t: DrawTool) {
     setDrawTool((cur) => (cur === t ? "none" : t));
     setLinkMode(false);
     setPendingLink(null);
+    setVertexEdit(false);
   }
   function toggleLinkMode() {
     setLinkMode((v) => {
@@ -127,6 +130,13 @@ export default function App() {
       setPendingLink(null);
       return !v;
     });
+    setVertexEdit(false);
+  }
+  function toggleVertexEdit() {
+    setVertexEdit((v) => !v);
+    setDrawTool("none");
+    setLinkMode(false);
+    setPendingLink(null);
   }
 
   // Vertical connections: click a unit on one floor, then a unit on another.
@@ -149,9 +159,51 @@ export default function App() {
         (v) => (v.a === a && v.b === b) || (v.a === b && v.b === a),
       );
       if (exists) return prev;
-      return { ...prev, verticals: [...prev.verticals, { a, b, name: "Vertical" }] };
+      // Auto-apply the elevator visual to both endpoints so the link reads.
+      return {
+        ...prev,
+        units: prev.units.map((u) =>
+          u.id === a || u.id === b ? { ...u, category: "elevator" as Category } : u,
+        ),
+        verticals: [...prev.verticals, { a, b, name: linkKind }],
+      };
     });
     setPendingLink(null);
+  }
+
+  function moveVertex(id: string, index: number, at: MetreXY) {
+    setBuilding((prev) => ({
+      ...prev,
+      units: prev.units.map((u) =>
+        u.id === id ? { ...u, polygon: u.polygon.map((p, i) => (i === index ? at : p)) } : u,
+      ),
+    }));
+  }
+
+  function insertVertex(id: string, edgeIndex: number) {
+    setBuilding((prev) => ({
+      ...prev,
+      units: prev.units.map((u) => {
+        if (u.id !== id) return u;
+        const a = u.polygon[edgeIndex];
+        const b = u.polygon[(edgeIndex + 1) % u.polygon.length];
+        const mid: MetreXY = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        const polygon = [...u.polygon];
+        polygon.splice(edgeIndex + 1, 0, mid);
+        return { ...u, polygon };
+      }),
+    }));
+  }
+
+  function deleteVertex(id: string, index: number) {
+    setBuilding((prev) => ({
+      ...prev,
+      units: prev.units.map((u) =>
+        u.id === id && u.polygon.length > 3
+          ? { ...u, polygon: u.polygon.filter((_, i) => i !== index) }
+          : u,
+      ),
+    }));
   }
 
   function deleteVertical(a: string, b: string) {
@@ -332,6 +384,7 @@ export default function App() {
             </button>
           </div>
           {selectedUnit && (
+            <>
             <div className="readout" style={{ marginTop: 12 }}>
               <div>
                 <span className="k">space</span> {selectedUnit.name}
@@ -348,6 +401,20 @@ export default function App() {
                 {formatLength(polygonPerimeter(selectedUnit.polygon), unit)}
               </div>
             </div>
+            <button
+              className={`wide ${vertexEdit ? "active" : ""}`}
+              style={{ marginTop: 8 }}
+              onClick={toggleVertexEdit}
+            >
+              {vertexEdit ? "◼ Editing vertices — click stop" : "✎ Edit vertices"}
+            </button>
+            {vertexEdit && (
+              <p className="hint">
+                Drag handles to move a corner, click a + to add one, right-click a
+                handle to delete. Snaps to the grid when it's on.
+              </p>
+            )}
+            </>
           )}
         </section>
 
@@ -383,7 +450,17 @@ export default function App() {
 
         <section>
           <label>Vertical links (stairs / elevator)</label>
-          <button className={`wide ${linkMode ? "active" : ""}`} onClick={toggleLinkMode}>
+          <select value={linkKind} onChange={(e) => setLinkKind(e.target.value)}>
+            <option>Elevator</option>
+            <option>Stairs</option>
+            <option>Ramp</option>
+            <option>Escalator</option>
+          </select>
+          <button
+            className={`wide ${linkMode ? "active" : ""}`}
+            style={{ marginTop: 8 }}
+            onClick={toggleLinkMode}
+          >
             {linkMode ? "◼ Linking — click stop" : "⭥ Link two units across floors"}
           </button>
           {linkMode && (
@@ -524,6 +601,7 @@ export default function App() {
         showGrid={showGrid}
         gridSize={gridSize}
         linkMode={linkMode}
+        vertexEdit={vertexEdit}
         routeLines={geom?.lines ?? empty}
         routePoints={geom?.points ?? []}
         onAddRoom={addRoom}
@@ -533,6 +611,9 @@ export default function App() {
         onSetCategory={setUnitCategory}
         onDelete={deleteRoom}
         onLinkUnit={onLinkUnit}
+        onMoveVertex={moveVertex}
+        onInsertVertex={insertVertex}
+        onDeleteVertex={deleteVertex}
       />
     </div>
   );

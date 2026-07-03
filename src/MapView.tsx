@@ -3,7 +3,16 @@ import maplibregl from "maplibre-gl";
 import type { Building, MetreXY, Category } from "./types";
 import type { FC, RoutePoint } from "./render";
 import { unitsToGeoJSON } from "./render";
-import { ll2m, m2ll, distM, polygonRing, pointsToLL, polygonArea, snapPoint } from "./geo";
+import {
+  ll2m,
+  m2ll,
+  distM,
+  polygonRing,
+  pointsToLL,
+  polygonArea,
+  snapPoint,
+  nearestPointOnPolygon,
+} from "./geo";
 import { rectFromDrag } from "./building";
 import { gridToGeoJSON } from "./render";
 import { formatLength, formatArea } from "./format";
@@ -25,6 +34,7 @@ interface Props {
   showGrid: boolean;
   gridSize: number;
   linkMode: boolean;
+  vertexEdit: boolean;
   routeLines: FC;
   routePoints: RoutePoint[];
   onAddRoom: (polygon: MetreXY[], ordinal: number) => void;
@@ -34,6 +44,9 @@ interface Props {
   onSetCategory: (id: string, category: Category) => void;
   onDelete: (id: string) => void;
   onLinkUnit: (id: string) => void;
+  onMoveVertex: (id: string, index: number, at: MetreXY) => void;
+  onInsertVertex: (id: string, edgeIndex: number) => void;
+  onDeleteVertex: (id: string, index: number) => void;
 }
 
 /** Renders the building + route; supports rectangle + polygon room authoring. */
@@ -47,6 +60,7 @@ export default function MapView({
   showGrid,
   gridSize,
   linkMode,
+  vertexEdit,
   routeLines,
   routePoints,
   onAddRoom,
@@ -56,6 +70,9 @@ export default function MapView({
   onSetCategory,
   onDelete,
   onLinkUnit,
+  onMoveVertex,
+  onInsertVertex,
+  onDeleteVertex,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -80,6 +97,10 @@ export default function MapView({
     gridSize,
     linkMode,
     onLinkUnit,
+    vertexEdit,
+    onMoveVertex,
+    onInsertVertex,
+    onDeleteVertex,
   });
   live.current = {
     building,
@@ -93,6 +114,10 @@ export default function MapView({
     gridSize,
     linkMode,
     onLinkUnit,
+    vertexEdit,
+    onMoveVertex,
+    onInsertVertex,
+    onDeleteVertex,
   };
 
   // Initialise the map once.
@@ -275,20 +300,66 @@ export default function MapView({
       markersRef.current.push(new maplibregl.Marker({ element: el }).setLngLat(c).addTo(map));
     }
 
-    // Draggable door handles for the active floor (only when not drawing).
-    if (drawTool === "none") {
-      const unitOrdinal = new Map(building.units.map((u) => [u.id, u.ordinal]));
+    // Draggable door handles for the active floor (hidden while drawing / editing verts).
+    if (drawTool === "none" && !vertexEdit) {
+      const unitById = new Map(building.units.map((u) => [u.id, u]));
       for (const op of building.openings) {
-        if (unitOrdinal.get(op.unit) !== ordinal) continue;
+        const owner = unitById.get(op.unit);
+        if (!owner || owner.ordinal !== ordinal) continue;
         const el = labelEl("", "door");
         const marker = new maplibregl.Marker({ element: el, draggable: true })
           .setLngLat(m2ll(building.origin, op.at[0], op.at[1]))
           .addTo(map);
         marker.on("dragend", () => {
           const ll = marker.getLngLat();
-          onMoveDoor(op.id, ll2m(building.origin, ll.lng, ll.lat));
+          let at = ll2m(building.origin, ll.lng, ll.lat);
+          if (live.current.showGrid) at = snapPoint(at, live.current.gridSize);
+          // Snap onto the owning room's nearest wall so doors sit on an edge.
+          const o = live.current.building.units.find((u) => u.id === op.unit);
+          if (o) at = nearestPointOnPolygon(at, o.polygon);
+          onMoveDoor(op.id, at);
         });
         markersRef.current.push(marker);
+      }
+    }
+
+    // Vertex-edit handles for the selected unit on the active floor.
+    if (vertexEdit && selectedId) {
+      const u = building.units.find((x) => x.id === selectedId);
+      if (u && u.ordinal === ordinal) {
+        u.polygon.forEach((v, i) => {
+          const el = labelEl("", "vhandle");
+          const marker = new maplibregl.Marker({ element: el, draggable: true })
+            .setLngLat(m2ll(building.origin, v[0], v[1]))
+            .addTo(map);
+          marker.on("dragend", () => {
+            const ll = marker.getLngLat();
+            let at = ll2m(building.origin, ll.lng, ll.lat);
+            if (live.current.showGrid) at = snapPoint(at, live.current.gridSize);
+            live.current.onMoveVertex(u.id, i, at);
+          });
+          el.addEventListener("contextmenu", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            live.current.onDeleteVertex(u.id, i);
+          });
+          markersRef.current.push(marker);
+        });
+        // Midpoint "+" handles to insert a vertex on each edge.
+        u.polygon.forEach((v, i) => {
+          const b2 = u.polygon[(i + 1) % u.polygon.length];
+          const mid: MetreXY = [(v[0] + b2[0]) / 2, (v[1] + b2[1]) / 2];
+          const el = labelEl("+", "vadd");
+          el.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            live.current.onInsertVertex(u.id, i);
+          });
+          markersRef.current.push(
+            new maplibregl.Marker({ element: el }).setLngLat(
+              m2ll(building.origin, mid[0], mid[1]),
+            ).addTo(map),
+          );
+        });
       }
     }
 
@@ -301,7 +372,7 @@ export default function MapView({
           .addTo(map),
       );
     }
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, onMoveDoor, unit, showDims]);
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, onMoveDoor, unit, showDims, vertexEdit]);
 
   // Draw-tool changes: cursor, dbl-click zoom, and reset any in-progress draft.
   useEffect(() => {
@@ -367,6 +438,21 @@ export default function MapView({
           <span>
             <kbd>Esc</kbd> deselect
           </span>
+        </div>
+      )}
+      {vertexEdit && drawTool === "none" && (
+        <div className="shortcuts">
+          <b>Edit vertices</b>
+          <span>
+            <kbd>Drag</kbd> a handle to move
+          </span>
+          <span>
+            <kbd>+</kbd> insert on edge
+          </span>
+          <span>
+            <kbd>Right-click</kbd> a handle to delete
+          </span>
+          {showGrid && <span>snapping to {gridSize} m grid</span>}
         </div>
       )}
       {menu && menuUnit && (
@@ -549,6 +635,11 @@ export default function MapView({
         // Link mode: feed the click to the vertical-connection flow instead.
         if (live.current.linkMode) {
           if (id) live.current.onLinkUnit(id);
+          return;
+        }
+        // Vertex-edit: switch the edited room on a hit, but keep it on empty clicks.
+        if (live.current.vertexEdit) {
+          if (id) live.current.onSelect(id);
           return;
         }
         live.current.onSelect(id ?? null);

@@ -362,6 +362,38 @@ button.wide.ghost {
   cursor: grabbing;
 }
 
+/* Vertex-edit handles */
+.vhandle {
+  width: 12px;
+  height: 12px;
+  background: #f2c14e;
+  border: 1.5px solid #0b0d10;
+  cursor: grab;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.vhandle:active {
+  cursor: grabbing;
+}
+
+.vadd {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  line-height: 1;
+  color: #0b0d10;
+  background: rgba(242, 193, 78, 0.65);
+  border: 1px solid #0b0d10;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.vadd:hover {
+  background: #f2c14e;
+}
+
 .roomrow.selected input {
   border-color: #f2c14e;
   color: #f2c14e;
