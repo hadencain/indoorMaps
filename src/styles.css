@@ -1,0 +1,164 @@
+:root {
+  --bg: #080a0d;
+  --panel: #0d1116;
+  --line: #1e2733;
+  --text: #e8e8e8;
+  --dim: #8a96a5;
+  --accent: #00d7cd;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.app {
+  display: flex;
+  height: 100%;
+}
+
+.sidebar {
+  width: 300px;
+  flex: 0 0 300px;
+  padding: 20px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+}
+
+.sidebar h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 300;
+  letter-spacing: 0.02em;
+}
+
+.sub {
+  margin: 4px 0 20px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.sidebar section {
+  margin-bottom: 22px;
+}
+
+.sidebar label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 12px 0 6px;
+}
+
+.floors {
+  display: flex;
+  gap: 8px;
+}
+
+.floors button,
+.sidebar select {
+  background: #10161e;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.floors button {
+  flex: 1;
+}
+
+.floors button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sidebar select {
+  width: 100%;
+}
+
+.readout {
+  font-size: 13px;
+  line-height: 1.9;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.readout .k {
+  display: inline-block;
+  width: 54px;
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.readout .warn {
+  color: #ff5c5c;
+}
+
+.hint {
+  margin-top: 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
+.map {
+  flex: 1;
+  position: relative;
+}
+
+/* MapLibre HTML markers */
+.label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #cdd6e0;
+  text-shadow: 0 1px 3px #000;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.pin {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  color: #05070a;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.pin-start {
+  background: #43d675;
+}
+
+.pin-end {
+  background: #ff5c5c;
+  color: #fff;
+}
+
+.pin-transition {
+  background: var(--accent);
+}
