@@ -2,6 +2,9 @@ node_modules/
 dist/
 build/
 scratch/
+docs/superpowers/
+.superpowers/
+.claude/
 *.log
 .DS_Store
 .env
