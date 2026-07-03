@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import type { Building, MetreXY } from "./types";
+import type { Building, MetreXY, Category } from "./types";
 import type { FC, RoutePoint } from "./render";
 import { unitsToGeoJSON } from "./render";
-import { ll2m, distM, polygonRing, pointsToLL } from "./geo";
+import { ll2m, m2ll, distM, polygonRing, pointsToLL, polygonArea, snapPoint } from "./geo";
 import { rectFromDrag } from "./building";
+import { gridToGeoJSON } from "./render";
+import { formatLength, formatArea } from "./format";
+import type { Unit } from "./format";
 
 const EMPTY: FC = { type: "FeatureCollection", features: [] };
 /** Click within this many metres of the first vertex to close a polygon. */
@@ -16,9 +19,21 @@ interface Props {
   building: Building;
   ordinal: number;
   drawTool: DrawTool;
+  selectedId: string | null;
+  unit: Unit;
+  showDims: boolean;
+  showGrid: boolean;
+  gridSize: number;
+  linkMode: boolean;
   routeLines: FC;
   routePoints: RoutePoint[];
   onAddRoom: (polygon: MetreXY[], ordinal: number) => void;
+  onSelect: (id: string | null) => void;
+  onMoveDoor: (doorId: string, at: MetreXY) => void;
+  onRename: (id: string, name: string) => void;
+  onSetCategory: (id: string, category: Category) => void;
+  onDelete: (id: string) => void;
+  onLinkUnit: (id: string) => void;
 }
 
 /** Renders the building + route; supports rectangle + polygon room authoring. */
@@ -26,21 +41,59 @@ export default function MapView({
   building,
   ordinal,
   drawTool,
+  selectedId,
+  unit,
+  showDims,
+  showGrid,
+  gridSize,
+  linkMode,
   routeLines,
   routePoints,
   onAddRoom,
+  onSelect,
+  onMoveDoor,
+  onRename,
+  onSetCategory,
+  onDelete,
+  onLinkUnit,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const measureRef = useRef<maplibregl.Marker | null>(null);
   const drawRef = useRef<{ poly: MetreXY[]; rectStart: MetreXY | null }>({
     poly: [],
     rectStart: null,
   });
   const [ready, setReady] = useState(false);
+  const [menu, setMenu] = useState<{ unitId: string; x: number; y: number } | null>(null);
 
-  const live = useRef({ building, ordinal, drawTool, onAddRoom });
-  live.current = { building, ordinal, drawTool, onAddRoom };
+  const live = useRef({
+    building,
+    ordinal,
+    drawTool,
+    onAddRoom,
+    onSelect,
+    unit,
+    showDims,
+    showGrid,
+    gridSize,
+    linkMode,
+    onLinkUnit,
+  });
+  live.current = {
+    building,
+    ordinal,
+    drawTool,
+    onAddRoom,
+    onSelect,
+    unit,
+    showDims,
+    showGrid,
+    gridSize,
+    linkMode,
+    onLinkUnit,
+  };
 
   // Initialise the map once.
   useEffect(() => {
@@ -55,14 +108,24 @@ export default function MapView({
       center: building.origin,
       zoom: 18,
       attributionControl: false,
+      dragRotate: false, // right-drag is free for the properties menu
     });
     mapRef.current = map;
+    // Suppress the native browser context menu over the map (we render our own).
+    containerRef.current.addEventListener("contextmenu", (e) => e.preventDefault());
 
     map.on("load", () => {
+      map.addSource("grid", { type: "geojson", data: EMPTY });
       map.addSource("units", { type: "geojson", data: unitsToGeoJSON(building) });
       map.addSource("route", { type: "geojson", data: EMPTY });
       map.addSource("draft", { type: "geojson", data: EMPTY });
 
+      map.addLayer({
+        id: "grid-line",
+        type: "line",
+        source: "grid",
+        paint: { "line-color": "#243244", "line-width": 0.6 },
+      });
       map.addLayer({
         id: "unit-fill",
         type: "fill",
@@ -83,6 +146,13 @@ export default function MapView({
         type: "line",
         source: "units",
         paint: { "line-color": "#31435c", "line-width": 1.5 },
+      });
+      map.addLayer({
+        id: "unit-selected",
+        type: "line",
+        source: "units",
+        paint: { "line-color": "#f2c14e", "line-width": 2.5 },
+        filter: ["==", ["get", "id"], "__none__"],
       });
       map.addLayer({
         id: "route-line",
@@ -155,7 +225,16 @@ export default function MapView({
     );
   }, [ready, building]);
 
-  // Floor / route changes: filter layers and rebuild HTML markers.
+  // Rebuild the snap grid when toggled / resized / building extent changes.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    (map.getSource("grid") as maplibregl.GeoJSONSource | undefined)?.setData(
+      showGrid ? gridToGeoJSON(building, gridSize) : EMPTY,
+    );
+  }, [ready, showGrid, gridSize, building]);
+
+  // Floor / route / selection changes: filter layers and rebuild HTML markers.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
@@ -164,21 +243,56 @@ export default function MapView({
     map.setFilter("unit-fill", floorFilter);
     map.setFilter("unit-outline", floorFilter);
     map.setFilter("route-line", floorFilter);
+    map.setFilter("unit-selected", [
+      "all",
+      floorFilter,
+      ["==", ["get", "id"], selectedId ?? "__none__"],
+    ]);
 
     (map.getSource("route") as maplibregl.GeoJSONSource | undefined)?.setData(routeLines);
 
     for (const m of markersRef.current) m.remove();
     markersRef.current = [];
 
+    // Room labels for the active floor (+ area when dimensions are shown).
+    const areaById = new Map(building.units.map((u) => [u.id, polygonArea(u.polygon)]));
     for (const f of unitsToGeoJSON(building).features) {
-      const props = f.properties as { ordinal: number; name: string; category: string };
+      const props = f.properties as {
+        id: string;
+        ordinal: number;
+        name: string;
+        category: string;
+      };
       if (props.ordinal !== ordinal || props.category === "corridor") continue;
       const c = ringCentroid((f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][]);
-      markersRef.current.push(
-        new maplibregl.Marker({ element: labelEl(props.name, "label") }).setLngLat(c).addTo(map),
-      );
+      const el = labelEl(props.name, "label");
+      if (showDims) {
+        const sub = document.createElement("div");
+        sub.className = "label-sub";
+        sub.textContent = formatArea(areaById.get(props.id) ?? 0, unit);
+        el.appendChild(sub);
+      }
+      markersRef.current.push(new maplibregl.Marker({ element: el }).setLngLat(c).addTo(map));
     }
 
+    // Draggable door handles for the active floor (only when not drawing).
+    if (drawTool === "none") {
+      const unitOrdinal = new Map(building.units.map((u) => [u.id, u.ordinal]));
+      for (const op of building.openings) {
+        if (unitOrdinal.get(op.unit) !== ordinal) continue;
+        const el = labelEl("", "door");
+        const marker = new maplibregl.Marker({ element: el, draggable: true })
+          .setLngLat(m2ll(building.origin, op.at[0], op.at[1]))
+          .addTo(map);
+        marker.on("dragend", () => {
+          const ll = marker.getLngLat();
+          onMoveDoor(op.id, ll2m(building.origin, ll.lng, ll.lat));
+        });
+        markersRef.current.push(marker);
+      }
+    }
+
+    // Route start / end / transition pins.
     for (const p of routePoints) {
       if (p.ordinal !== ordinal) continue;
       markersRef.current.push(
@@ -187,22 +301,110 @@ export default function MapView({
           .addTo(map),
       );
     }
-  }, [ready, ordinal, routeLines, routePoints, building]);
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, onMoveDoor, unit, showDims]);
 
   // Draw-tool changes: cursor, dbl-click zoom, and reset any in-progress draft.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    map.getCanvas().style.cursor = drawTool === "none" ? "" : "crosshair";
+    map.getCanvas().style.cursor =
+      drawTool !== "none" ? "crosshair" : linkMode ? "pointer" : "";
     if (drawTool === "none") {
       map.doubleClickZoom.enable();
       cancelDraft();
     } else {
       map.doubleClickZoom.disable();
     }
-  }, [ready, drawTool]);
+  }, [ready, drawTool, linkMode]);
 
-  return <div ref={containerRef} className="map" />;
+  // Close the properties menu on Escape, floor change, or if its unit is gone.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  useEffect(() => setMenu(null), [ordinal]);
+  useEffect(() => {
+    if (menu && !building.units.some((u) => u.id === menu.unitId)) setMenu(null);
+  }, [building, menu]);
+
+  const menuUnit = menu ? building.units.find((u) => u.id === menu.unitId) ?? null : null;
+
+  return (
+    <div className="map-wrap">
+      <div ref={containerRef} className="map" />
+
+      {drawTool === "polygon" && (
+        <div className="shortcuts">
+          <b>Polygon</b>
+          <span>
+            <kbd>Click</kbd> add vertex
+          </span>
+          <span>
+            <kbd>Click first pt</kbd> / <kbd>Enter</kbd> close
+          </span>
+          <span>
+            <kbd>Esc</kbd> / <kbd>Right-click</kbd> cancel
+          </span>
+          {live.current.showGrid && <span>snapping to {live.current.gridSize} m grid</span>}
+        </div>
+      )}
+      {drawTool === "rect" && (
+        <div className="shortcuts">
+          <b>Rectangle</b>
+          <span>
+            <kbd>Drag</kbd> to draw
+          </span>
+          {showGrid && <span>snapping to {gridSize} m grid</span>}
+        </div>
+      )}
+      {linkMode && drawTool === "none" && (
+        <div className="shortcuts">
+          <b>Link floors</b>
+          <span>click a unit, switch floor, click its counterpart</span>
+          <span>
+            <kbd>Esc</kbd> deselect
+          </span>
+        </div>
+      )}
+      {menu && menuUnit && (
+        <div className="props-popup" style={{ left: menu.x, top: menu.y }}>
+          <div className="props-head">
+            <span>Properties</span>
+            <button className="del" title="Close" onClick={() => setMenu(null)}>
+              ✕
+            </button>
+          </div>
+          <label>Name</label>
+          <input
+            autoFocus
+            value={menuUnit.name}
+            onChange={(e) => onRename(menuUnit.id, e.target.value)}
+          />
+          <label>Category</label>
+          <select
+            value={menuUnit.category}
+            onChange={(e) => onSetCategory(menuUnit.id, e.target.value as Category)}
+          >
+            <option value="room">room</option>
+            <option value="corridor">corridor</option>
+            <option value="elevator">elevator</option>
+          </select>
+          <button
+            className="wide ghost danger"
+            onClick={() => {
+              onDelete(menuUnit.id);
+              setMenu(null);
+            }}
+          >
+            Delete unit
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   // ---- draft rendering (component scope; hoisted) ----
   function draftSource(): maplibregl.GeoJSONSource | undefined {
@@ -212,6 +414,7 @@ export default function MapView({
     drawRef.current.poly = [];
     drawRef.current.rectStart = null;
     draftSource()?.setData(EMPTY);
+    clearMeasure();
   }
   function setDraft(verts: MetreXY[], cursor: MetreXY | null) {
     const origin = live.current.building.origin;
@@ -245,11 +448,33 @@ export default function MapView({
     if (poly.length >= 3) live.current.onAddRoom([...poly], live.current.ordinal);
     cancelDraft();
   }
+  function setMeasure(at: MetreXY, text: string) {
+    const map = mapRef.current;
+    if (!map) return;
+    const ll = m2ll(live.current.building.origin, at[0], at[1]);
+    if (!measureRef.current) {
+      measureRef.current = new maplibregl.Marker({
+        element: labelEl("", "measure"),
+        anchor: "left",
+        offset: [12, 0],
+      })
+        .setLngLat(ll)
+        .addTo(map);
+    }
+    measureRef.current.setLngLat(ll);
+    measureRef.current.getElement().textContent = text;
+  }
+  function clearMeasure() {
+    measureRef.current?.remove();
+    measureRef.current = null;
+  }
 
   // ---- event wiring (bound once; reads live/drawRef) ----
   function bindDrawing(map: maplibregl.Map) {
-    const toMetre = (ll: maplibregl.LngLat): MetreXY =>
-      ll2m(live.current.building.origin, ll.lng, ll.lat);
+    const toMetre = (ll: maplibregl.LngLat): MetreXY => {
+      const p = ll2m(live.current.building.origin, ll.lng, ll.lat);
+      return live.current.showGrid ? snapPoint(p, live.current.gridSize) : p;
+    };
 
     map.on("mousedown", (e) => {
       if (live.current.drawTool !== "rect") return;
@@ -261,10 +486,25 @@ export default function MapView({
     map.on("mousemove", (e) => {
       const tool = live.current.drawTool;
       const cur = toMetre(e.lngLat);
+      const { unit: u, showDims: dims } = live.current;
       if (tool === "rect" && drawRef.current.rectStart) {
-        setDraft(rectFromDrag(drawRef.current.rectStart, cur), null);
+        const start = drawRef.current.rectStart;
+        setDraft(rectFromDrag(start, cur), null);
+        if (dims) {
+          setMeasure(
+            cur,
+            `${formatLength(Math.abs(cur[0] - start[0]), u)} × ` +
+              `${formatLength(Math.abs(cur[1] - start[1]), u)}`,
+          );
+        } else clearMeasure();
       } else if (tool === "polygon" && drawRef.current.poly.length > 0) {
-        setDraft(drawRef.current.poly, cur);
+        const poly = drawRef.current.poly;
+        setDraft(poly, cur);
+        if (dims) {
+          const edge = distM(poly[poly.length - 1], cur);
+          const area = polygonArea([...poly, cur]);
+          setMeasure(cur, `${formatLength(edge, u)} · ${formatArea(area, u)}`);
+        } else clearMeasure();
       }
     });
 
@@ -273,6 +513,7 @@ export default function MapView({
       const rect = rectFromDrag(drawRef.current.rectStart, toMetre(e.lngLat));
       drawRef.current.rectStart = null;
       draftSource()?.setData(EMPTY);
+      clearMeasure();
       map.dragPan.enable();
       const [x0, y0, x1, y1] = [rect[0][0], rect[0][1], rect[2][0], rect[2][1]];
       if (x1 - x0 >= 2 && y1 - y0 >= 2) {
@@ -280,8 +521,40 @@ export default function MapView({
       }
     });
 
+    map.on("contextmenu", (e) => {
+      const tool = live.current.drawTool;
+      if (tool === "polygon") {
+        e.preventDefault();
+        cancelDraft();
+        return;
+      }
+      if (tool !== "none") return;
+      const hits = map.queryRenderedFeatures(e.point, { layers: ["unit-fill"] });
+      const id = hits[0]?.properties?.id as string | undefined;
+      if (id) {
+        e.preventDefault();
+        live.current.onSelect(id);
+        setMenu({ unitId: id, x: e.point.x, y: e.point.y });
+      } else {
+        setMenu(null);
+      }
+    });
+
     map.on("click", (e) => {
-      if (live.current.drawTool !== "polygon") return;
+      const tool = live.current.drawTool;
+      if (tool === "none") {
+        setMenu(null);
+        const hits = map.queryRenderedFeatures(e.point, { layers: ["unit-fill"] });
+        const id = hits[0]?.properties?.id as string | undefined;
+        // Link mode: feed the click to the vertical-connection flow instead.
+        if (live.current.linkMode) {
+          if (id) live.current.onLinkUnit(id);
+          return;
+        }
+        live.current.onSelect(id ?? null);
+        return;
+      }
+      if (tool !== "polygon") return;
       const p = toMetre(e.lngLat);
       const poly = drawRef.current.poly;
       if (poly.length >= 3 && distM(p, poly[0]) < CLOSE_SNAP_M) {

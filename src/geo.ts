@@ -16,6 +16,12 @@ export function ll2m(origin: LngLat, lng: number, lat: number): MetreXY {
   return [(lng - lng0) * mPerDegLng, (lat - lat0) * M_PER_DEG_LAT];
 }
 
+/** Snap a metre point to the nearest multiple of `size`. */
+export function snapPoint(p: MetreXY, size: number): MetreXY {
+  if (size <= 0) return p;
+  return [Math.round(p[0] / size) * size, Math.round(p[1] / size) * size];
+}
+
 /** Euclidean distance between two local-metre points, in metres. */
 export function distM(a: MetreXY, b: MetreXY): number {
   const dx = a[0] - b[0];
@@ -63,6 +69,28 @@ export function bbox(pts: MetreXY[]): [number, number, number, number] {
     y1 = Math.max(y1, y);
   }
   return [x0, y0, x1, y1];
+}
+
+/** Absolute polygon area in m² (shoelace), for an open ring. */
+export function polygonArea(pts: MetreXY[]): number {
+  if (pts.length < 3) return 0;
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x0, y0] = pts[i];
+    const [x1, y1] = pts[(i + 1) % pts.length];
+    a += x0 * y1 - x1 * y0;
+  }
+  return Math.abs(a) / 2;
+}
+
+/** Closed-ring perimeter in metres. */
+export function polygonPerimeter(pts: MetreXY[]): number {
+  if (pts.length < 2) return 0;
+  let p = 0;
+  for (let i = 0; i < pts.length; i++) {
+    p += distM(pts[i], pts[(i + 1) % pts.length]);
+  }
+  return p;
 }
 
 /** Metre points -> lng/lat points (open, not closed). */

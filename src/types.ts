@@ -25,6 +25,7 @@ export interface Unit {
 
 /** A door: connects `unit` to the corridor on the same ordinal at point `at`. */
 export interface Opening {
+  id: string;
   unit: string;
   at: MetreXY;
 }

@@ -1,7 +1,36 @@
 import type { Building, Graph, LngLat } from "./types";
-import { polygonRing, distM } from "./geo";
+import { polygonRing, distM, m2ll, bbox } from "./geo";
 
 export type FC = GeoJSON.FeatureCollection;
+
+/** Grid lines (lng/lat) spanning the building footprint + margin, every `size` m. */
+export function gridToGeoJSON(b: Building, size: number): FC {
+  const features: GeoJSON.Feature[] = [];
+  if (size <= 0 || b.units.length === 0) return { type: "FeatureCollection", features };
+
+  const all = b.units.flatMap((u) => u.polygon);
+  const [minX, minY, maxX, maxY] = bbox(all);
+  const margin = Math.max(size * 4, 8);
+  const x0 = Math.floor((minX - margin) / size) * size;
+  const y0 = Math.floor((minY - margin) / size) * size;
+  const x1 = Math.ceil((maxX + margin) / size) * size;
+  const y1 = Math.ceil((maxY + margin) / size) * size;
+
+  // Cap line count so a tiny grid over a big span can't explode.
+  if ((x1 - x0) / size + (y1 - y0) / size > 1000) return { type: "FeatureCollection", features };
+
+  for (let x = x0; x <= x1 + 1e-6; x += size) {
+    features.push(line([m2ll(b.origin, x, y0), m2ll(b.origin, x, y1)]));
+  }
+  for (let y = y0; y <= y1 + 1e-6; y += size) {
+    features.push(line([m2ll(b.origin, x0, y), m2ll(b.origin, x1, y)]));
+  }
+  return { type: "FeatureCollection", features };
+}
+
+function line(coordinates: LngLat[]): GeoJSON.Feature {
+  return { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates } };
+}
 
 /** Unit polygons (one Feature per unit, tagged with ordinal + category). */
 export function unitsToGeoJSON(b: Building): FC {

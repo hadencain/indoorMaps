@@ -186,9 +186,129 @@ button.wide.ghost {
   color: var(--dim);
 }
 
-.map {
+.map-wrap {
   flex: 1;
   position: relative;
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+}
+
+.props-popup {
+  position: absolute;
+  z-index: 5;
+  width: 200px;
+  transform: translate(8px, 8px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  padding: 12px;
+}
+
+.props-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 8px;
+}
+
+.props-head .del {
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.props-popup label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 8px 0 4px;
+}
+
+.props-popup input,
+.props-popup select {
+  width: 100%;
+  background: #10161e;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 7px 8px;
+  font-size: 13px;
+}
+
+.props-popup input:focus,
+.props-popup select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.props-popup .wide.danger {
+  margin-top: 12px;
+  text-align: center;
+}
+
+.props-popup .wide.danger:hover {
+  border-color: #ff5c5c;
+  color: #ff5c5c;
+}
+
+/* Draw-mode shortcut bar */
+.shortcuts {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100% - 32px);
+  padding: 8px 14px;
+  background: rgba(13, 17, 22, 0.92);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.shortcuts b {
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.shortcuts kbd {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text);
+  background: #10161e;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.vlabel {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text);
+  align-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* MapLibre HTML markers */
@@ -225,4 +345,78 @@ button.wide.ghost {
 
 .pin-transition {
   background: var(--accent);
+}
+
+/* Draggable door handle */
+.door {
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  border: 1.5px solid #0b0d10;
+  border-radius: 50%;
+  cursor: grab;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.door:active {
+  cursor: grabbing;
+}
+
+.roomrow.selected input {
+  border-color: #f2c14e;
+  color: #f2c14e;
+}
+
+.label-sub {
+  font-size: 10px;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+/* Live dimension readout while drawing */
+.measure {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #05070a;
+  background: var(--accent);
+  padding: 2px 6px;
+  border-radius: 2px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.numin {
+  width: 70px;
+  background: #10161e;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.unitlabel {
+  font-size: 12px;
+  color: var(--dim);
+  align-self: center;
+}
+
+.sidebar label.filebtn {
+  display: block;
+  margin: 8px 0 0;
+  text-align: center;
+  background: #10161e;
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 9px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.sidebar label.filebtn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }

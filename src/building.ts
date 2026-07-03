@@ -49,15 +49,15 @@ export const initialBuilding: Building = {
   ],
   openings: [
     // Ground doors onto the corridor (corridor bottom edge is y=18).
-    { unit: "lobby", at: [6, 18] },
-    { unit: "cafe", at: [20, 18] },
-    { unit: "office-101", at: [34, 18] },
-    { unit: "elevator-g", at: [20, 22] }, // corridor top edge
+    { id: "d-lobby", unit: "lobby", at: [6, 18] },
+    { id: "d-cafe", unit: "cafe", at: [20, 18] },
+    { id: "d-office-101", unit: "office-101", at: [34, 18] },
+    { id: "d-elevator-g", unit: "elevator-g", at: [20, 22] }, // corridor top edge
     // Level 1 doors.
-    { unit: "conf", at: [6, 18] },
-    { unit: "office-201", at: [20, 18] },
-    { unit: "lab", at: [34, 18] },
-    { unit: "elevator-1", at: [20, 22] },
+    { id: "d-conf", unit: "conf", at: [6, 18] },
+    { id: "d-office-201", unit: "office-201", at: [20, 18] },
+    { id: "d-lab", unit: "lab", at: [34, 18] },
+    { id: "d-elevator-1", unit: "elevator-1", at: [20, 22] },
   ],
   verticals: [{ a: "elevator-g", b: "elevator-1", name: "Elevator" }],
 };

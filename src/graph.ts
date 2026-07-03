@@ -40,13 +40,13 @@ export function buildGraph(b: Building): Graph {
     b.units.find((u) => u.category === "corridor" && u.ordinal === ordinal);
 
   // Door nodes + unit<->door<->corridor edges.
-  b.openings.forEach((op, i) => {
+  b.openings.forEach((op) => {
     const unit = nodes.get(op.unit);
     if (!unit) throw new Error(`opening references unknown unit: ${op.unit}`);
     const corridor = corridorFor(unit.ordinal);
     if (!corridor) throw new Error(`no corridor on ordinal ${unit.ordinal}`);
 
-    const doorId = `door:${op.unit}:${i}`;
+    const doorId = `door:${op.id}`;
     const xy: MetreXY = op.at;
     nodes.set(doorId, {
       id: doorId,
