@@ -61,6 +61,7 @@ interface State {
   moveDoor: (doorId: string, at: MetreXY) => void;
   renameUnit: (id: string, name: string) => void;
   setCategory: (id: string, category: Category) => void;
+  setSecurity: (id: string, level: "public" | "secure" | "restricted") => void;
   deleteUnit: (id: string) => void;
   moveVertex: (id: string, index: number, at: MetreXY) => void;
   insertVertex: (id: string, edgeIndex: number) => void;
@@ -138,6 +139,14 @@ export const useStore = create<State>((set, get) => ({
       building: {
         ...s.building,
         units: s.building.units.map((u) => (u.id === id ? { ...u, category } : u)),
+      },
+    })),
+
+  setSecurity: (id, level) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        units: s.building.units.map((u) => (u.id === id ? { ...u, security: level } : u)),
       },
     })),
 

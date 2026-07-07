@@ -1,7 +1,14 @@
 import { useStore } from "../../store";
 import { bbox, polygonArea, polygonPerimeter } from "../../geo";
 import { formatArea, formatLength } from "../../format";
+import { CATEGORY_ORDER, CATEGORY_LABELS } from "../../categories";
 import type { Category } from "../../types";
+
+const SECURITY_LEVELS: ReadonlyArray<"public" | "secure" | "restricted"> = [
+  "public",
+  "secure",
+  "restricted",
+];
 
 export default function PropertiesPanel() {
   const building = useStore((s) => s.building);
@@ -11,6 +18,7 @@ export default function PropertiesPanel() {
   const setTool = useStore((s) => s.setTool);
   const renameUnit = useStore((s) => s.renameUnit);
   const setCategory = useStore((s) => s.setCategory);
+  const setSecurity = useStore((s) => s.setSecurity);
   const deleteUnit = useStore((s) => s.deleteUnit);
   const u = building.units.find((x) => x.id === selectedId);
   if (!u)
@@ -28,10 +36,24 @@ export default function PropertiesPanel() {
       <input value={u.name} onChange={(e) => renameUnit(u.id, e.target.value)} />
       <label>Category</label>
       <select value={u.category} onChange={(e) => setCategory(u.id, e.target.value as Category)}>
-        <option value="room">room</option>
-        <option value="corridor">corridor</option>
-        <option value="elevator">elevator</option>
-        <option value="stairs">stairs</option>
+        {CATEGORY_ORDER.map((c) => (
+          <option key={c} value={c}>
+            {CATEGORY_LABELS[c]}
+          </option>
+        ))}
+      </select>
+      <label>Security</label>
+      <select
+        value={u.security ?? "public"}
+        onChange={(e) =>
+          setSecurity(u.id, e.target.value as "public" | "secure" | "restricted")
+        }
+      >
+        {SECURITY_LEVELS.map((lvl) => (
+          <option key={lvl} value={lvl}>
+            {lvl}
+          </option>
+        ))}
       </select>
       <div className="readout" style={{ marginTop: 12 }}>
         <div>

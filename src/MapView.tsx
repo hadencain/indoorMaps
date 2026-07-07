@@ -16,6 +16,7 @@ import {
 import { rectFromDrag } from "./building";
 import { gridToGeoJSON } from "./render";
 import { formatLength, formatArea } from "./format";
+import { CATEGORY_ORDER, CATEGORY_LABELS } from "./categories";
 import { useStore } from "./store";
 import { useRoute } from "./ui/route";
 
@@ -457,10 +458,11 @@ export default function MapView() {
             value={menuUnit.category}
             onChange={(e) => onSetCategory(menuUnit.id, e.target.value as Category)}
           >
-            <option value="room">room</option>
-            <option value="corridor">corridor</option>
-            <option value="elevator">elevator</option>
-            <option value="stairs">stairs</option>
+            {CATEGORY_ORDER.map((c) => (
+              <option key={c} value={c}>
+                {CATEGORY_LABELS[c]}
+              </option>
+            ))}
           </select>
           <button
             className="wide ghost danger"
