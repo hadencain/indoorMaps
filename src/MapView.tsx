@@ -16,7 +16,7 @@ import {
 import { rectFromDrag } from "./building";
 import { gridToGeoJSON } from "./render";
 import { formatLength, formatArea } from "./format";
-import { CATEGORY_ORDER, CATEGORY_LABELS } from "./categories";
+import { CATEGORY_ORDER, CATEGORY_LABELS, categoryFillExpression } from "./categories";
 import { useStore } from "./store";
 import { useRoute } from "./ui/route";
 
@@ -139,14 +139,7 @@ export default function MapView() {
         type: "fill",
         source: "units",
         paint: {
-          "fill-color": [
-            "match",
-            ["get", "category"],
-            "corridor", "#1a2230",
-            "elevator", "#0e3b3a",
-            "stairs", "#3a2e14",
-            "#171f2b",
-          ],
+          "fill-color": categoryFillExpression() as maplibregl.ExpressionSpecification,
           "fill-opacity": 0.9,
         },
       });
