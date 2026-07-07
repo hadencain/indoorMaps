@@ -65,6 +65,20 @@ export interface Vertical {
   name: string;
 }
 
+/** A raster floorplan image anchored beneath the vector layers on one floor.
+ *  User-provided local file → data URI (no network). One optional image per
+ *  ordinal; adjustable width/position/opacity in the underlay controls. */
+export interface RasterUnderlay {
+  ordinal: number;
+  dataUrl: string; // data: URI (may be "" if stripped from persistence — re-import after reload)
+  naturalW: number; // image pixel dimensions, for aspect
+  naturalH: number;
+  widthM: number; // real-world width of the image span, metres
+  offset: MetreXY; // SW corner offset from building origin, metres
+  rotation: number; // degrees CCW, default 0
+  opacity: number; // 0..1, default 0.5
+}
+
 export interface Building {
   /** SW origin of the local metre grid, as [lng, lat]. */
   origin: LngLat;
@@ -72,6 +86,8 @@ export interface Building {
   units: Unit[];
   openings: Opening[];
   verticals: Vertical[];
+  /** Optional raster floorplan underlays, at most one per ordinal (P11c). */
+  underlays?: RasterUnderlay[];
 }
 
 export interface NodeMeta {

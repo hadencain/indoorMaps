@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Building, MetreXY, Category } from "./types";
+import type { Building, MetreXY, Category, RasterUnderlay } from "./types";
 import { initialBuilding, doorForRoom } from "./building";
 import { defaultNameFor } from "./categories";
 import { parseSvgShapes } from "./svgImport";
@@ -76,6 +76,11 @@ interface State {
   linkUnit: (id: string) => void;
   deleteVertical: (a: string, b: string) => void;
   importSvgText: (text: string) => void;
+  importRasterFile: (file: File) => Promise<void>;
+  setUnderlayOpacity: (ordinal: number, v: number) => void;
+  nudgeUnderlay: (ordinal: number, d: MetreXY) => void;
+  setUnderlayWidth: (ordinal: number, widthM: number) => void;
+  removeUnderlay: (ordinal: number) => void;
   exportGeoJSON: () => void;
   loadGeoJSONText: (text: string) => void;
   resetBuilding: () => void;
@@ -316,6 +321,79 @@ export const useStore = create<State>((set, get) => ({
     });
   },
 
+  importRasterFile: async (file) => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as string);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(file);
+    });
+    const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+      img.onerror = () => reject(new Error("bad image"));
+      img.src = dataUrl;
+    });
+    set((s) => {
+      const ord = s.ordinal;
+      const underlay: RasterUnderlay = {
+        ordinal: ord,
+        dataUrl,
+        naturalW: dims.w,
+        naturalH: dims.h,
+        widthM: s.planWidth,
+        offset: [0, 0],
+        rotation: 0,
+        opacity: 0.5,
+      };
+      const rest = (s.building.underlays ?? []).filter((u) => u.ordinal !== ord);
+      return {
+        building: { ...s.building, underlays: [...rest, underlay] },
+        importMsg: `Imported floorplan image (${dims.w}×${dims.h}px).`,
+      };
+    });
+  },
+
+  setUnderlayOpacity: (ordinal, v) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        underlays: (s.building.underlays ?? []).map((u) =>
+          u.ordinal === ordinal ? { ...u, opacity: Math.min(1, Math.max(0, v)) } : u,
+        ),
+      },
+    })),
+
+  nudgeUnderlay: (ordinal, d) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        underlays: (s.building.underlays ?? []).map((u) =>
+          u.ordinal === ordinal
+            ? { ...u, offset: [u.offset[0] + d[0], u.offset[1] + d[1]] as MetreXY }
+            : u,
+        ),
+      },
+    })),
+
+  setUnderlayWidth: (ordinal, widthM) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        underlays: (s.building.underlays ?? []).map((u) =>
+          u.ordinal === ordinal ? { ...u, widthM: Math.max(1, widthM || 1) } : u,
+        ),
+      },
+    })),
+
+  removeUnderlay: (ordinal) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        underlays: (s.building.underlays ?? []).filter((u) => u.ordinal !== ordinal),
+      },
+    })),
+
   exportGeoJSON: () => {
     const b = get().building;
     const text = JSON.stringify(buildingToGeoJSON(b), null, 2);
@@ -348,12 +426,29 @@ export const useStore = create<State>((set, get) => ({
 }));
 
 // Persist building to localStorage on change (validated shape, v3 key).
-useStore.subscribe((s, prev) => {
-  if (s.building !== prev.building) {
+//
+// Guard: a large base64 underlay `dataUrl` can exceed the localStorage quota.
+// Because the whole `building` persists as one blob, an oversized image would
+// otherwise silently break persistence of the ENTIRE building (units included).
+// So on quota failure we retry persisting a copy with each underlay `dataUrl`
+// stripped to "" (metadata kept). Net: the building always persists; oversized
+// underlay images are session-only and must be re-imported after reload.
+function persistBuilding(building: Building) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(building));
+  } catch {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(s.building));
+      const stripped: Building = {
+        ...building,
+        underlays: building.underlays?.map((u) => ({ ...u, dataUrl: "" })),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stripped));
     } catch {
       /* storage unavailable — non-fatal */
     }
   }
+}
+
+useStore.subscribe((s, prev) => {
+  if (s.building !== prev.building) persistBuilding(s.building);
 });
