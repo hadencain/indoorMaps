@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import type { MetreXY, Category, LngLat, RasterUnderlay } from "./types";
+import type { Building, MetreXY, Category, LngLat, RasterUnderlay } from "./types";
 import type { FC } from "./render";
 import { unitsToGeoJSON } from "./render";
 import {
@@ -14,6 +14,7 @@ import {
   nearestPointOnPolygon,
 } from "./geo";
 import { rectFromDrag } from "./building";
+import { sectorRing } from "./coverage";
 import { gridToGeoJSON } from "./render";
 import { formatLength, formatArea } from "./format";
 import { CATEGORY_ORDER, CATEGORY_LABELS, categoryFillExpression } from "./categories";
@@ -35,6 +36,7 @@ export default function MapView() {
   const ordinal = useStore((s) => s.ordinal);
   const activeTool = useStore((s) => s.activeTool);
   const selectedId = useStore((s) => s.selectedId);
+  const selectedCameraId = useStore((s) => s.selectedCameraId);
   const unit = useStore((s) => s.unit);
   const showDims = useStore((s) => s.showDims);
   const showGrid = useStore((s) => s.showGrid);
@@ -46,6 +48,7 @@ export default function MapView() {
     activeTool === "rect" ? "rect" : activeTool === "polygon" ? "polygon" : "none";
   const linkMode = activeTool === "link";
   const vertexEdit = activeTool === "vertex";
+  const cameraMode = activeTool === "camera";
   const routeLines = geom?.lines ?? EMPTY;
   const routePoints = geom?.points ?? [];
 
@@ -61,6 +64,10 @@ export default function MapView() {
   const onMoveVertex = useStore((s) => s.moveVertex);
   const onInsertVertex = useStore((s) => s.insertVertex);
   const onDeleteVertex = useStore((s) => s.deleteVertex);
+  const onAddCamera = useStore((s) => s.addCamera);
+  const onMoveCamera = useStore((s) => s.moveCamera);
+  const onRotateCamera = useStore((s) => s.rotateCamera);
+  const onSelectCamera = useStore((s) => s.setSelectedCamera);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
@@ -89,6 +96,12 @@ export default function MapView() {
     onMoveVertex,
     onInsertVertex,
     onDeleteVertex,
+    cameraMode,
+    selectedCameraId,
+    onAddCamera,
+    onMoveCamera,
+    onRotateCamera,
+    onSelectCamera,
   });
   live.current = {
     building,
@@ -107,6 +120,12 @@ export default function MapView() {
     onMoveVertex,
     onInsertVertex,
     onDeleteVertex,
+    cameraMode,
+    selectedCameraId,
+    onAddCamera,
+    onMoveCamera,
+    onRotateCamera,
+    onSelectCamera,
   };
 
   // Initialise the map once.
@@ -144,6 +163,7 @@ export default function MapView() {
       });
       map.addSource("grid", { type: "geojson", data: EMPTY });
       map.addSource("units", { type: "geojson", data: unitsToGeoJSON(building) });
+      map.addSource("camera-fov", { type: "geojson", data: camerasFovFC(building) });
       map.addSource("route", { type: "geojson", data: EMPTY });
       map.addSource("draft", { type: "geojson", data: EMPTY });
 
@@ -174,6 +194,27 @@ export default function MapView() {
         source: "units",
         paint: { "line-color": "#f2c14e", "line-width": 2.5 },
         filter: ["==", ["get", "id"], "__none__"],
+      });
+      // Camera FOV cones (P4 = naive radial wedges; they pass through walls —
+      // occlusion clipping arrives in P5, swapping only the source geometry).
+      map.addLayer({
+        id: "camera-fov-fill",
+        type: "fill",
+        source: "camera-fov",
+        paint: { "fill-color": "#00d7cd", "fill-opacity": 0.12 },
+      });
+      map.addLayer({
+        id: "camera-fov-line",
+        type: "line",
+        source: "camera-fov",
+        paint: { "line-color": "#00d7cd", "line-width": 1, "line-opacity": 0.5 },
+      });
+      map.addLayer({
+        id: "camera-fov-selected",
+        type: "line",
+        source: "camera-fov",
+        paint: { "line-color": "#5cf6ee", "line-width": 2 },
+        filter: ["==", ["get", "cameraId"], "__none__"],
       });
       map.addLayer({
         id: "route-line",
@@ -258,6 +299,9 @@ export default function MapView() {
     (map.getSource("units") as maplibregl.GeoJSONSource | undefined)?.setData(
       unitsToGeoJSON(building),
     );
+    (map.getSource("camera-fov") as maplibregl.GeoJSONSource | undefined)?.setData(
+      camerasFovFC(building),
+    );
   }, [ready, building]);
 
   // Rebuild the snap grid when toggled / resized / building extent changes.
@@ -300,6 +344,13 @@ export default function MapView() {
       "all",
       floorFilter,
       ["==", ["get", "id"], selectedId ?? "__none__"],
+    ]);
+    map.setFilter("camera-fov-fill", floorFilter);
+    map.setFilter("camera-fov-line", floorFilter);
+    map.setFilter("camera-fov-selected", [
+      "all",
+      floorFilter,
+      ["==", ["get", "cameraId"], selectedCameraId ?? "__none__"],
     ]);
 
     (map.getSource("route") as maplibregl.GeoJSONSource | undefined)?.setData(routeLines);
@@ -406,26 +457,93 @@ export default function MapView() {
           .addTo(map),
       );
     }
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit]);
+
+    // Camera body markers. Cameras + FOV are visible on ALL tools, but placement,
+    // drag, and rotation are only interactive under the camera tool.
+    for (const cam of building.cameras) {
+      if (cam.ordinal !== ordinal) continue;
+      const isSelected = cam.id === selectedCameraId;
+      const el = document.createElement("div");
+      el.className = `camera ${cam.kind}` + (isSelected ? " selected" : "");
+      const bodyEl = document.createElement("div");
+      bodyEl.className = "camera-body";
+      // CSS rotation is clockwise; metre heading is CCW (atan2). Screen y-up
+      // matches metre y-up here, so the visual angle is `-heading` degrees.
+      // Dome has no meaningful aim — leave its body unrotated.
+      if (cam.kind !== "dome") bodyEl.style.transform = `rotate(${-cam.heading}deg)`;
+      el.appendChild(bodyEl);
+
+      const marker = new maplibregl.Marker({ element: el, draggable: cameraMode })
+        .setLngLat(m2ll(building.origin, cam.at[0], cam.at[1]))
+        .addTo(map);
+
+      if (cameraMode) {
+        marker.on("dragend", () => {
+          const ll = marker.getLngLat();
+          let at = ll2m(live.current.building.origin, ll.lng, ll.lat);
+          if (live.current.showGrid) at = snapPoint(at, live.current.gridSize);
+          live.current.onMoveCamera(cam.id, at);
+        });
+        el.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          live.current.onSelectCamera(cam.id);
+        });
+        el.addEventListener("dblclick", (ev) => {
+          ev.stopPropagation();
+          onCameraActivate(cam.id);
+        });
+      }
+      markersRef.current.push(marker);
+
+      // Rotation handle: only for the SELECTED, non-dome camera under the camera
+      // tool. Placed along the heading a short distance out (capped for reach).
+      if (cameraMode && isSelected && cam.kind !== "dome") {
+        const handleLen = Math.min(cam.rangeM, 4);
+        const h = (cam.heading * Math.PI) / 180;
+        const handleAt: MetreXY = [
+          cam.at[0] + Math.cos(h) * handleLen,
+          cam.at[1] + Math.sin(h) * handleLen,
+        ];
+        const hEl = labelEl("", "cam-handle");
+        const hMarker = new maplibregl.Marker({ element: hEl, draggable: true })
+          .setLngLat(m2ll(building.origin, handleAt[0], handleAt[1]))
+          .addTo(map);
+        // Commit on dragend only: a live `drag` handler would rotate the camera
+        // each tick, rebuilding all markers (building ref changes) and dropping
+        // this handle mid-drag. Matches the door/vertex dragend pattern.
+        hMarker.on("dragend", () => {
+          const ll = hMarker.getLngLat();
+          const p = ll2m(live.current.building.origin, ll.lng, ll.lat);
+          const c = live.current.building.cameras.find((x) => x.id === cam.id);
+          if (!c) return;
+          const deg = (Math.atan2(p[1] - c.at[1], p[0] - c.at[0]) * 180) / Math.PI;
+          live.current.onRotateCamera(cam.id, deg);
+        });
+        markersRef.current.push(hMarker);
+      }
+    }
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedCameraId, cameraMode, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit]);
 
   // Draw-tool changes: cursor, dbl-click zoom, and reset any in-progress draft.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
     map.getCanvas().style.cursor =
-      drawTool !== "none" ? "crosshair" : linkMode ? "pointer" : "";
+      drawTool !== "none" || cameraMode ? "crosshair" : linkMode ? "pointer" : "";
     if (drawTool === "none") {
       map.doubleClickZoom.enable();
       cancelDraft();
     } else {
       map.doubleClickZoom.disable();
     }
-  }, [ready, drawTool, linkMode]);
+  }, [ready, drawTool, linkMode, cameraMode]);
 
   // Close the properties menu on Escape, floor change, or if its unit is gone.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenu(null);
+      if (e.key !== "Escape") return;
+      setMenu(null);
+      if (live.current.selectedCameraId) live.current.onSelectCamera(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -591,6 +709,13 @@ export default function MapView() {
     measureRef.current = null;
   }
 
+  // Deeper camera click-through (open live feed / incident timeline) is a wired
+  // no-op stub in P4. A later phase fills this in; the double-click seam exists
+  // so the wiring is present but currently does nothing.
+  function onCameraActivate(_id: string) {
+    /* stub — intentionally no-op in P4 */
+  }
+
   // ---- event wiring (bound once; reads live/drawRef) ----
   function bindDrawing(map: maplibregl.Map) {
     const toMetre = (ll: maplibregl.LngLat): MetreXY => {
@@ -666,6 +791,14 @@ export default function MapView() {
       const tool = live.current.drawTool;
       if (tool === "none") {
         setMenu(null);
+        // Camera mode: an empty-canvas click places a new camera. (Clicks on a
+        // camera marker are consumed by the marker's own listener and never
+        // reach the map.)
+        if (live.current.cameraMode) {
+          const at = toMetre(e.lngLat);
+          live.current.onAddCamera(at, live.current.ordinal);
+          return;
+        }
         const hits = map.queryRenderedFeatures(e.point, { layers: ["unit-fill"] });
         const id = hits[0]?.properties?.id as string | undefined;
         // Link mode: feed the click to the vertical-connection flow instead.
@@ -720,6 +853,22 @@ function underlayCoordinates(
   const se = rot(ox + u.widthM, oy);
   const sw = rot(ox, oy);
   return [nw, ne, se, sw];
+}
+
+/** Build the camera-FOV FeatureCollection: one Polygon per camera, tagged with
+ *  `{ cameraId, ordinal }` for floor-filtering + selection highlighting. In P4
+ *  the ring is the naive radial wedge (`sectorRing`) — NOT occlusion-clipped.
+ *  P5 swaps `sectorRing` for `computeVisibility` with no rendering change. */
+function camerasFovFC(building: Building): FC {
+  const features: GeoJSON.Feature[] = building.cameras.map((cam) => ({
+    type: "Feature",
+    properties: { cameraId: cam.id, ordinal: cam.ordinal },
+    geometry: {
+      type: "Polygon",
+      coordinates: [polygonRing(building.origin, sectorRing(cam))],
+    },
+  }));
+  return { type: "FeatureCollection", features };
 }
 
 function ringCentroid(ring: [number, number][]): [number, number] {
