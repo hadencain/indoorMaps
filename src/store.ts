@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Building, MetreXY, Category } from "./types";
 import { initialBuilding, doorForRoom } from "./building";
+import { defaultNameFor } from "./categories";
 import { parseSvgShapes } from "./svgImport";
 import { buildingToGeoJSON, geoJSONToBuilding } from "./imdf";
 
@@ -44,8 +45,10 @@ interface State {
   goalId: string;
   planWidth: number;
   importMsg: string | null;
+  draftCategory: Category;
 
   setTool: (t: Tool) => void;
+  setDraftCategory: (c: Category) => void;
   setOrdinal: (o: number) => void;
   setSelected: (id: string | null) => void;
   setUnit: (u: "m" | "ft") => void;
@@ -89,8 +92,10 @@ export const useStore = create<State>((set, get) => ({
   goalId: "lab",
   planWidth: 40,
   importMsg: null,
+  draftCategory: "room",
 
   setTool: (t) => set({ activeTool: t, pendingLink: null }),
+  setDraftCategory: (c) => set({ draftCategory: c }),
   setOrdinal: (o) => set({ ordinal: o }),
   setSelected: (id) => set({ selectedId: id }),
   setUnit: (u) => set({ unit: u }),
@@ -105,12 +110,13 @@ export const useStore = create<State>((set, get) => ({
   addRoom: (polygon, ord) =>
     set((s) => {
       const id = `room-${Date.now()}-${roomSeq++}`;
-      const name = `Room ${s.building.units.filter((u) => u.category === "room").length + 1}`;
+      const category = s.draftCategory;
+      const name = defaultNameFor(category, s.building);
       const door = doorForRoom(s.building, polygon, ord);
       return {
         building: {
           ...s.building,
-          units: [...s.building.units, { id, ordinal: ord, name, category: "room", polygon }],
+          units: [...s.building.units, { id, ordinal: ord, name, category, polygon }],
           openings: door
             ? [...s.building.openings, { id: `d-${id}`, unit: id, at: door }]
             : s.building.openings,
