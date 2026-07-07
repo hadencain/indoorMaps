@@ -7,7 +7,21 @@
 export type LngLat = [number, number];
 export type MetreXY = [number, number];
 
-export type Category = "room" | "corridor" | "elevator" | "stairs";
+export type Category =
+  // structural / circulation (existing)
+  | "room"
+  | "corridor"
+  | "elevator"
+  | "stairs"
+  // cosmetic spaces (new — semantic + fill color only)
+  | "office"
+  | "restroom"
+  | "lobby"
+  | "retail"
+  | "storage"
+  | "mechanical"
+  // behavioral (new)
+  | "outside"; // walkable exterior region
 
 export interface Level {
   ordinal: number;
@@ -19,6 +33,13 @@ export interface Unit {
   ordinal: number;
   name: string;
   category: Category;
+  /**
+   * Access level. Absent is treated as "public". `restricted` is non-routable
+   * (excluded from the nav graph — see `isNonRoutable` in categories.ts).
+   * Access is an attribute orthogonal to `category` (a restricted office is
+   * `{ category: "office", security: "restricted" }`).
+   */
+  security?: "public" | "secure" | "restricted";
   /** Polygon outline in local metres, as an open ring (no repeated last point). */
   polygon: MetreXY[];
 }
