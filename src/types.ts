@@ -44,11 +44,18 @@ export interface Unit {
   polygon: MetreXY[];
 }
 
-/** A door: connects `unit` to the corridor on the same ordinal at point `at`. */
+/** A door or entrance. `at` is a point on the owning unit's wall.
+ *  - "door"     (default): connects `unit` to the corridor on the same ordinal.
+ *  - "entrance": connects `unit` to the nearest outside area on the same ordinal
+ *    (an opening on the building envelope).
+ *  `kind` is optional; `undefined` is treated as `"door"` everywhere, so every
+ *  existing opening and every persisted `v3` building / prior GeoJSON export
+ *  remains valid with no migration. */
 export interface Opening {
   id: string;
   unit: string;
   at: MetreXY;
+  kind?: "door" | "entrance";
 }
 
 /** A stair/elevator run connecting two units across ordinals. */
@@ -72,7 +79,7 @@ export interface NodeMeta {
   ordinal: number;
   xy: MetreXY;
   lnglat: LngLat;
-  kind: "unit" | "door";
+  kind: "unit" | "door" | "entrance";
   name?: string;
   category?: Category;
 }
