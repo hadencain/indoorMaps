@@ -116,6 +116,18 @@ export interface Building {
   underlays?: RasterUnderlay[];
 }
 
+/** Per-overlay visibility toggles (UI state; persisted separately from the
+ *  building). No `grid` member — the grid row proxies the existing `showGrid`. */
+export interface LayerVisibility {
+  cameras: boolean; // camera markers + FOV cones
+  coverage: boolean; // clipped coverage polygons
+  blindSpots: boolean; // blind-spot fills
+  accessZones: boolean; // secure/restricted perimeter + badge readers
+  labels: boolean; // room name/area labels
+  routes: boolean; // A* route line + pins
+  incidents: boolean; // incident markers (Phase E)
+}
+
 export interface NodeMeta {
   id: string;
   ordinal: number;

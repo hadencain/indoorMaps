@@ -43,9 +43,9 @@ export default function MapView() {
   const showGrid = useStore((s) => s.showGrid);
   const gridSize = useStore((s) => s.gridSize);
   const { geom } = useRoute();
-  const showCoverage = useStore((s) => s.showCoverage);
+  const layers = useStore((s) => s.layers);
   // Occlusion-clipped visibility polygons for the active floor's cameras (P5) +
-  // coverage/blind analysis (P6, null unless showCoverage is on). Recomputed off
+  // coverage/blind analysis (P6, null unless the coverage/blind layer is on). Recomputed off
   // the render path by the hook's memo (per-camera cache) — a camera drag/param
   // change recomputes only that camera; a wall move recomputes every camera on
   // the floor; everything else reuses the cache.
@@ -110,6 +110,7 @@ export default function MapView() {
     onMoveCamera,
     onRotateCamera,
     onSelectCamera,
+    layers,
   });
   live.current = {
     building,
@@ -134,6 +135,7 @@ export default function MapView() {
     onMoveCamera,
     onRotateCamera,
     onSelectCamera,
+    layers,
   };
 
   // Initialise the map once.
@@ -172,7 +174,7 @@ export default function MapView() {
       map.addSource("grid", { type: "geojson", data: EMPTY });
       map.addSource("units", { type: "geojson", data: unitsToGeoJSON(building) });
       // Coverage (P6): green covered union + red blind = floor − covered. Fed by
-      // the coverage effect, only when showCoverage is on.
+      // the coverage effect; per-overlay visibility gated by the layers effect.
       map.addSource("coverage", { type: "geojson", data: EMPTY });
       map.addSource("blindspots", { type: "geojson", data: EMPTY });
       // Camera FOV: populated by the visibility effect from useVisibility() output.
@@ -277,7 +279,7 @@ export default function MapView() {
       // Coverage (green) + blind (red) sit BELOW the camera-fov layers and above
       // unit-fill/outline: inserting each before "camera-fov-fill" yields the
       // order unit-* → coverage-fill → blind-fill → camera-fov-*. Translucent so
-      // the category fills read through. Shown only when showCoverage is on.
+      // the category fills read through. Visibility gated by the layers effect.
       map.addLayer(
         {
           id: "coverage-fill",
@@ -392,22 +394,45 @@ export default function MapView() {
     );
   }, [ready, visPolys, building.origin]);
 
-  // Coverage/blind overlays (P6) — occlusion-clipped, never cones. Empty out the
-  // sources when the overlay is off (coverage is null) so nothing renders.
+  // Coverage/blind overlays (P6) — occlusion-clipped, never cones. Source data
+  // is populated whenever the analysis exists (coverage != null, i.e. the
+  // coverage or blind-spots layer is on); per-overlay *visibility* is toggled
+  // independently by the layer-visibility effect below.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    const cov =
-      showCoverage && coverage
-        ? ringsToFC(building.origin, coverage.coveredRings, coverage.ordinal)
-        : EMPTY;
-    const blind =
-      showCoverage && coverage
-        ? ringsToFC(building.origin, coverage.blindRings, coverage.ordinal)
-        : EMPTY;
+    const cov = coverage
+      ? ringsToFC(building.origin, coverage.coveredRings, coverage.ordinal)
+      : EMPTY;
+    const blind = coverage
+      ? ringsToFC(building.origin, coverage.blindRings, coverage.ordinal)
+      : EMPTY;
     (map.getSource("coverage") as maplibregl.GeoJSONSource | undefined)?.setData(cov);
     (map.getSource("blindspots") as maplibregl.GeoJSONSource | undefined)?.setData(blind);
-  }, [ready, coverage, showCoverage, building.origin]);
+  }, [ready, coverage, building.origin]);
+
+  // Layer-visibility (P9): toggle managed native layers on/off. Guards every id
+  // with getLayer so a not-yet-built layer (e.g. incidents, Phase E) is a silent
+  // no-op. Base unit-fill/outline/selected are NEVER toggled — geometry is
+  // always visible; layers gate overlays only.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const vis = (id: string, on: boolean) => {
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
+    };
+    // Cameras toggle also hides their FOV cones (the cones are the cameras'
+    // native footprint; markers are gated separately in the marker effect).
+    vis("camera-fov-fill", layers.cameras);
+    vis("camera-fov-line", layers.cameras);
+    vis("camera-fov-selected", layers.cameras);
+    vis("coverage-fill", layers.coverage);
+    vis("blind-fill", layers.blindSpots);
+    vis("unit-secure-fill", layers.accessZones);
+    vis("unit-secure-outline", layers.accessZones);
+    vis("route-line", layers.routes);
+    vis("grid-line", showGrid);
+  }, [ready, layers, showGrid]);
 
   // Rebuild the snap grid when toggled / resized / building extent changes.
   useEffect(() => {
@@ -473,24 +498,28 @@ export default function MapView() {
     markersRef.current = [];
 
     // Room labels for the active floor (+ area when dimensions are shown).
-    const areaById = new Map(building.units.map((u) => [u.id, polygonArea(u.polygon)]));
-    for (const f of unitsToGeoJSON(building).features) {
-      const props = f.properties as {
-        id: string;
-        ordinal: number;
-        name: string;
-        category: string;
-      };
-      if (props.ordinal !== ordinal || props.category === "corridor") continue;
-      const c = ringCentroid((f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][]);
-      const el = labelEl(props.name, "label");
-      if (showDims) {
-        const sub = document.createElement("div");
-        sub.className = "label-sub";
-        sub.textContent = formatArea(areaById.get(props.id) ?? 0, unit);
-        el.appendChild(sub);
+    if (layers.labels) {
+      const areaById = new Map(building.units.map((u) => [u.id, polygonArea(u.polygon)]));
+      for (const f of unitsToGeoJSON(building).features) {
+        const props = f.properties as {
+          id: string;
+          ordinal: number;
+          name: string;
+          category: string;
+        };
+        if (props.ordinal !== ordinal || props.category === "corridor") continue;
+        const c = ringCentroid(
+          (f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][],
+        );
+        const el = labelEl(props.name, "label");
+        if (showDims) {
+          const sub = document.createElement("div");
+          sub.className = "label-sub";
+          sub.textContent = formatArea(areaById.get(props.id) ?? 0, unit);
+          el.appendChild(sub);
+        }
+        markersRef.current.push(new maplibregl.Marker({ element: el }).setLngLat(c).addTo(map));
       }
-      markersRef.current.push(new maplibregl.Marker({ element: el }).setLngLat(c).addTo(map));
     }
 
     // Draggable door handles for the active floor (hidden while drawing / editing verts).
@@ -525,7 +554,7 @@ export default function MapView() {
     // Badge-reader markers (P8): on openings whose OWNING unit is secure or
     // restricted. Derived from unit security only (Opening.kind has no "badge"
     // value). Annotation markers — non-draggable. Gated by layers.accessZones.
-    {
+    if (layers.accessZones) {
       const secById = new Map(building.units.map((u) => [u.id, u.security ?? "public"]));
       for (const op of building.openings) {
         const sec = secById.get(op.unit);
@@ -582,18 +611,22 @@ export default function MapView() {
     }
 
     // Route start / end / transition pins.
-    for (const p of routePoints) {
-      if (p.ordinal !== ordinal) continue;
-      markersRef.current.push(
-        new maplibregl.Marker({ element: labelEl(p.label, `pin pin-${p.kind}`) })
-          .setLngLat(p.lnglat)
-          .addTo(map),
-      );
+    if (layers.routes) {
+      for (const p of routePoints) {
+        if (p.ordinal !== ordinal) continue;
+        markersRef.current.push(
+          new maplibregl.Marker({ element: labelEl(p.label, `pin pin-${p.kind}`) })
+            .setLngLat(p.lnglat)
+            .addTo(map),
+        );
+      }
     }
 
     // Camera body markers. Cameras + FOV are visible on ALL tools, but placement,
-    // drag, and rotation are only interactive under the camera tool.
+    // drag, and rotation are only interactive under the camera tool. Gated by
+    // layers.cameras (the FOV cones are gated in the layer-visibility effect).
     for (const cam of building.cameras) {
+      if (!layers.cameras) break;
       if (cam.ordinal !== ordinal) continue;
       const isSelected = cam.id === selectedCameraId;
       const el = document.createElement("div");
@@ -658,7 +691,7 @@ export default function MapView() {
         markersRef.current.push(hMarker);
       }
     }
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedCameraId, cameraMode, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit]);
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedCameraId, cameraMode, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers]);
 
   // Draw-tool changes: cursor, dbl-click zoom, and reset any in-progress draft.
   useEffect(() => {

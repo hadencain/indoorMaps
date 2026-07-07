@@ -32,15 +32,18 @@ interface CacheEntry {
 export interface VisibilityInfo {
   /** Active floor's occlusion-clipped visibility polygons, one per camera. */
   polys: VisibilityPolygon[];
-  /** Active floor's coverage/blind analysis — null unless `showCoverage` is on
-   *  (the boolean union is not run while the overlay is off). */
+  /** Active floor's coverage/blind analysis — null unless the coverage or
+   *  blind-spots layer is on (the boolean union is skipped while both are off). */
   coverage: CoverageResult | null;
 }
 
 export function useVisibility(): VisibilityInfo {
   const building = useStore((s) => s.building);
   const ordinal = useStore((s) => s.ordinal);
-  const showCoverage = useStore((s) => s.showCoverage);
+  // The Layers popover is the single source of truth for coverage visibility:
+  // compute the (expensive) boolean union whenever EITHER overlay is on.
+  const coverageOn = useStore((s) => s.layers.coverage);
+  const blindOn = useStore((s) => s.layers.blindSpots);
 
   const walls = useMemo(
     () => collectWalls(building, ordinal),
@@ -76,14 +79,14 @@ export function useVisibility(): VisibilityInfo {
     return out;
   }, [building.cameras, walls, ordinal]);
 
-  // Coverage/blind union — gated behind showCoverage (skip the work when off),
+  // Coverage/blind union — gated behind the coverage/blind layers (skip when off),
   // memoized on the same walls/visibility identity so it recomputes exactly
   // when the visibility set or floor geometry changes.
   const coverage = useMemo<CoverageResult | null>(() => {
-    if (!showCoverage) return null;
+    if (!coverageOn && !blindOn) return null;
     return computeCoverage(building, ordinal, polys);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showCoverage, polys, walls, ordinal]);
+  }, [coverageOn, blindOn, polys, walls, ordinal]);
 
   return { polys, coverage };
 }

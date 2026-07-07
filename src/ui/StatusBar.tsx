@@ -21,7 +21,7 @@ export default function StatusBar() {
   const startId = useStore((s) => s.startId);
   const goalId = useStore((s) => s.goalId);
   const routeMode = useStore((s) => s.routeMode);
-  const showCoverage = useStore((s) => s.showCoverage);
+  const showCoverage = useStore((s) => s.layers.coverage);
   const { geom, exit } = useRoute();
   const { coverage } = useVisibility();
   const name = (id: string) => building.units.find((u) => u.id === id)?.name ?? id;

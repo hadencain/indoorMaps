@@ -7,6 +7,7 @@ import type {
   Camera,
   CameraKind,
   SecurityLevel,
+  LayerVisibility,
 } from "./types";
 import { initialBuilding, doorForRoom } from "./building";
 import { defaultNameFor } from "./categories";
@@ -20,6 +21,38 @@ export type Tool = "select" | "rect" | "polygon" | "vertex" | "link" | "route" |
 // unchanged. Bumping the key would discard the persisted building. Cameras
 // migrate in-place via the `cameras: []` default in loadBuilding.
 const STORAGE_KEY = "indoormaps:building:v3";
+// Layer-visibility prefs live under their OWN key, never folded into the
+// building payload (a shared GeoJSON export must not carry operator view prefs).
+const LAYERS_KEY = "indoormaps:layers:v1";
+
+export const DEFAULT_LAYERS: LayerVisibility = {
+  cameras: true,
+  coverage: true,
+  blindSpots: false,
+  accessZones: true,
+  labels: true,
+  routes: true,
+  incidents: true,
+};
+
+function loadLayers(): LayerVisibility {
+  try {
+    const raw = localStorage.getItem(LAYERS_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as Record<string, unknown>;
+      if (p && typeof p === "object") {
+        const out = { ...DEFAULT_LAYERS };
+        for (const k of Object.keys(DEFAULT_LAYERS) as (keyof LayerVisibility)[]) {
+          if (typeof p[k] === "boolean") out[k] = p[k] as boolean;
+        }
+        return out;
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  return { ...DEFAULT_LAYERS };
+}
 
 function loadBuilding(): Building {
   try {
@@ -53,7 +86,7 @@ interface State {
   activeTool: Tool;
   selectedId: string | null;
   selectedCameraId: string | null;
-  showCoverage: boolean;
+  layers: LayerVisibility;
   ordinal: number;
   unit: "m" | "ft";
   showDims: boolean;
@@ -101,7 +134,8 @@ interface State {
   updateCamera: (id: string, patch: Partial<Omit<Camera, "id">>) => void;
   deleteCamera: (id: string) => void;
   setSelectedCamera: (id: string | null) => void;
-  toggleCoverage: () => void;
+  setLayer: (key: keyof LayerVisibility, on: boolean) => void;
+  toggleLayer: (key: keyof LayerVisibility) => void;
   importSvgText: (text: string) => void;
   importRasterFile: (file: File) => Promise<void>;
   setUnderlayOpacity: (ordinal: number, v: number) => void;
@@ -118,7 +152,7 @@ export const useStore = create<State>((set, get) => ({
   activeTool: "select",
   selectedId: null,
   selectedCameraId: null,
-  showCoverage: false,
+  layers: loadLayers(),
   ordinal: 0,
   unit: "m",
   showDims: false,
@@ -352,7 +386,8 @@ export const useStore = create<State>((set, get) => ({
 
   setSelectedCamera: (id) =>
     set(id ? { selectedCameraId: id, selectedId: null } : { selectedCameraId: null }),
-  toggleCoverage: () => set((s) => ({ showCoverage: !s.showCoverage })),
+  setLayer: (key, on) => set((s) => ({ layers: { ...s.layers, [key]: on } })),
+  toggleLayer: (key) => set((s) => ({ layers: { ...s.layers, [key]: !s.layers[key] } })),
 
   importSvgText: (text) => {
     const shapes = parseSvgShapes(text);
@@ -533,4 +568,14 @@ function persistBuilding(building: Building) {
 
 useStore.subscribe((s, prev) => {
   if (s.building !== prev.building) persistBuilding(s.building);
+});
+
+// Layer-visibility prefs persist under their own key, separate from the building.
+useStore.subscribe((s, prev) => {
+  if (s.layers === prev.layers) return;
+  try {
+    localStorage.setItem(LAYERS_KEY, JSON.stringify(s.layers));
+  } catch {
+    /* storage unavailable — non-fatal */
+  }
 });

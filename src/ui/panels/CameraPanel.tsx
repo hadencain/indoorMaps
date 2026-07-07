@@ -21,13 +21,13 @@ export default function CameraPanel() {
   const ordinal = useStore((s) => s.ordinal);
   const unit = useStore((s) => s.unit);
   const selectedCameraId = useStore((s) => s.selectedCameraId);
-  const showCoverage = useStore((s) => s.showCoverage);
+  const showCoverage = useStore((s) => s.layers.coverage);
   const setSelectedCamera = useStore((s) => s.setSelectedCamera);
   const setSelected = useStore((s) => s.setSelected);
   const updateCamera = useStore((s) => s.updateCamera);
   const rotateCamera = useStore((s) => s.rotateCamera);
   const deleteCamera = useStore((s) => s.deleteCamera);
-  const toggleCoverage = useStore((s) => s.toggleCoverage);
+  const toggleLayer = useStore((s) => s.toggleLayer);
   const { polys: visPolys, coverage } = useVisibility();
 
   // Derived spaces this camera sees (same-ordinal, from occlusion geometry).
@@ -50,7 +50,7 @@ export default function CameraPanel() {
         <div className="readout" style={{ marginTop: 12 }}>
           <button
             className={`wide ${showCoverage ? "active" : ""}`}
-            onClick={toggleCoverage}
+            onClick={() => toggleLayer("coverage")}
           >
             {showCoverage ? "◼ Showing coverage" : "Show coverage"}
           </button>

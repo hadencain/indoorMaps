@@ -1,5 +1,6 @@
 import { Grid3x3, Ruler } from "lucide-react";
 import { useStore } from "../store";
+import LayersControl from "./LayersControl";
 
 export default function ViewControls() {
   const showGrid = useStore((s) => s.showGrid);
@@ -39,6 +40,7 @@ export default function ViewControls() {
           ft
         </button>
       </div>
+      <LayersControl />
     </div>
   );
 }
