@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import type { MetreXY, Category } from "./types";
+import type { MetreXY, Category, LngLat, RasterUnderlay } from "./types";
 import type { FC } from "./render";
 import { unitsToGeoJSON } from "./render";
 import {
@@ -21,6 +21,9 @@ import { useStore } from "./store";
 import { useRoute } from "./ui/route";
 
 const EMPTY: FC = { type: "FeatureCollection", features: [] };
+/** 1×1 transparent pixel — placeholder image for the underlay source until a real one loads. */
+const TRANSPARENT_PX =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 /** Click within this many metres of the first vertex to close a polygon. */
 const CLOSE_SNAP_M = 2.5;
 
@@ -126,6 +129,19 @@ export default function MapView() {
     containerRef.current.addEventListener("contextmenu", (e) => e.preventDefault());
 
     map.on("load", () => {
+      // Raster floorplan underlay — image source seeded with a transparent pixel
+      // and a degenerate placeholder rectangle; real image swapped in per-floor.
+      const o = building.origin;
+      map.addSource("underlay", {
+        type: "image",
+        url: TRANSPARENT_PX,
+        coordinates: [
+          [o[0], o[1] + 1e-4],
+          [o[0] + 1e-4, o[1] + 1e-4],
+          [o[0] + 1e-4, o[1]],
+          [o[0], o[1]],
+        ],
+      });
       map.addSource("grid", { type: "geojson", data: EMPTY });
       map.addSource("units", { type: "geojson", data: unitsToGeoJSON(building) });
       map.addSource("route", { type: "geojson", data: EMPTY });
@@ -190,6 +206,20 @@ export default function MapView() {
         },
       });
 
+      // Insert the underlay BELOW every vector layer (beforeId = grid-line, the
+      // first vector layer) so it renders under grid/units/route. Hidden until a
+      // floor with an underlay is active.
+      map.addLayer(
+        {
+          id: "underlay",
+          type: "raster",
+          source: "underlay",
+          layout: { visibility: "none" },
+          paint: { "raster-opacity": 0.5, "raster-fade-duration": 0 },
+        },
+        "grid-line",
+      );
+
       const b = new maplibregl.LngLatBounds();
       for (const f of unitsToGeoJSON(building).features) {
         for (const c of (f.geometry as GeoJSON.Polygon).coordinates[0]) {
@@ -238,6 +268,24 @@ export default function MapView() {
       showGrid ? gridToGeoJSON(building, gridSize) : EMPTY,
     );
   }, [ready, showGrid, gridSize, building]);
+
+  // Show the active floor's raster underlay (if any) beneath the vector layers.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const src = map.getSource("underlay") as maplibregl.ImageSource | undefined;
+    if (!src) return;
+    // Only render an underlay that still has its image (dataUrl may be "" after a
+    // quota-stripped reload — its metadata persists, but re-import is required).
+    const u = (building.underlays ?? []).find((x) => x.ordinal === ordinal && x.dataUrl);
+    if (u) {
+      src.updateImage({ url: u.dataUrl, coordinates: underlayCoordinates(u, building.origin) });
+      map.setPaintProperty("underlay", "raster-opacity", u.opacity);
+      map.setLayoutProperty("underlay", "visibility", "visible");
+    } else {
+      map.setLayoutProperty("underlay", "visibility", "none");
+    }
+  }, [ready, ordinal, building]);
 
   // Floor / route / selection changes: filter layers and rebuild HTML markers.
   useEffect(() => {
@@ -646,6 +694,32 @@ export default function MapView() {
       setDraft(poly, null);
     });
   }
+}
+
+/** The four lng/lat corners of a raster underlay, in MapLibre image-source order
+ *  [top-left, top-right, bottom-right, bottom-left]. Metre rectangle anchored at
+ *  the SW corner (`offset`), sized `widthM` × `heightM` (aspect-preserved), then
+ *  rotated CCW by `rotation` degrees about that SW corner. */
+function underlayCoordinates(
+  u: RasterUnderlay,
+  origin: LngLat,
+): [LngLat, LngLat, LngLat, LngLat] {
+  const heightM = u.widthM * (u.naturalH / u.naturalW);
+  const [ox, oy] = u.offset;
+  const rad = (u.rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const rot = (x: number, y: number): LngLat => {
+    const dx = x - ox;
+    const dy = y - oy;
+    return m2ll(origin, ox + dx * cos - dy * sin, oy + dx * sin + dy * cos);
+  };
+  // top = north (higher y); bottom = south. SW = (ox, oy).
+  const nw = rot(ox, oy + heightM);
+  const ne = rot(ox + u.widthM, oy + heightM);
+  const se = rot(ox + u.widthM, oy);
+  const sw = rot(ox, oy);
+  return [nw, ne, se, sw];
 }
 
 function ringCentroid(ring: [number, number][]): [number, number] {
