@@ -1,9 +1,13 @@
 import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Undo2, Redo2 } from "lucide-react";
 import { useStore } from "../store";
 
 export default function TopBar() {
   const levels = useStore((s) => s.building.levels);
+  const undo = useStore((s) => s.undo);
+  const redo = useStore((s) => s.redo);
+  const canUndo = useStore((s) => s.past.length > 0);
+  const canRedo = useStore((s) => s.future.length > 0);
   const ordinal = useStore((s) => s.ordinal);
   const setOrdinal = useStore((s) => s.setOrdinal);
   const planWidth = useStore((s) => s.planWidth);
@@ -21,6 +25,24 @@ export default function TopBar() {
   return (
     <header className="topbar">
       <div className="wordmark">indoorMaps</div>
+      <div className="histbtns">
+        <button
+          className="histbtn"
+          title="Undo (Ctrl/Cmd+Z)"
+          disabled={!canUndo}
+          onClick={undo}
+        >
+          <Undo2 size={15} />
+        </button>
+        <button
+          className="histbtn"
+          title="Redo (Ctrl/Cmd+Shift+Z)"
+          disabled={!canRedo}
+          onClick={redo}
+        >
+          <Redo2 size={15} />
+        </button>
+      </div>
       <div className="floorpills">
         {levels.map((lv) => (
           <button

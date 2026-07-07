@@ -227,6 +227,28 @@ button.wide.ghost {
   font-size: 14px;
   letter-spacing: 0.02em;
 }
+.histbtns {
+  display: flex;
+  gap: var(--s1);
+}
+.histbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-2);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.histbtn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.histbtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 .floorpills {
   display: flex;
   gap: var(--s1);

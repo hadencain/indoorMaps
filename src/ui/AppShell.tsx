@@ -19,6 +19,8 @@ export default function AppShell() {
   const setTool = useStore((s) => s.setTool);
   const selectedCameraId = useStore((s) => s.selectedCameraId);
   const deleteCamera = useStore((s) => s.deleteCamera);
+  const undo = useStore((s) => s.undo);
+  const redo = useStore((s) => s.redo);
 
   // Keep start/goal valid as rooms come and go.
   useEffect(() => {
@@ -47,6 +49,26 @@ export default function AppShell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedId, building, deleteUnit, setTool, selectedCameraId, deleteCamera]);
+
+  // Undo/redo: Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z and Ctrl+Y redo. Skipped while
+  // typing in a text field so editing a name/note keeps native undo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((k === "z" && e.shiftKey) || k === "y") {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
 
   return (
     <div className="shell">
