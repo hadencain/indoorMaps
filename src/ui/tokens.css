@@ -1,0 +1,36 @@
+:root {
+  --bg: #0b0d10;
+  --panel: #0d1116;
+  --panel-2: #10161e;
+  --line: #1e2733;
+  --line-2: #2c3a4c;
+  --text: #e8e8e8;
+  --dim: #8a96a5;
+  --accent: #00d7cd;
+  --danger: #ff5c5c;
+  --select: #f2c14e;
+
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+
+  --rail: 52px;
+  --inspector: 280px;
+  --topbar: 48px;
+  --statusbar: 30px;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  font-family: var(--font-sans);
+  color: var(--text);
+  background: var(--bg);
+  font-feature-settings: "tnum" 1; /* tabular numerals for metrics */
+}
+.mono { font-family: var(--font-mono); }
