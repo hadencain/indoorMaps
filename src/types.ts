@@ -79,6 +79,27 @@ export interface RasterUnderlay {
   opacity: number; // 0..1, default 0.5
 }
 
+/** CCTV camera kind.
+ *  - "fixed" = static sector (a wedge at a fixed heading).
+ *  - "dome"  = 360° sight; `fovDeg`/`heading` are ignored (treated as full circle).
+ *  - "ptz"   = pan/tilt/zoom; geometrically identical to `fixed` for a static
+ *    coverage snapshot, flagged visually as sweeping. */
+export type CameraKind = "fixed" | "dome" | "ptz";
+
+/** A placed CCTV camera. Position/aim authored in local metres; coverage is
+ *  derived (never stored). Heading is degrees from +x (map-east), CCW positive,
+ *  so `heading°` maps directly onto `Math.atan2(dy, dx)` with no conversion. */
+export interface Camera {
+  id: string;
+  ordinal: number; // floor the camera lives on (mirrors Unit.ordinal)
+  at: MetreXY; // position in local metres
+  heading: number; // degrees, from +x axis, CCW positive (atan2-native)
+  fovDeg: number; // horizontal field of view in degrees; ignored when kind === "dome"
+  rangeM: number; // useful sight range in metres (hard cap on sightline length)
+  kind: CameraKind;
+  name: string;
+}
+
 export interface Building {
   /** SW origin of the local metre grid, as [lng, lat]. */
   origin: LngLat;
@@ -86,6 +107,8 @@ export interface Building {
   units: Unit[];
   openings: Opening[];
   verticals: Vertical[];
+  /** Placed CCTV cameras. Defaults to [] for legacy buildings (see loadBuilding). */
+  cameras: Camera[];
   /** Optional raster floorplan underlays, at most one per ordinal (P11c). */
   underlays?: RasterUnderlay[];
 }

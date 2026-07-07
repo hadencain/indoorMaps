@@ -1,12 +1,16 @@
 import { create } from "zustand";
-import type { Building, MetreXY, Category, RasterUnderlay } from "./types";
+import type { Building, MetreXY, Category, RasterUnderlay, Camera, CameraKind } from "./types";
 import { initialBuilding, doorForRoom } from "./building";
 import { defaultNameFor } from "./categories";
 import { parseSvgShapes } from "./svgImport";
 import { buildingToGeoJSON, geoJSONToBuilding } from "./imdf";
 
-export type Tool = "select" | "rect" | "polygon" | "vertex" | "link" | "route";
+export type Tool = "select" | "rect" | "polygon" | "vertex" | "link" | "route" | "camera";
 
+// Kept at v3 deliberately: cameras are additive + defaulted (see below), so
+// legacy v3 payloads — including the raster underlays added under v3 — load
+// unchanged. Bumping the key would discard the persisted building. Cameras
+// migrate in-place via the `cameras: []` default in loadBuilding.
 const STORAGE_KEY = "indoormaps:building:v3";
 
 function loadBuilding(): Building {
@@ -20,7 +24,11 @@ function loadBuilding(): Building {
         Array.isArray(b.openings) &&
         b.units.every((u) => Array.isArray(u.polygon)) &&
         b.openings.every((o) => typeof o.id === "string");
-      if (ok) return b;
+      if (ok) {
+        // Additive migration: legacy payloads predate cameras — default them.
+        if (!Array.isArray(b.cameras)) b.cameras = [];
+        return b;
+      }
     }
   } catch {
     /* fall through */
@@ -28,12 +36,16 @@ function loadBuilding(): Building {
   return initialBuilding;
 }
 
+const CAM_DEFAULTS = { heading: 0, fovDeg: 90, rangeM: 8, kind: "fixed" as CameraKind };
+let camSeq = 0;
 let roomSeq = 0;
 
 interface State {
   building: Building;
   activeTool: Tool;
   selectedId: string | null;
+  selectedCameraId: string | null;
+  showCoverage: boolean;
   ordinal: number;
   unit: "m" | "ft";
   showDims: boolean;
@@ -75,6 +87,13 @@ interface State {
   deleteVertex: (id: string, index: number) => void;
   linkUnit: (id: string) => void;
   deleteVertical: (a: string, b: string) => void;
+  addCamera: (at: MetreXY, ordinal: number) => void;
+  moveCamera: (id: string, at: MetreXY) => void;
+  rotateCamera: (id: string, heading: number) => void;
+  updateCamera: (id: string, patch: Partial<Omit<Camera, "id">>) => void;
+  deleteCamera: (id: string) => void;
+  setSelectedCamera: (id: string | null) => void;
+  toggleCoverage: () => void;
   importSvgText: (text: string) => void;
   importRasterFile: (file: File) => Promise<void>;
   setUnderlayOpacity: (ordinal: number, v: number) => void;
@@ -90,6 +109,8 @@ export const useStore = create<State>((set, get) => ({
   building: loadBuilding(),
   activeTool: "select",
   selectedId: null,
+  selectedCameraId: null,
+  showCoverage: false,
   ordinal: 0,
   unit: "m",
   showDims: false,
@@ -104,7 +125,7 @@ export const useStore = create<State>((set, get) => ({
   importMsg: null,
   draftCategory: "room",
 
-  setTool: (t) => set({ activeTool: t, pendingLink: null }),
+  setTool: (t) => set({ activeTool: t, pendingLink: null, selectedCameraId: null }),
   setDraftCategory: (c) => set({ draftCategory: c }),
   setOrdinal: (o) => set({ ordinal: o }),
   setSelected: (id) => set({ selectedId: id }),
@@ -278,6 +299,52 @@ export const useStore = create<State>((set, get) => ({
       },
     })),
 
+  addCamera: (at, ord) =>
+    set((s) => {
+      const id = `cam-${Date.now()}-${camSeq++}`;
+      const n = s.building.cameras.filter((c) => c.ordinal === ord).length + 1;
+      const cam: Camera = { id, ordinal: ord, at, name: `Camera ${n}`, ...CAM_DEFAULTS };
+      return {
+        selectedCameraId: id,
+        building: { ...s.building, cameras: [...s.building.cameras, cam] },
+      };
+    }),
+
+  moveCamera: (id, at) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        cameras: s.building.cameras.map((c) => (c.id === id ? { ...c, at } : c)),
+      },
+    })),
+
+  rotateCamera: (id, heading) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        cameras: s.building.cameras.map((c) =>
+          c.id === id ? { ...c, heading: ((heading % 360) + 360) % 360 } : c,
+        ),
+      },
+    })),
+
+  updateCamera: (id, patch) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        cameras: s.building.cameras.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      },
+    })),
+
+  deleteCamera: (id) =>
+    set((s) => ({
+      selectedCameraId: s.selectedCameraId === id ? null : s.selectedCameraId,
+      building: { ...s.building, cameras: s.building.cameras.filter((c) => c.id !== id) },
+    })),
+
+  setSelectedCamera: (id) => set({ selectedCameraId: id }),
+  toggleCoverage: () => set((s) => ({ showCoverage: !s.showCoverage })),
+
   importSvgText: (text) => {
     const shapes = parseSvgShapes(text);
     if (shapes.length === 0) {
@@ -412,7 +479,12 @@ export const useStore = create<State>((set, get) => ({
       set({ importMsg: "Not an indoorMaps GeoJSON export (missing metadata)." });
       return;
     }
-    set({ building: loaded, selectedId: null, importMsg: `Loaded ${loaded.units.length} units.` });
+    set({
+      building: loaded,
+      selectedId: null,
+      selectedCameraId: null,
+      importMsg: `Loaded ${loaded.units.length} units.`,
+    });
   },
 
   resetBuilding: () =>
@@ -421,6 +493,7 @@ export const useStore = create<State>((set, get) => ({
       startId: "lobby",
       goalId: "lab",
       selectedId: null,
+      selectedCameraId: null,
       importMsg: null,
     }),
 }));
