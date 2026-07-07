@@ -43,11 +43,13 @@ export default function MapView() {
   const showGrid = useStore((s) => s.showGrid);
   const gridSize = useStore((s) => s.gridSize);
   const { geom } = useRoute();
-  // Occlusion-clipped visibility polygons for the active floor's cameras (P5).
-  // Recomputed off the render path by the hook's memo (per-camera cache) — a
-  // camera drag/param change recomputes only that camera; a wall move recomputes
-  // every camera on the floor; everything else reuses the cache.
-  const visPolys = useVisibility();
+  const showCoverage = useStore((s) => s.showCoverage);
+  // Occlusion-clipped visibility polygons for the active floor's cameras (P5) +
+  // coverage/blind analysis (P6, null unless showCoverage is on). Recomputed off
+  // the render path by the hook's memo (per-camera cache) — a camera drag/param
+  // change recomputes only that camera; a wall move recomputes every camera on
+  // the floor; everything else reuses the cache.
+  const { polys: visPolys, coverage } = useVisibility();
 
   // Legacy internal interaction modes, derived from the single active tool.
   const drawTool: DrawTool =
@@ -169,6 +171,10 @@ export default function MapView() {
       });
       map.addSource("grid", { type: "geojson", data: EMPTY });
       map.addSource("units", { type: "geojson", data: unitsToGeoJSON(building) });
+      // Coverage (P6): green covered union + red blind = floor − covered. Fed by
+      // the coverage effect, only when showCoverage is on.
+      map.addSource("coverage", { type: "geojson", data: EMPTY });
+      map.addSource("blindspots", { type: "geojson", data: EMPTY });
       // Camera FOV: populated by the visibility effect from useVisibility() output.
       map.addSource("camera-fov", { type: "geojson", data: EMPTY });
       map.addSource("route", { type: "geojson", data: EMPTY });
@@ -223,6 +229,28 @@ export default function MapView() {
         paint: { "line-color": "#5cf6ee", "line-width": 2 },
         filter: ["==", ["get", "cameraId"], "__none__"],
       });
+      // Coverage (green) + blind (red) sit BELOW the camera-fov layers and above
+      // unit-fill/outline: inserting each before "camera-fov-fill" yields the
+      // order unit-* → coverage-fill → blind-fill → camera-fov-*. Translucent so
+      // the category fills read through. Shown only when showCoverage is on.
+      map.addLayer(
+        {
+          id: "coverage-fill",
+          type: "fill",
+          source: "coverage",
+          paint: { "fill-color": "#2fbf71", "fill-opacity": 0.22 },
+        },
+        "camera-fov-fill",
+      );
+      map.addLayer(
+        {
+          id: "blind-fill",
+          type: "fill",
+          source: "blindspots",
+          paint: { "fill-color": "#ff5c5c", "fill-opacity": 0.22 },
+        },
+        "camera-fov-fill",
+      );
       map.addLayer({
         id: "route-line",
         type: "line",
@@ -319,6 +347,23 @@ export default function MapView() {
     );
   }, [ready, visPolys, building.origin]);
 
+  // Coverage/blind overlays (P6) — occlusion-clipped, never cones. Empty out the
+  // sources when the overlay is off (coverage is null) so nothing renders.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const cov =
+      showCoverage && coverage
+        ? ringsToFC(building.origin, coverage.coveredRings, coverage.ordinal)
+        : EMPTY;
+    const blind =
+      showCoverage && coverage
+        ? ringsToFC(building.origin, coverage.blindRings, coverage.ordinal)
+        : EMPTY;
+    (map.getSource("coverage") as maplibregl.GeoJSONSource | undefined)?.setData(cov);
+    (map.getSource("blindspots") as maplibregl.GeoJSONSource | undefined)?.setData(blind);
+  }, [ready, coverage, showCoverage, building.origin]);
+
   // Rebuild the snap grid when toggled / resized / building extent changes.
   useEffect(() => {
     const map = mapRef.current;
@@ -360,6 +405,8 @@ export default function MapView() {
       floorFilter,
       ["==", ["get", "id"], selectedId ?? "__none__"],
     ]);
+    map.setFilter("coverage-fill", floorFilter);
+    map.setFilter("blind-fill", floorFilter);
     map.setFilter("camera-fov-fill", floorFilter);
     map.setFilter("camera-fov-line", floorFilter);
     map.setFilter("camera-fov-selected", [
@@ -882,6 +929,17 @@ function visibilityToFC(origin: LngLat, visPolys: VisibilityPolygon[]): FC {
       type: "Polygon",
       coordinates: [polygonRing(origin, vp.ring)],
     },
+  }));
+  return { type: "FeatureCollection", features };
+}
+
+/** Metre rings → floor-tagged Polygon FeatureCollection (coverage / blind
+ *  overlays). One feature per ring; projected to lng/lat via `polygonRing`. */
+function ringsToFC(origin: LngLat, rings: MetreXY[][], ordinal: number): FC {
+  const features: GeoJSON.Feature[] = rings.map((r) => ({
+    type: "Feature",
+    properties: { ordinal },
+    geometry: { type: "Polygon", coordinates: [polygonRing(origin, r)] },
   }));
   return { type: "FeatureCollection", features };
 }

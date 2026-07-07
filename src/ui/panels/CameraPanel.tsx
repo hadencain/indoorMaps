@@ -23,7 +23,7 @@ export default function CameraPanel() {
   const rotateCamera = useStore((s) => s.rotateCamera);
   const deleteCamera = useStore((s) => s.deleteCamera);
   const toggleCoverage = useStore((s) => s.toggleCoverage);
-  const visPolys = useVisibility();
+  const { polys: visPolys, coverage } = useVisibility();
 
   const level = building.levels.find((l) => l.ordinal === ordinal)?.name ?? `L${ordinal}`;
   const floorCams = building.cameras.filter((c) => c.ordinal === ordinal);
@@ -43,6 +43,13 @@ export default function CameraPanel() {
           >
             {showCoverage ? "◼ Showing coverage" : "Show coverage"}
           </button>
+          {showCoverage && coverage && (
+            <p className="mono" style={{ margin: "8px 0 0", lineHeight: 1.5 }}>
+              coverage {(coverage.coveragePct * 100).toFixed(0)}% · covered{" "}
+              {formatArea(coverage.coveredAreaM2, unit)} · blind{" "}
+              {formatArea(Math.max(0, coverage.floorAreaM2 - coverage.coveredAreaM2), unit)}
+            </p>
+          )}
         </div>
 
         {floorCams.length > 0 && (

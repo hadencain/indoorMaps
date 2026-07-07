@@ -1,5 +1,6 @@
 import { useStore } from "../store";
 import { useRoute } from "./route";
+import { useVisibility } from "./visibility";
 
 const HINTS: Record<string, string> = {
   select: "Click a unit to select · drag door dots · right-click a door to make it an entrance",
@@ -20,7 +21,9 @@ export default function StatusBar() {
   const startId = useStore((s) => s.startId);
   const goalId = useStore((s) => s.goalId);
   const routeMode = useStore((s) => s.routeMode);
+  const showCoverage = useStore((s) => s.showCoverage);
   const { geom, exit } = useRoute();
+  const { coverage } = useVisibility();
   const name = (id: string) => building.units.find((u) => u.id === id)?.name ?? id;
   const floors = geom ? `${geom.floors.length} floor${geom.floors.length === 1 ? "" : "s"}` : "";
   const floorName = building.levels.find((l) => l.ordinal === ordinal)?.name ?? `L${ordinal}`;
@@ -33,6 +36,9 @@ export default function StatusBar() {
       {activeTool === "camera" ? (
         <span>
           Cameras · {camCount} on {floorName}
+          {showCoverage && coverage
+            ? ` · coverage ${(coverage.coveragePct * 100).toFixed(0)}%`
+            : ""}
         </span>
       ) : geom ? (
         routeMode === "egress" ? (
