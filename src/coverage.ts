@@ -10,6 +10,8 @@
 
 import type { Building, Camera, MetreXY } from "./types";
 import { polygonArea } from "./geo";
+import polygonClipping from "polygon-clipping";
+import type { MultiPolygon, Ring } from "polygon-clipping";
 
 /** Number of arc samples used to round the range boundary of a sector.
  *  ~4° per step reads as a smooth arc without exploding vertex count. */
@@ -200,4 +202,127 @@ export function computeVisibility(cam: Camera, walls: Segment[]): MetreXY[] {
   }
 
   return full ? hits : [at, ...hits];
+}
+
+// ---------------------------------------------------------------------------
+// P6 — Coverage + blind-spot computation (boolean geometry via polygon-clipping)
+// ---------------------------------------------------------------------------
+//
+// Runs entirely in metre-space (not lng/lat) so union/difference/area are
+// distortion-free; results are projected to lng/lat only for rendering.
+// HARD CONSTRAINT: coverage consumes P5's occlusion-clipped VisibilityPolygon
+// rings — NEVER radial cones. Cameras contribute exactly what they can see.
+
+/** Close an open metre ring (repeat the first point) for polygon-clipping,
+ *  which expects closed rings. */
+function closedRing(ring: MetreXY[]): Ring {
+  const r: Ring = ring.map((p) => [p[0], p[1]]);
+  const f = r[0];
+  const l = r[r.length - 1];
+  if (r.length > 0 && (f[0] !== l[0] || f[1] !== l[1])) r.push([f[0], f[1]]);
+  return r;
+}
+
+/** Metre rings → polygon-clipping MultiPolygon (each ring becomes one polygon
+ *  outer). Degenerate rings (< 3 pts) are dropped. */
+function ringsToMP(rings: MetreXY[][]): MultiPolygon {
+  const mp: MultiPolygon = [];
+  for (const ring of rings) {
+    if (ring.length < 3) continue;
+    mp.push([closedRing(ring)]);
+  }
+  return mp;
+}
+
+/** Union all rings into one MultiPolygon (merges overlaps). Empty in → empty. */
+function unionRings(rings: MetreXY[][]): MultiPolygon {
+  const mp = ringsToMP(rings);
+  if (mp.length === 0) return [];
+  return polygonClipping.union(mp);
+}
+
+/** A polygon-clipping Ring is closed (last == first); polygonArea (geo.ts)
+ *  wants an open ring, so strip the closing duplicate before measuring. */
+function openRing(ring: Ring): MetreXY[] {
+  const n = ring.length;
+  const closed =
+    n > 1 && ring[0][0] === ring[n - 1][0] && ring[0][1] === ring[n - 1][1];
+  const src = closed ? ring.slice(0, -1) : ring;
+  return src.map((p) => [p[0], p[1]] as MetreXY);
+}
+
+/** Signed multipolygon area: Σ outer-ring area − Σ hole-ring area, using the
+ *  imported shoelace `polygonArea` per ring (ring 0 of each polygon = outer). */
+function mpArea(mp: MultiPolygon): number {
+  let a = 0;
+  for (const poly of mp) {
+    poly.forEach((ring, i) => {
+      const area = polygonArea(openRing(ring));
+      a += i === 0 ? area : -area;
+    });
+  }
+  return a;
+}
+
+/** Flatten a MultiPolygon's outer + hole rings to open MetreXY rings for
+ *  rendering (each ring projected + drawn as its own fill polygon). In the rare
+ *  case a result has holes, those hole rings render as solid fills — an accepted
+ *  v1 cosmetic limit; the AREA math above stays exact (holes subtract). */
+function mpRings(mp: MultiPolygon): MetreXY[][] {
+  const out: MetreXY[][] = [];
+  for (const poly of mp) for (const ring of poly) out.push(openRing(ring));
+  return out;
+}
+
+/**
+ * Per-floor coverage analysis from occlusion-clipped visibility polygons.
+ *
+ *  1. floor   = union of every unit polygon on `ordinal` (the space that SHOULD
+ *     be seen — blind spots are meaningful floor a camera misses, not exterior).
+ *  2. covered = union of every camera's P5 visibility ring on this floor.
+ *  3. coveredInFloor = covered ∩ floor — clips the range arc that spills through
+ *     an exterior wall so coverage-% counts only area inside the building.
+ *  4. blind   = floor − covered.
+ *
+ * coveragePct = coveredAreaM2 / floorAreaM2, both measured after clipping.
+ */
+export function computeCoverage(
+  building: Building,
+  ordinal: number,
+  visPolys: VisibilityPolygon[],
+): CoverageResult {
+  const unitRings: MetreXY[][] = [];
+  for (const u of building.units) {
+    if (u.ordinal !== ordinal) continue;
+    if (u.polygon.length < 3 || polygonArea(u.polygon) < 1e-6) continue;
+    unitRings.push(u.polygon);
+  }
+  const coverRings = visPolys
+    .filter((v) => v.ordinal === ordinal && v.ring.length >= 3)
+    .map((v) => v.ring);
+
+  const floor = unionRings(unitRings);
+  const covered = unionRings(coverRings);
+
+  const coveredInFloor: MultiPolygon =
+    covered.length && floor.length
+      ? polygonClipping.intersection(covered, floor)
+      : [];
+  const blind: MultiPolygon = !floor.length
+    ? []
+    : covered.length
+      ? polygonClipping.difference(floor, covered)
+      : floor;
+
+  const floorAreaM2 = mpArea(floor);
+  const coveredAreaM2 = mpArea(coveredInFloor);
+
+  return {
+    ordinal,
+    coveredRings: mpRings(coveredInFloor),
+    blindRings: mpRings(blind),
+    floorAreaM2,
+    coveredAreaM2,
+    coveragePct: floorAreaM2 > 0 ? coveredAreaM2 / floorAreaM2 : 0,
+  };
 }
