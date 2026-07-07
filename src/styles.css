@@ -638,6 +638,17 @@ button.wide.ghost {
   cursor: grabbing;
 }
 
+/* Entrance handle: larger cyan/green diamond, unmistakable vs a plain door. */
+.door-entrance {
+  width: 16px;
+  height: 16px;
+  background: #35e0c0;
+  border: 2px solid #05201b;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+
 /* Vertex-edit handles */
 .vhandle {
   width: 12px;

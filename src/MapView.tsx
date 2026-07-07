@@ -50,6 +50,7 @@ export default function MapView() {
   const onAddRoom = useStore((s) => s.addRoom);
   const onSelect = useStore((s) => s.setSelected);
   const onMoveDoor = useStore((s) => s.moveDoor);
+  const onToggleOpeningKind = useStore((s) => s.toggleOpeningKind);
   const onRename = useStore((s) => s.renameUnit);
   const onSetCategory = useStore((s) => s.setCategory);
   const onDelete = useStore((s) => s.deleteUnit);
@@ -285,7 +286,7 @@ export default function MapView() {
       for (const op of building.openings) {
         const owner = unitById.get(op.unit);
         if (!owner || owner.ordinal !== ordinal) continue;
-        const el = labelEl("", "door");
+        const el = labelEl("", op.kind === "entrance" ? "door door-entrance" : "door");
         const marker = new maplibregl.Marker({ element: el, draggable: true })
           .setLngLat(m2ll(building.origin, op.at[0], op.at[1]))
           .addTo(map);
@@ -297,6 +298,12 @@ export default function MapView() {
           const o = live.current.building.units.find((u) => u.id === op.unit);
           if (o) at = nearestPointOnPolygon(at, o.polygon);
           onMoveDoor(op.id, at);
+        });
+        // Right-click a door handle to toggle it between door and entrance.
+        el.addEventListener("contextmenu", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          onToggleOpeningKind(op.id);
         });
         markersRef.current.push(marker);
       }
@@ -351,7 +358,7 @@ export default function MapView() {
           .addTo(map),
       );
     }
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, onMoveDoor, unit, showDims, vertexEdit]);
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit]);
 
   // Draw-tool changes: cursor, dbl-click zoom, and reset any in-progress draft.
   useEffect(() => {
