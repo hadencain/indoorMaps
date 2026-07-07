@@ -11,6 +11,7 @@ import type {
   Incident,
   IncidentKind,
   PatrolPath,
+  Unit,
 } from "./types";
 import { initialBuilding, doorForRoom } from "./building";
 import { defaultNameFor, isSpace } from "./categories";
@@ -36,10 +37,16 @@ export type Tool =
 // legacy v3 payloads — including the raster underlays added under v3 — load
 // unchanged. Bumping the key would discard the persisted building. Cameras
 // migrate in-place via the `cameras: []` default in loadBuilding.
+//
+// Undo/redo (P12) is IN-MEMORY only: `past`/`future` are never persisted, so
+// the persisted shape is unchanged and the key stays v3.
 const STORAGE_KEY = "indoormaps:building:v3";
 // Layer-visibility prefs live under their OWN key, never folded into the
 // building payload (a shared GeoJSON export must not carry operator view prefs).
 const LAYERS_KEY = "indoormaps:layers:v1";
+
+// Bounded snapshot history: cap the number of retained past/future buildings.
+const HISTORY_LIMIT = 50;
 
 export const DEFAULT_LAYERS: LayerVisibility = {
   cameras: true,
@@ -105,8 +112,13 @@ let patSeq = 0;
 
 interface State {
   building: Building;
+  // Undo/redo — bounded in-memory snapshot stacks of the `building` slice only.
+  // NEVER persisted (session-only; reset on reload).
+  past: Building[];
+  future: Building[];
   activeTool: Tool;
   selectedId: string | null;
+  selectedIds: string[];
   selectedCameraId: string | null;
   selectedIncidentId: string | null;
   incidentKind: IncidentKind;
@@ -125,6 +137,7 @@ interface State {
   planWidth: number;
   importMsg: string | null;
   draftCategory: Category;
+  searchQuery: string;
 
   setTool: (t: Tool) => void;
   setDraftCategory: (c: Category) => void;
@@ -185,339 +198,339 @@ interface State {
   exportGeoJSON: () => void;
   loadGeoJSONText: (text: string) => void;
   resetBuilding: () => void;
+
+  // P12 undo/redo
+  undo: () => void;
+  redo: () => void;
+  // P12 multi-select + bulk
+  toggleSelected: (id: string) => void;
+  selectMany: (ids: string[]) => void;
+  clearSelection: () => void;
+  bulkSetCategory: (ids: string[], c: Category) => void;
+  bulkSetSecurity: (ids: string[], sec: Unit["security"]) => void;
+  // P12 search
+  setSearch: (q: string) => void;
 }
 
-export const useStore = create<State>((set, get) => ({
-  building: loadBuilding(),
-  activeTool: "select",
-  selectedId: null,
-  selectedCameraId: null,
-  selectedIncidentId: null,
-  incidentKind: "trespass",
-  patrolDraft: null,
-  layers: loadLayers(),
-  ordinal: 0,
-  unit: "m",
-  showDims: false,
-  showGrid: false,
-  gridSize: 1,
-  linkKind: "Elevator",
-  pendingLink: null,
-  startId: "lobby",
-  goalId: "lab",
-  routeMode: "direct",
-  planWidth: 40,
-  importMsg: null,
-  draftCategory: "room",
-
-  setTool: (t) =>
-    set({
-      activeTool: t,
-      pendingLink: null,
-      selectedCameraId: null,
-      selectedIncidentId: null,
-      // Abandon any in-progress patrol draft on a tool switch (re-armed via the
-      // patrol panel's "Draw patrol" button = beginPatrol).
-      patrolDraft: null,
-    }),
-  setDraftCategory: (c) => set({ draftCategory: c }),
-  setOrdinal: (o) => set({ ordinal: o }),
-  setSelected: (id) => set({ selectedId: id, selectedCameraId: null, selectedIncidentId: null }),
-  setUnit: (u) => set({ unit: u }),
-  toggleDims: () => set((s) => ({ showDims: !s.showDims })),
-  toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
-  setGridSize: (n) => set({ gridSize: Math.min(20, Math.max(0.25, n || 1)) }),
-  setLinkKind: (k) => set({ linkKind: k }),
-  setStart: (id) => set({ startId: id }),
-  setGoal: (id) => set({ goalId: id }),
-  setRouteMode: (m) => set({ routeMode: m }),
-  setPlanWidth: (n) => set({ planWidth: Math.max(1, n || 1) }),
-
-  addRoom: (polygon, ord) =>
+export const useStore = create<State>((set, get) => {
+  // Single choke point for EVERY building-mutating action. Snapshots the current
+  // building into `past`, applies the recipe, and clears `future` (any fresh edit
+  // invalidates the redo stack). No-op guard: a recipe returning the same
+  // reference takes no snapshot. UI-state side effects stay OUT of here — each
+  // action does its own `set({...})` for those (see e.g. addCamera, deleteUnit).
+  const commit = (recipe: (b: Building) => Building) =>
     set((s) => {
+      const next = recipe(s.building);
+      if (next === s.building) return {};
+      const past = [...s.past, s.building].slice(-HISTORY_LIMIT);
+      return { building: next, past, future: [] };
+    });
+
+  return {
+    building: loadBuilding(),
+    past: [],
+    future: [],
+    activeTool: "select",
+    selectedId: null,
+    selectedIds: [],
+    selectedCameraId: null,
+    selectedIncidentId: null,
+    incidentKind: "trespass",
+    patrolDraft: null,
+    layers: loadLayers(),
+    ordinal: 0,
+    unit: "m",
+    showDims: false,
+    showGrid: false,
+    gridSize: 1,
+    linkKind: "Elevator",
+    pendingLink: null,
+    startId: "lobby",
+    goalId: "lab",
+    routeMode: "direct",
+    planWidth: 40,
+    importMsg: null,
+    draftCategory: "room",
+    searchQuery: "",
+
+    setTool: (t) =>
+      set({
+        activeTool: t,
+        pendingLink: null,
+        selectedCameraId: null,
+        selectedIncidentId: null,
+        // Abandon any in-progress patrol draft on a tool switch (re-armed via the
+        // patrol panel's "Draw patrol" button = beginPatrol).
+        patrolDraft: null,
+      }),
+    setDraftCategory: (c) => set({ draftCategory: c }),
+    setOrdinal: (o) => set({ ordinal: o }),
+    setSelected: (id) =>
+      set({
+        selectedId: id,
+        selectedIds: id ? [id] : [],
+        selectedCameraId: null,
+        selectedIncidentId: null,
+      }),
+    setUnit: (u) => set({ unit: u }),
+    toggleDims: () => set((s) => ({ showDims: !s.showDims })),
+    toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
+    setGridSize: (n) => set({ gridSize: Math.min(20, Math.max(0.25, n || 1)) }),
+    setLinkKind: (k) => set({ linkKind: k }),
+    setStart: (id) => set({ startId: id }),
+    setGoal: (id) => set({ goalId: id }),
+    setRouteMode: (m) => set({ routeMode: m }),
+    setPlanWidth: (n) => set({ planWidth: Math.max(1, n || 1) }),
+
+    addRoom: (polygon, ord) => {
       const id = `room-${Date.now()}-${roomSeq++}`;
-      const category = s.draftCategory;
-      const name = defaultNameFor(category, s.building);
-      const door = doorForRoom(s.building, polygon, ord);
-      return {
-        building: {
-          ...s.building,
-          units: [...s.building.units, { id, ordinal: ord, name, category, polygon }],
+      const category = get().draftCategory;
+      commit((b) => {
+        const name = defaultNameFor(category, b);
+        const door = doorForRoom(b, polygon, ord);
+        return {
+          ...b,
+          units: [...b.units, { id, ordinal: ord, name, category, polygon }],
           openings: door
-            ? [...s.building.openings, { id: `d-${id}`, unit: id, at: door }]
-            : s.building.openings,
-        },
-      };
-    }),
+            ? [...b.openings, { id: `d-${id}`, unit: id, at: door }]
+            : b.openings,
+        };
+      });
+    },
 
-  moveDoor: (doorId, at) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        openings: s.building.openings.map((o) => (o.id === doorId ? { ...o, at } : o)),
-      },
-    })),
+    moveDoor: (doorId, at) =>
+      commit((b) => ({
+        ...b,
+        openings: b.openings.map((o) => (o.id === doorId ? { ...o, at } : o)),
+      })),
 
-  setOpeningKind: (openingId, kind) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        openings: s.building.openings.map((o) => (o.id === openingId ? { ...o, kind } : o)),
-      },
-    })),
+    setOpeningKind: (openingId, kind) =>
+      commit((b) => ({
+        ...b,
+        openings: b.openings.map((o) => (o.id === openingId ? { ...o, kind } : o)),
+      })),
 
-  toggleOpeningKind: (openingId) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        openings: s.building.openings.map((o) =>
+    toggleOpeningKind: (openingId) =>
+      commit((b) => ({
+        ...b,
+        openings: b.openings.map((o) =>
           o.id === openingId
             ? { ...o, kind: o.kind === "entrance" ? "door" : "entrance" }
             : o,
         ),
-      },
-    })),
+      })),
 
-  renameUnit: (id, name) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        units: s.building.units.map((u) => (u.id === id ? { ...u, name } : u)),
-      },
-    })),
+    renameUnit: (id, name) =>
+      commit((b) => ({
+        ...b,
+        units: b.units.map((u) => (u.id === id ? { ...u, name } : u)),
+      })),
 
-  setCategory: (id, category) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        units: s.building.units.map((u) => (u.id === id ? { ...u, category } : u)),
-      },
-    })),
+    setCategory: (id, category) =>
+      commit((b) => ({
+        ...b,
+        units: b.units.map((u) => (u.id === id ? { ...u, category } : u)),
+      })),
 
-  setSecurity: (id, level) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        units: s.building.units.map((u) => (u.id === id ? { ...u, security: level } : u)),
-      },
-    })),
+    setSecurity: (id, level) =>
+      commit((b) => ({
+        ...b,
+        units: b.units.map((u) => (u.id === id ? { ...u, security: level } : u)),
+      })),
 
-  deleteUnit: (id) =>
-    set((s) => ({
-      selectedId: s.selectedId === id ? null : s.selectedId,
-      building: {
-        ...s.building,
-        units: s.building.units.filter((u) => u.id !== id),
-        openings: s.building.openings.filter((o) => o.unit !== id),
-        verticals: s.building.verticals.filter((v) => v.a !== id && v.b !== id),
-      },
-    })),
+    deleteUnit: (id) => {
+      commit((b) => ({
+        ...b,
+        units: b.units.filter((u) => u.id !== id),
+        openings: b.openings.filter((o) => o.unit !== id),
+        verticals: b.verticals.filter((v) => v.a !== id && v.b !== id),
+      }));
+      set((s) => ({
+        selectedId: s.selectedId === id ? null : s.selectedId,
+        selectedIds: s.selectedIds.filter((x) => x !== id),
+      }));
+    },
 
-  moveVertex: (id, index, at) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        units: s.building.units.map((u) =>
+    moveVertex: (id, index, at) =>
+      commit((b) => ({
+        ...b,
+        units: b.units.map((u) =>
           u.id === id ? { ...u, polygon: u.polygon.map((p, i) => (i === index ? at : p)) } : u,
         ),
-      },
-    })),
+      })),
 
-  insertVertex: (id, edgeIndex) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        units: s.building.units.map((u) => {
+    insertVertex: (id, edgeIndex) =>
+      commit((b) => ({
+        ...b,
+        units: b.units.map((u) => {
           if (u.id !== id) return u;
           const a = u.polygon[edgeIndex];
-          const b = u.polygon[(edgeIndex + 1) % u.polygon.length];
-          const mid: MetreXY = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+          const bb = u.polygon[(edgeIndex + 1) % u.polygon.length];
+          const mid: MetreXY = [(a[0] + bb[0]) / 2, (a[1] + bb[1]) / 2];
           const polygon = [...u.polygon];
           polygon.splice(edgeIndex + 1, 0, mid);
           return { ...u, polygon };
         }),
-      },
-    })),
+      })),
 
-  deleteVertex: (id, index) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        units: s.building.units.map((u) =>
+    deleteVertex: (id, index) =>
+      commit((b) => ({
+        ...b,
+        units: b.units.map((u) =>
           u.id === id && u.polygon.length > 3
             ? { ...u, polygon: u.polygon.filter((_, i) => i !== index) }
             : u,
         ),
-      },
-    })),
+      })),
 
-  linkUnit: (id) => {
-    const s = get();
-    const u = s.building.units.find((x) => x.id === id);
-    if (!u) return;
-    set({ selectedId: id });
-    if (!s.pendingLink) {
-      set({ pendingLink: { id, ordinal: u.ordinal } });
-      return;
-    }
-    if (s.pendingLink.id === id || s.pendingLink.ordinal === u.ordinal) {
-      set({ pendingLink: { id, ordinal: u.ordinal } });
-      return;
-    }
-    const a = s.pendingLink.id;
-    const b = id;
-    const cat: Category = s.linkKind === "Stairs" ? "stairs" : "elevator";
-    set((st) => {
-      const exists = st.building.verticals.some(
+    linkUnit: (id) => {
+      const s = get();
+      const u = s.building.units.find((x) => x.id === id);
+      if (!u) return;
+      set({ selectedId: id, selectedIds: [id] });
+      if (!s.pendingLink) {
+        set({ pendingLink: { id, ordinal: u.ordinal } });
+        return;
+      }
+      if (s.pendingLink.id === id || s.pendingLink.ordinal === u.ordinal) {
+        set({ pendingLink: { id, ordinal: u.ordinal } });
+        return;
+      }
+      const a = s.pendingLink.id;
+      const b = id;
+      const cat: Category = s.linkKind === "Stairs" ? "stairs" : "elevator";
+      const linkKind = s.linkKind;
+      const exists = s.building.verticals.some(
         (v) => (v.a === a && v.b === b) || (v.a === b && v.b === a),
       );
-      if (exists) return { pendingLink: null };
-      return {
-        pendingLink: null,
-        building: {
-          ...st.building,
-          units: st.building.units.map((x) =>
-            x.id === a || x.id === b ? { ...x, category: cat } : x,
-          ),
-          verticals: [...st.building.verticals, { a, b, name: st.linkKind }],
-        },
-      };
-    });
-  },
+      set({ pendingLink: null });
+      // Only commit an undo entry when we actually ADD a vertical; the
+      // pending-link-only branches above stay plain `set` (picking the first unit
+      // is not an undoable edit).
+      if (exists) return;
+      commit((bl) => ({
+        ...bl,
+        units: bl.units.map((x) =>
+          x.id === a || x.id === b ? { ...x, category: cat } : x,
+        ),
+        verticals: [...bl.verticals, { a, b, name: linkKind }],
+      }));
+    },
 
-  deleteVertical: (a, b) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        verticals: s.building.verticals.filter((v) => !(v.a === a && v.b === b)),
-      },
-    })),
+    deleteVertical: (a, b) =>
+      commit((bl) => ({
+        ...bl,
+        verticals: bl.verticals.filter((v) => !(v.a === a && v.b === b)),
+      })),
 
-  addCamera: (at, ord) =>
-    set((s) => {
+    addCamera: (at, ord) => {
+      const s = get();
       const id = `cam-${Date.now()}-${camSeq++}`;
       const n = s.building.cameras.filter((c) => c.ordinal === ord).length + 1;
       const cam: Camera = { id, ordinal: ord, at, name: `Camera ${n}`, ...CAM_DEFAULTS };
-      return {
-        selectedCameraId: id,
-        building: { ...s.building, cameras: [...s.building.cameras, cam] },
-      };
-    }),
+      commit((b) => ({ ...b, cameras: [...b.cameras, cam] }));
+      set({ selectedCameraId: id });
+    },
 
-  moveCamera: (id, at) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        cameras: s.building.cameras.map((c) => (c.id === id ? { ...c, at } : c)),
-      },
-    })),
+    moveCamera: (id, at) =>
+      commit((b) => ({
+        ...b,
+        cameras: b.cameras.map((c) => (c.id === id ? { ...c, at } : c)),
+      })),
 
-  rotateCamera: (id, heading) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        cameras: s.building.cameras.map((c) =>
+    rotateCamera: (id, heading) =>
+      commit((b) => ({
+        ...b,
+        cameras: b.cameras.map((c) =>
           c.id === id ? { ...c, heading: ((heading % 360) + 360) % 360 } : c,
         ),
-      },
-    })),
+      })),
 
-  updateCamera: (id, patch) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        cameras: s.building.cameras.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-      },
-    })),
+    updateCamera: (id, patch) =>
+      commit((b) => ({
+        ...b,
+        cameras: b.cameras.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      })),
 
-  deleteCamera: (id) =>
-    set((s) => ({
-      selectedCameraId: s.selectedCameraId === id ? null : s.selectedCameraId,
-      building: { ...s.building, cameras: s.building.cameras.filter((c) => c.id !== id) },
-    })),
+    deleteCamera: (id) => {
+      commit((b) => ({ ...b, cameras: b.cameras.filter((c) => c.id !== id) }));
+      set((s) => (s.selectedCameraId === id ? { selectedCameraId: null } : {}));
+    },
 
-  setSelectedCamera: (id) =>
-    set(
-      id
-        ? { selectedCameraId: id, selectedId: null, selectedIncidentId: null }
-        : { selectedCameraId: null },
-    ),
+    setSelectedCamera: (id) =>
+      set(
+        id
+          ? { selectedCameraId: id, selectedId: null, selectedIds: [], selectedIncidentId: null }
+          : { selectedCameraId: null },
+      ),
 
-  // ---- P10 incidents ----
-  addIncident: (at, ordinal) =>
-    set((s) => {
+    // ---- P10 incidents ----
+    addIncident: (at, ordinal) => {
       const id = `inc-${Date.now()}-${incSeq++}`;
-      const incident: Incident = { id, ordinal, at, kind: s.incidentKind, note: "" };
-      return {
-        selectedIncidentId: id,
-        selectedId: null,
-        selectedCameraId: null,
-        building: { ...s.building, incidents: [...(s.building.incidents ?? []), incident] },
-      };
-    }),
+      const kind = get().incidentKind;
+      const incident: Incident = { id, ordinal, at, kind, note: "" };
+      commit((b) => ({ ...b, incidents: [...(b.incidents ?? []), incident] }));
+      set({ selectedIncidentId: id, selectedId: null, selectedIds: [], selectedCameraId: null });
+    },
 
-  moveIncident: (id, at) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        incidents: (s.building.incidents ?? []).map((i) => (i.id === id ? { ...i, at } : i)),
-      },
-    })),
+    moveIncident: (id, at) =>
+      commit((b) => ({
+        ...b,
+        incidents: (b.incidents ?? []).map((i) => (i.id === id ? { ...i, at } : i)),
+      })),
 
-  updateIncident: (id, patch) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        incidents: (s.building.incidents ?? []).map((i) =>
+    updateIncident: (id, patch) =>
+      commit((b) => ({
+        ...b,
+        incidents: (b.incidents ?? []).map((i) =>
           i.id === id ? { ...i, ...patch } : i,
         ),
-      },
-    })),
+      })),
 
-  deleteIncident: (id) =>
-    set((s) => ({
-      selectedIncidentId: s.selectedIncidentId === id ? null : s.selectedIncidentId,
-      building: {
-        ...s.building,
-        incidents: (s.building.incidents ?? []).filter((i) => i.id !== id),
-      },
-    })),
+    deleteIncident: (id) => {
+      commit((b) => ({
+        ...b,
+        incidents: (b.incidents ?? []).filter((i) => i.id !== id),
+      }));
+      set((s) => (s.selectedIncidentId === id ? { selectedIncidentId: null } : {}));
+    },
 
-  setIncidentKind: (k) => set({ incidentKind: k }),
-  setSelectedIncident: (id) =>
-    set(
-      id
-        ? { selectedIncidentId: id, selectedId: null, selectedCameraId: null }
-        : { selectedIncidentId: null },
-    ),
+    setIncidentKind: (k) => set({ incidentKind: k }),
+    setSelectedIncident: (id) =>
+      set(
+        id
+          ? { selectedIncidentId: id, selectedId: null, selectedIds: [], selectedCameraId: null }
+          : { selectedIncidentId: null },
+      ),
 
-  // ---- P10 patrols ----
-  beginPatrol: () => set({ patrolDraft: [] }),
-  addPatrolPoint: (p) =>
-    set((s) => ({ patrolDraft: [...(s.patrolDraft ?? []), p] })),
+    // ---- P10 patrols ----
+    beginPatrol: () => set({ patrolDraft: [] }),
+    addPatrolPoint: (p) =>
+      set((s) => ({ patrolDraft: [...(s.patrolDraft ?? []), p] })),
 
-  commitPatrol: () =>
-    set((s) => {
+    commitPatrol: () => {
+      const s = get();
       const draft = s.patrolDraft;
-      if (!draft || draft.length < 2) return { patrolDraft: null };
+      if (!draft || draft.length < 2) {
+        set({ patrolDraft: null });
+        return;
+      }
       const id = `patrol-${Date.now()}-${patSeq++}`;
       const n = (s.building.patrols ?? []).length + 1;
       const patrol: PatrolPath = { id, ordinal: s.ordinal, name: `Patrol ${n}`, points: draft };
-      return {
-        patrolDraft: null,
-        building: { ...s.building, patrols: [...(s.building.patrols ?? []), patrol] },
-      };
-    }),
+      commit((b) => ({ ...b, patrols: [...(b.patrols ?? []), patrol] }));
+      set({ patrolDraft: null });
+    },
 
-  cancelPatrol: () => set({ patrolDraft: null }),
+    cancelPatrol: () => set({ patrolDraft: null }),
 
-  autoPatrol: (ordinal) =>
-    set((s) => {
+    autoPatrol: (ordinal) => {
       // Greedy nearest-neighbour tour over the floor's room centroids. Straight
       // segments — can cut through walls (accepted v1; A*-through-corridors is a
       // noted enhancement).
+      const s = get();
       const rooms = s.building.units.filter((u) => u.ordinal === ordinal && isSpace(u.category));
-      if (rooms.length < 2) return {};
+      if (rooms.length < 2) return;
       const centroids = rooms.map((u) => polygonCentroid(u.polygon));
       const used = new Array(centroids.length).fill(false);
       const order: MetreXY[] = [];
@@ -543,214 +556,288 @@ export const useStore = create<State>((set, get) => ({
       const id = `patrol-${Date.now()}-${patSeq++}`;
       const n = (s.building.patrols ?? []).length + 1;
       const patrol: PatrolPath = { id, ordinal, name: `Auto patrol ${n}`, points: order };
-      return {
-        patrolDraft: null,
-        building: { ...s.building, patrols: [...(s.building.patrols ?? []), patrol] },
-      };
-    }),
+      commit((b) => ({ ...b, patrols: [...(b.patrols ?? []), patrol] }));
+      set({ patrolDraft: null });
+    },
 
-  renamePatrol: (id, name) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        patrols: (s.building.patrols ?? []).map((p) => (p.id === id ? { ...p, name } : p)),
-      },
-    })),
+    renamePatrol: (id, name) =>
+      commit((b) => ({
+        ...b,
+        patrols: (b.patrols ?? []).map((p) => (p.id === id ? { ...p, name } : p)),
+      })),
 
-  deletePatrol: (id) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        patrols: (s.building.patrols ?? []).filter((p) => p.id !== id),
-      },
-    })),
+    deletePatrol: (id) =>
+      commit((b) => ({
+        ...b,
+        patrols: (b.patrols ?? []).filter((p) => p.id !== id),
+      })),
 
-  // ---- P11 exports ----
-  exportIMDFArchive: () => {
-    const b = get().building;
-    const blob = zipStore(buildingToIMDFArchive(b));
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "building-imdf.zip";
-    a.click();
-    URL.revokeObjectURL(url);
-    set({ importMsg: "Exported IMDF archive (building-imdf.zip)." });
-  },
+    // ---- P11 exports ----
+    exportIMDFArchive: () => {
+      const b = get().building;
+      const blob = zipStore(buildingToIMDFArchive(b));
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "building-imdf.zip";
+      a.click();
+      URL.revokeObjectURL(url);
+      set({ importMsg: "Exported IMDF archive (building-imdf.zip)." });
+    },
 
-  exportSecurityReport: () => {
-    const b = get().building;
-    const md = buildSecurityReport(b);
-    const url = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "security-report.md";
-    a.click();
-    URL.revokeObjectURL(url);
-    set({ importMsg: "Exported security report (security-report.md)." });
-  },
+    exportSecurityReport: () => {
+      const b = get().building;
+      const md = buildSecurityReport(b);
+      const url = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "security-report.md";
+      a.click();
+      URL.revokeObjectURL(url);
+      set({ importMsg: "Exported security report (security-report.md)." });
+    },
 
-  setLayer: (key, on) => set((s) => ({ layers: { ...s.layers, [key]: on } })),
-  toggleLayer: (key) => set((s) => ({ layers: { ...s.layers, [key]: !s.layers[key] } })),
+    setLayer: (key, on) => set((s) => ({ layers: { ...s.layers, [key]: on } })),
+    toggleLayer: (key) => set((s) => ({ layers: { ...s.layers, [key]: !s.layers[key] } })),
 
-  importSvgText: (text) => {
-    const shapes = parseSvgShapes(text);
-    if (shapes.length === 0) {
-      set({ importMsg: "No rect/polygon/path shapes found in that SVG." });
-      return;
-    }
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const sh of shapes)
-      for (const [sx, sy] of sh.points) {
-        minX = Math.min(minX, sx); minY = Math.min(minY, sy);
-        maxX = Math.max(maxX, sx); maxY = Math.max(maxY, sy);
+    importSvgText: (text) => {
+      const shapes = parseSvgShapes(text);
+      if (shapes.length === 0) {
+        set({ importMsg: "No rect/polygon/path shapes found in that SVG." });
+        return;
       }
-    const s = get();
-    const scale = s.planWidth / (maxX - minX || 1);
-    const toMetre = ([sx, sy]: [number, number]): MetreXY => [
-      (sx - minX) * scale,
-      (maxY - sy) * scale,
-    ];
-    set((st) => {
-      const stamp = Date.now();
-      const newUnits = shapes.map((sh, i) => ({
-        id: `imp-${stamp}-${i}`,
-        ordinal: st.ordinal,
-        name: sh.name || `Imported ${i + 1}`,
-        category: "room" as const,
-        polygon: sh.points.map(toMetre),
-      }));
-      const openings = [...st.building.openings];
-      const hasCorridor = st.building.units.some(
-        (u) => u.category === "corridor" && u.ordinal === st.ordinal,
-      );
-      if (hasCorridor)
-        for (const u of newUnits) {
-          const d = doorForRoom(st.building, u.polygon, st.ordinal);
-          if (d) openings.push({ id: `d-${u.id}`, unit: u.id, at: d });
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const sh of shapes)
+        for (const [sx, sy] of sh.points) {
+          minX = Math.min(minX, sx); minY = Math.min(minY, sy);
+          maxX = Math.max(maxX, sx); maxY = Math.max(maxY, sy);
         }
-      return {
-        building: { ...st.building, units: [...st.building.units, ...newUnits], openings },
+      const st0 = get();
+      const ord = st0.ordinal;
+      const scale = st0.planWidth / (maxX - minX || 1);
+      const toMetre = ([sx, sy]: [number, number]): MetreXY => [
+        (sx - minX) * scale,
+        (maxY - sy) * scale,
+      ];
+      const stamp = Date.now();
+      commit((b) => {
+        const newUnits = shapes.map((sh, i) => ({
+          id: `imp-${stamp}-${i}`,
+          ordinal: ord,
+          name: sh.name || `Imported ${i + 1}`,
+          category: "room" as const,
+          polygon: sh.points.map(toMetre),
+        }));
+        const openings = [...b.openings];
+        const hasCorridor = b.units.some(
+          (u) => u.category === "corridor" && u.ordinal === ord,
+        );
+        if (hasCorridor)
+          for (const u of newUnits) {
+            const d = doorForRoom(b, u.polygon, ord);
+            if (d) openings.push({ id: `d-${u.id}`, unit: u.id, at: d });
+          }
+        return { ...b, units: [...b.units, ...newUnits], openings };
+      });
+      set({
         importMsg: `Imported ${shapes.length} shape${shapes.length === 1 ? "" : "s"}.`,
-      };
-    });
-  },
+      });
+    },
 
-  importRasterFile: async (file) => {
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(r.result as string);
-      r.onerror = () => reject(r.error);
-      r.readAsDataURL(file);
-    });
-    const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-      img.onerror = () => reject(new Error("bad image"));
-      img.src = dataUrl;
-    });
-    set((s) => {
-      const ord = s.ordinal;
+    importRasterFile: async (file) => {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result as string);
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(file);
+      });
+      const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+        img.onerror = () => reject(new Error("bad image"));
+        img.src = dataUrl;
+      });
+      const { ordinal: ord, planWidth } = get();
       const underlay: RasterUnderlay = {
         ordinal: ord,
         dataUrl,
         naturalW: dims.w,
         naturalH: dims.h,
-        widthM: s.planWidth,
+        widthM: planWidth,
         offset: [0, 0],
         rotation: 0,
         opacity: 0.5,
       };
-      const rest = (s.building.underlays ?? []).filter((u) => u.ordinal !== ord);
-      return {
-        building: { ...s.building, underlays: [...rest, underlay] },
-        importMsg: `Imported floorplan image (${dims.w}×${dims.h}px).`,
-      };
-    });
-  },
+      commit((b) => {
+        const rest = (b.underlays ?? []).filter((u) => u.ordinal !== ord);
+        return { ...b, underlays: [...rest, underlay] };
+      });
+      set({ importMsg: `Imported floorplan image (${dims.w}×${dims.h}px).` });
+    },
 
-  setUnderlayOpacity: (ordinal, v) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        underlays: (s.building.underlays ?? []).map((u) =>
+    setUnderlayOpacity: (ordinal, v) =>
+      commit((b) => ({
+        ...b,
+        underlays: (b.underlays ?? []).map((u) =>
           u.ordinal === ordinal ? { ...u, opacity: Math.min(1, Math.max(0, v)) } : u,
         ),
-      },
-    })),
+      })),
 
-  nudgeUnderlay: (ordinal, d) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        underlays: (s.building.underlays ?? []).map((u) =>
+    nudgeUnderlay: (ordinal, d) =>
+      commit((b) => ({
+        ...b,
+        underlays: (b.underlays ?? []).map((u) =>
           u.ordinal === ordinal
             ? { ...u, offset: [u.offset[0] + d[0], u.offset[1] + d[1]] as MetreXY }
             : u,
         ),
-      },
-    })),
+      })),
 
-  setUnderlayWidth: (ordinal, widthM) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        underlays: (s.building.underlays ?? []).map((u) =>
+    setUnderlayWidth: (ordinal, widthM) =>
+      commit((b) => ({
+        ...b,
+        underlays: (b.underlays ?? []).map((u) =>
           u.ordinal === ordinal ? { ...u, widthM: Math.max(1, widthM || 1) } : u,
         ),
-      },
-    })),
+      })),
 
-  removeUnderlay: (ordinal) =>
-    set((s) => ({
-      building: {
-        ...s.building,
-        underlays: (s.building.underlays ?? []).filter((u) => u.ordinal !== ordinal),
-      },
-    })),
+    removeUnderlay: (ordinal) =>
+      commit((b) => ({
+        ...b,
+        underlays: (b.underlays ?? []).filter((u) => u.ordinal !== ordinal),
+      })),
 
-  exportGeoJSON: () => {
-    const b = get().building;
-    const text = JSON.stringify(buildingToGeoJSON(b), null, 2);
-    const url = URL.createObjectURL(new Blob([text], { type: "application/geo+json" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "building.geojson";
-    a.click();
-    URL.revokeObjectURL(url);
-    set({ importMsg: `Exported ${b.units.length} units as GeoJSON.` });
-  },
+    exportGeoJSON: () => {
+      const b = get().building;
+      const text = JSON.stringify(buildingToGeoJSON(b), null, 2);
+      const url = URL.createObjectURL(new Blob([text], { type: "application/geo+json" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "building.geojson";
+      a.click();
+      URL.revokeObjectURL(url);
+      set({ importMsg: `Exported ${b.units.length} units as GeoJSON.` });
+    },
 
-  loadGeoJSONText: (text) => {
-    const loaded = geoJSONToBuilding(text);
-    if (!loaded) {
-      set({ importMsg: "Not an indoorMaps GeoJSON export (missing metadata)." });
-      return;
-    }
-    set({
-      building: loaded,
-      selectedId: null,
-      selectedCameraId: null,
-      selectedIncidentId: null,
-      patrolDraft: null,
-      importMsg: `Loaded ${loaded.units.length} units.`,
-    });
-  },
+    loadGeoJSONText: (text) => {
+      const loaded = geoJSONToBuilding(text);
+      if (!loaded) {
+        set({ importMsg: "Not an indoorMaps GeoJSON export (missing metadata)." });
+        return;
+      }
+      commit(() => loaded);
+      set({
+        selectedId: null,
+        selectedIds: [],
+        selectedCameraId: null,
+        selectedIncidentId: null,
+        patrolDraft: null,
+        importMsg: `Loaded ${loaded.units.length} units.`,
+      });
+    },
 
-  resetBuilding: () =>
-    set({
-      building: initialBuilding,
-      startId: "lobby",
-      goalId: "lab",
-      selectedId: null,
-      selectedCameraId: null,
-      selectedIncidentId: null,
-      patrolDraft: null,
-      importMsg: null,
-    }),
-}));
+    resetBuilding: () => {
+      commit(() => initialBuilding);
+      set({
+        startId: "lobby",
+        goalId: "lab",
+        selectedId: null,
+        selectedIds: [],
+        selectedCameraId: null,
+        selectedIncidentId: null,
+        patrolDraft: null,
+        importMsg: null,
+      });
+    },
+
+    // ---- P12 undo/redo ----
+    // Move a snapshot between past/future and swap it in as `building`. Both
+    // clear ALL selections: reverted geometry may drop ids the current selection
+    // references (a deleted-then-undone unit, a redone delete, etc.).
+    undo: () =>
+      set((s) => {
+        if (s.past.length === 0) return {};
+        const prev = s.past[s.past.length - 1];
+        return {
+          building: prev,
+          past: s.past.slice(0, -1),
+          future: [s.building, ...s.future].slice(0, HISTORY_LIMIT),
+          selectedId: null,
+          selectedIds: [],
+          selectedCameraId: null,
+          selectedIncidentId: null,
+        };
+      }),
+
+    redo: () =>
+      set((s) => {
+        if (s.future.length === 0) return {};
+        const next = s.future[0];
+        return {
+          building: next,
+          past: [...s.past, s.building].slice(-HISTORY_LIMIT),
+          future: s.future.slice(1),
+          selectedId: null,
+          selectedIds: [],
+          selectedCameraId: null,
+          selectedIncidentId: null,
+        };
+      }),
+
+    // ---- P12 multi-select + bulk ----
+    // Shift-click toggle: add/remove `id` from the multi-selection. Keeps
+    // `selectedId` as the "primary" (last-toggled-on, or the remaining one).
+    toggleSelected: (id) =>
+      set((s) => {
+        const has = s.selectedIds.includes(id);
+        const selectedIds = has
+          ? s.selectedIds.filter((x) => x !== id)
+          : [...s.selectedIds, id];
+        return {
+          selectedIds,
+          selectedId: has
+            ? (s.selectedId === id ? (selectedIds[selectedIds.length - 1] ?? null) : s.selectedId)
+            : id,
+          selectedCameraId: null,
+          selectedIncidentId: null,
+        };
+      }),
+
+    selectMany: (ids) =>
+      set({
+        selectedIds: ids,
+        selectedId: ids[ids.length - 1] ?? null,
+        selectedCameraId: null,
+        selectedIncidentId: null,
+      }),
+
+    clearSelection: () => set({ selectedId: null, selectedIds: [] }),
+
+    bulkSetCategory: (ids, c) => {
+      const idSet = new Set(ids);
+      commit((b) => ({
+        ...b,
+        units: b.units.map((u) => (idSet.has(u.id) ? { ...u, category: c } : u)),
+      }));
+    },
+
+    bulkSetSecurity: (ids, sec) => {
+      const idSet = new Set(ids);
+      commit((b) => ({
+        ...b,
+        units: b.units.map((u) => (idSet.has(u.id) ? { ...u, security: sec } : u)),
+      }));
+    },
+
+    // ---- P12 search ----
+    setSearch: (q) => set({ searchQuery: q }),
+  };
+});
 
 // Persist building to localStorage on change (validated shape, v3 key).
+//
+// Only `s.building` is persisted — `past`/`future` are session-only history and
+// never written (keeps localStorage small; undo does not survive reload).
 //
 // Guard: a large base64 underlay `dataUrl` can exceed the localStorage quota.
 // Because the whole `building` persists as one blob, an oversized image would
