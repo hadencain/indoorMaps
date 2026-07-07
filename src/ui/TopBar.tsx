@@ -11,6 +11,8 @@ export default function TopBar() {
   const importSvgText = useStore((s) => s.importSvgText);
   const importRasterFile = useStore((s) => s.importRasterFile);
   const exportGeoJSON = useStore((s) => s.exportGeoJSON);
+  const exportIMDFArchive = useStore((s) => s.exportIMDFArchive);
+  const exportSecurityReport = useStore((s) => s.exportSecurityReport);
   const loadGeoJSONText = useStore((s) => s.loadGeoJSONText);
   const resetBuilding = useStore((s) => s.resetBuilding);
   const importMsg = useStore((s) => s.importMsg);
@@ -75,6 +77,12 @@ export default function TopBar() {
             </label>
             <button className="dm-item" onClick={exportGeoJSON}>
               Export GeoJSON
+            </button>
+            <button className="dm-item" onClick={exportIMDFArchive}>
+              Export IMDF archive…
+            </button>
+            <button className="dm-item" onClick={exportSecurityReport}>
+              Export security report…
             </button>
             <label className="dm-item">
               Load GeoJSON…
