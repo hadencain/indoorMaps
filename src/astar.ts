@@ -64,3 +64,21 @@ export function findRoute(
 
   return null;
 }
+
+/**
+ * Route from `startId` to whichever of `goalIds` is cheapest. Reuses `findRoute`;
+ * the graph is tiny (tens of nodes) so a linear loop is correct and minimal.
+ * Returns the winning route tagged with its `goalId`, or null if none reachable.
+ */
+export function findNearestRoute(
+  graph: Graph,
+  startId: string,
+  goalIds: string[],
+): (RouteResult & { goalId: string }) | null {
+  let best: (RouteResult & { goalId: string }) | null = null;
+  for (const g of goalIds) {
+    const r = findRoute(graph, startId, g);
+    if (r && (!best || r.cost < best.cost)) best = { ...r, goalId: g };
+  }
+  return best;
+}

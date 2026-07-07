@@ -2,7 +2,7 @@ import { useStore } from "../store";
 import { useRoute } from "./route";
 
 const HINTS: Record<string, string> = {
-  select: "Click a unit to select · drag door dots · right-click for properties",
+  select: "Click a unit to select · drag door dots · right-click a door to make it an entrance",
   rect: "Drag a rectangle to add a room",
   polygon: "Click to add vertices · Enter/first-point to close · Esc to cancel",
   vertex: "Drag handles · + to insert · right-click a handle to delete",
@@ -17,20 +17,27 @@ export default function StatusBar() {
   const gridSize = useStore((s) => s.gridSize);
   const startId = useStore((s) => s.startId);
   const goalId = useStore((s) => s.goalId);
-  const { geom } = useRoute();
+  const routeMode = useStore((s) => s.routeMode);
+  const { geom, exit } = useRoute();
   const name = (id: string) => building.units.find((u) => u.id === id)?.name ?? id;
+  const floors = geom ? `${geom.floors.length} floor${geom.floors.length === 1 ? "" : "s"}` : "";
 
   return (
     <footer className="statusbar mono">
       <span className="st-tool">{activeTool}</span>
       <span className="st-sep">·</span>
       {geom ? (
-        <span>
-          {name(startId)} → {name(goalId)} · {geom.metres.toFixed(0)} m · {geom.floors.length} floor
-          {geom.floors.length === 1 ? "" : "s"}
-        </span>
+        routeMode === "egress" ? (
+          <span>
+            Egress · {name(startId)} → {exit?.name ?? "Exit"} · {geom.metres.toFixed(0)} m · {floors}
+          </span>
+        ) : (
+          <span>
+            {name(startId)} → {name(goalId)} · {geom.metres.toFixed(0)} m · {floors}
+          </span>
+        )
       ) : (
-        <span className="warn">no route</span>
+        <span className="warn">{routeMode === "egress" ? "no exit reachable" : "no route"}</span>
       )}
       <span className="st-hint">{HINTS[activeTool]}</span>
       <span className="st-grid">{showGrid ? `grid ${gridSize} m` : "grid off"}</span>

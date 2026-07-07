@@ -448,6 +448,27 @@ button.wide.ghost {
   border-color: var(--accent);
 }
 
+/* Direct / Egress route-mode toggle (RoutePanel) */
+.modetoggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.modetoggle button {
+  flex: 1;
+  height: 28px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.modetoggle button.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* Status bar */
 .statusbar {
   grid-area: statusbar;

@@ -43,6 +43,7 @@ interface State {
   pendingLink: { id: string; ordinal: number } | null;
   startId: string;
   goalId: string;
+  routeMode: "direct" | "egress";
   planWidth: number;
   importMsg: string | null;
   draftCategory: Category;
@@ -58,6 +59,7 @@ interface State {
   setLinkKind: (k: string) => void;
   setStart: (id: string) => void;
   setGoal: (id: string) => void;
+  setRouteMode: (m: "direct" | "egress") => void;
   setPlanWidth: (n: number) => void;
 
   addRoom: (polygon: MetreXY[], ordinal: number) => void;
@@ -92,6 +94,7 @@ export const useStore = create<State>((set, get) => ({
   pendingLink: null,
   startId: "lobby",
   goalId: "lab",
+  routeMode: "direct",
   planWidth: 40,
   importMsg: null,
   draftCategory: "room",
@@ -107,6 +110,7 @@ export const useStore = create<State>((set, get) => ({
   setLinkKind: (k) => set({ linkKind: k }),
   setStart: (id) => set({ startId: id }),
   setGoal: (id) => set({ goalId: id }),
+  setRouteMode: (m) => set({ routeMode: m }),
   setPlanWidth: (n) => set({ planWidth: Math.max(1, n || 1) }),
 
   addRoom: (polygon, ord) =>
