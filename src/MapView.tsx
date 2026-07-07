@@ -74,6 +74,7 @@ export default function MapView() {
     drawTool,
     onAddRoom,
     onSelect,
+    selectedId,
     unit,
     showDims,
     showGrid,
@@ -91,6 +92,7 @@ export default function MapView() {
     drawTool,
     onAddRoom,
     onSelect,
+    selectedId,
     unit,
     showDims,
     showGrid,
@@ -621,7 +623,9 @@ export default function MapView() {
           if (id) live.current.onSelect(id);
           return;
         }
-        live.current.onSelect(id ?? null);
+        // Plain select: clicking the currently-selected unit toggles it off.
+        const cur = live.current.selectedId;
+        live.current.onSelect(id && id === cur ? null : (id ?? null));
         return;
       }
       if (tool !== "polygon") return;
