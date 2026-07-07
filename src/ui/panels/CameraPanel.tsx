@@ -1,4 +1,7 @@
 import { useStore } from "../../store";
+import { useVisibility } from "../visibility";
+import { polygonArea } from "../../geo";
+import { formatArea } from "../../format";
 import type { CameraKind } from "../../types";
 
 const M_TO_FT = 3.280839895;
@@ -20,6 +23,7 @@ export default function CameraPanel() {
   const rotateCamera = useStore((s) => s.rotateCamera);
   const deleteCamera = useStore((s) => s.deleteCamera);
   const toggleCoverage = useStore((s) => s.toggleCoverage);
+  const visPolys = useVisibility();
 
   const level = building.levels.find((l) => l.ordinal === ordinal)?.name ?? `L${ordinal}`;
   const floorCams = building.cameras.filter((c) => c.ordinal === ordinal);
@@ -33,10 +37,6 @@ export default function CameraPanel() {
         <p className="hint">Click the canvas to place a camera on {level}.</p>
 
         <div className="readout" style={{ marginTop: 12 }}>
-          <p className="warn" style={{ margin: "0 0 8px", lineHeight: 1.4 }}>
-            Line-of-sight not modeled — cones pass through walls (occlusion +
-            coverage coming).
-          </p>
           <button
             className={`wide ${showCoverage ? "active" : ""}`}
             onClick={toggleCoverage}
@@ -72,6 +72,9 @@ export default function CameraPanel() {
   const isDome = selected.kind === "dome";
   const rangeDisplay =
     unit === "ft" ? +(selected.rangeM * M_TO_FT).toFixed(1) : selected.rangeM;
+  // Honest coverage: area of this camera's occlusion-clipped sightline polygon.
+  const visRing = visPolys.find((v) => v.cameraId === selected.id)?.ring;
+  const coversArea = visRing ? polygonArea(visRing) : 0;
 
   return (
     <div className="panel">
@@ -134,6 +137,10 @@ export default function CameraPanel() {
           updateCamera(selected.id, { rangeM: unit === "ft" ? v / M_TO_FT : v });
         }}
       />
+
+      <div className="readout mono" style={{ marginTop: 12 }}>
+        covers {formatArea(coversArea, unit)}
+      </div>
 
       <button
         className="wide danger"

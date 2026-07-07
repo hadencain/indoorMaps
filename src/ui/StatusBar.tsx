@@ -8,7 +8,7 @@ const HINTS: Record<string, string> = {
   vertex: "Drag handles · + to insert · right-click a handle to delete",
   link: "Click a unit, switch floor, click its counterpart",
   route: "Pick From and To in the inspector",
-  camera: "Click to place a camera · drag to move · drag the handle to aim · cones ignore walls",
+  camera: "Click to place a camera · drag to move · drag the handle to aim · sightlines clip to walls",
 };
 
 export default function StatusBar() {

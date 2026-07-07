@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import type { Building, MetreXY, Category, LngLat, RasterUnderlay } from "./types";
+import type { MetreXY, Category, LngLat, RasterUnderlay } from "./types";
 import type { FC } from "./render";
 import { unitsToGeoJSON } from "./render";
 import {
@@ -14,12 +14,13 @@ import {
   nearestPointOnPolygon,
 } from "./geo";
 import { rectFromDrag } from "./building";
-import { sectorRing } from "./coverage";
+import type { VisibilityPolygon } from "./coverage";
 import { gridToGeoJSON } from "./render";
 import { formatLength, formatArea } from "./format";
 import { CATEGORY_ORDER, CATEGORY_LABELS, categoryFillExpression } from "./categories";
 import { useStore } from "./store";
 import { useRoute } from "./ui/route";
+import { useVisibility } from "./ui/visibility";
 
 const EMPTY: FC = { type: "FeatureCollection", features: [] };
 /** 1×1 transparent pixel — placeholder image for the underlay source until a real one loads. */
@@ -42,6 +43,11 @@ export default function MapView() {
   const showGrid = useStore((s) => s.showGrid);
   const gridSize = useStore((s) => s.gridSize);
   const { geom } = useRoute();
+  // Occlusion-clipped visibility polygons for the active floor's cameras (P5).
+  // Recomputed off the render path by the hook's memo (per-camera cache) — a
+  // camera drag/param change recomputes only that camera; a wall move recomputes
+  // every camera on the floor; everything else reuses the cache.
+  const visPolys = useVisibility();
 
   // Legacy internal interaction modes, derived from the single active tool.
   const drawTool: DrawTool =
@@ -163,7 +169,8 @@ export default function MapView() {
       });
       map.addSource("grid", { type: "geojson", data: EMPTY });
       map.addSource("units", { type: "geojson", data: unitsToGeoJSON(building) });
-      map.addSource("camera-fov", { type: "geojson", data: camerasFovFC(building) });
+      // Camera FOV: populated by the visibility effect from useVisibility() output.
+      map.addSource("camera-fov", { type: "geojson", data: EMPTY });
       map.addSource("route", { type: "geojson", data: EMPTY });
       map.addSource("draft", { type: "geojson", data: EMPTY });
 
@@ -299,10 +306,18 @@ export default function MapView() {
     (map.getSource("units") as maplibregl.GeoJSONSource | undefined)?.setData(
       unitsToGeoJSON(building),
     );
-    (map.getSource("camera-fov") as maplibregl.GeoJSONSource | undefined)?.setData(
-      camerasFovFC(building),
-    );
   }, [ready, building]);
+
+  // Feed the camera-FOV source from the occlusion-clipped visibility polygons
+  // (P5). Drop-in geometry swap of the old naive-cone source — same layers,
+  // same projection, same floor filter — only the ring geometry is now honest.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    (map.getSource("camera-fov") as maplibregl.GeoJSONSource | undefined)?.setData(
+      visibilityToFC(building.origin, visPolys),
+    );
+  }, [ready, visPolys, building.origin]);
 
   // Rebuild the snap grid when toggled / resized / building extent changes.
   useEffect(() => {
@@ -855,17 +870,17 @@ function underlayCoordinates(
   return [nw, ne, se, sw];
 }
 
-/** Build the camera-FOV FeatureCollection: one Polygon per camera, tagged with
- *  `{ cameraId, ordinal }` for floor-filtering + selection highlighting. In P4
- *  the ring is the naive radial wedge (`sectorRing`) — NOT occlusion-clipped.
- *  P5 swaps `sectorRing` for `computeVisibility` with no rendering change. */
-function camerasFovFC(building: Building): FC {
-  const features: GeoJSON.Feature[] = building.cameras.map((cam) => ({
+/** Build the camera-FOV FeatureCollection from occlusion-clipped visibility
+ *  polygons (P5): one Polygon per camera, tagged `{ cameraId, ordinal }` for
+ *  floor-filtering + selection highlighting. Each `ring` is real line-of-sight
+ *  (walls clip the sightline) — no longer the wall-piercing naive cone. */
+function visibilityToFC(origin: LngLat, visPolys: VisibilityPolygon[]): FC {
+  const features: GeoJSON.Feature[] = visPolys.map((vp) => ({
     type: "Feature",
-    properties: { cameraId: cam.id, ordinal: cam.ordinal },
+    properties: { cameraId: vp.cameraId, ordinal: vp.ordinal },
     geometry: {
       type: "Polygon",
-      coordinates: [polygonRing(building.origin, sectorRing(cam))],
+      coordinates: [polygonRing(origin, vp.ring)],
     },
   }));
   return { type: "FeatureCollection", features };
