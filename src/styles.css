@@ -740,6 +740,83 @@ button.wide.ghost {
   color: #f2c14e;
 }
 
+/* Camera markers (P4). Cyan directional body, rotated by heading in JS; a small
+ * square rotation handle for the selected non-dome camera. Square / radius-0. */
+.camera {
+  cursor: grab;
+}
+.camera:active {
+  cursor: grabbing;
+}
+.camera-body {
+  position: relative;
+  width: 13px;
+  height: 13px;
+  background: var(--accent);
+  border: 1.5px solid #05201b;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  transform-origin: center;
+}
+/* Aim pointer on the +x (heading 0) edge, before rotation. */
+.camera-body::after {
+  content: "";
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 6px solid var(--accent);
+}
+.camera.selected .camera-body {
+  background: #5cf6ee;
+  border-color: #5cf6ee;
+  box-shadow: 0 0 0 2px rgba(92, 246, 238, 0.4);
+}
+.camera.selected .camera-body::after {
+  border-left-color: #5cf6ee;
+}
+/* Dome: no aim pointer (360° sight, no meaningful heading). */
+.camera.dome .camera-body::after {
+  display: none;
+}
+.cam-handle {
+  width: 11px;
+  height: 11px;
+  background: #5cf6ee;
+  border: 1.5px solid #05201b;
+  cursor: grab;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+.cam-handle:active {
+  cursor: grabbing;
+}
+
+/* Camera list row (CameraPanel, no-selection state). */
+.camrow-select {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #10161e;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+.camrow-select:hover {
+  border-color: var(--accent);
+}
+.camrow-kind {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
 .label-sub {
   font-size: 10px;
   color: var(--accent);

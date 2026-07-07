@@ -5,6 +5,7 @@ import PropertiesPanel from "./panels/PropertiesPanel";
 import DrawPanel from "./panels/DrawPanel";
 import LinkPanel from "./panels/LinkPanel";
 import RoutePanel from "./panels/RoutePanel";
+import CameraPanel from "./panels/CameraPanel";
 
 export default function Inspector() {
   const activeTool = useStore((s) => s.activeTool);
@@ -14,6 +15,7 @@ export default function Inspector() {
   if (activeTool === "rect" || activeTool === "polygon") body = <DrawPanel />;
   else if (activeTool === "link") body = <LinkPanel />;
   else if (activeTool === "route") body = <RoutePanel />;
+  else if (activeTool === "camera") body = <CameraPanel />;
   else if (activeTool === "vertex" || selectedId) body = <PropertiesPanel />;
   else body = <FloorContentsPanel />;
 

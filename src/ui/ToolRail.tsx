@@ -1,4 +1,4 @@
-import { MousePointer2, Square, Hexagon, Spline, ArrowUpDown, Route } from "lucide-react";
+import { MousePointer2, Square, Hexagon, Spline, ArrowUpDown, Route, Cctv } from "lucide-react";
 import { useStore } from "../store";
 import type { Tool } from "../store";
 
@@ -9,6 +9,7 @@ const TOOLS: { id: Tool; label: string; Icon: typeof Square; needsSelection?: bo
   { id: "vertex", label: "Edit vertices", Icon: Spline, needsSelection: true },
   { id: "link", label: "Vertical link", Icon: ArrowUpDown },
   { id: "route", label: "Wayfinding", Icon: Route },
+  { id: "camera", label: "Cameras", Icon: Cctv },
 ];
 
 export default function ToolRail() {

@@ -17,6 +17,8 @@ export default function AppShell() {
   const setGoal = useStore((s) => s.setGoal);
   const deleteUnit = useStore((s) => s.deleteUnit);
   const setTool = useStore((s) => s.setTool);
+  const selectedCameraId = useStore((s) => s.selectedCameraId);
+  const deleteCamera = useStore((s) => s.deleteCamera);
 
   // Keep start/goal valid as rooms come and go.
   useEffect(() => {
@@ -32,6 +34,11 @@ export default function AppShell() {
       if (e.key !== "Delete" && e.key !== "Backspace") return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+      // Camera selection takes precedence when a camera is picked.
+      if (selectedCameraId) {
+        deleteCamera(selectedCameraId);
+        return;
+      }
       if (selectedId && building.units.some((u) => u.id === selectedId && u.category === "room")) {
         deleteUnit(selectedId);
         setTool("select");
@@ -39,7 +46,7 @@ export default function AppShell() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId, building, deleteUnit, setTool]);
+  }, [selectedId, building, deleteUnit, setTool, selectedCameraId, deleteCamera]);
 
   return (
     <div className="shell">
