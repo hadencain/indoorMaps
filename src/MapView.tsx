@@ -539,16 +539,19 @@ export default function MapView() {
         .setLngLat(m2ll(building.origin, cam.at[0], cam.at[1]))
         .addTo(map);
 
+      // Selecting a camera works under ANY tool (opens CameraPanel; mutually
+      // exclusive with unit selection). stopPropagation keeps the map's
+      // empty-click deselect from firing. Drag/aim stay camera-tool only.
+      el.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        live.current.onSelectCamera(cam.id);
+      });
       if (cameraMode) {
         marker.on("dragend", () => {
           const ll = marker.getLngLat();
           let at = ll2m(live.current.building.origin, ll.lng, ll.lat);
           if (live.current.showGrid) at = snapPoint(at, live.current.gridSize);
           live.current.onMoveCamera(cam.id, at);
-        });
-        el.addEventListener("click", (ev) => {
-          ev.stopPropagation();
-          live.current.onSelectCamera(cam.id);
         });
         el.addEventListener("dblclick", (ev) => {
           ev.stopPropagation();
@@ -863,6 +866,9 @@ export default function MapView() {
         }
         const hits = map.queryRenderedFeatures(e.point, { layers: ["unit-fill"] });
         const id = hits[0]?.properties?.id as string | undefined;
+        // Any empty-canvas click clears a selected camera (mutually exclusive
+        // with unit selection). Unit hits below clear it via setSelected.
+        if (!id && live.current.selectedCameraId) live.current.onSelectCamera(null);
         // Link mode: feed the click to the vertical-connection flow instead.
         if (live.current.linkMode) {
           if (id) live.current.onLinkUnit(id);

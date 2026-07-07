@@ -817,6 +817,65 @@ button.wide.ghost {
   color: var(--dim);
 }
 
+/* Small section header inside a panel (Covers / Seen by). */
+.panel-subtitle {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+
+/* Inert camera feed placeholder (CameraPanel). Presents as clickable; the
+ * onClick is a no-op stub — NO network, NO stream. Pure scaffold. */
+.camera-feed {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: radial-gradient(120% 120% at 50% 40%, #12181f 0%, #080a0d 100%);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  user-select: none;
+}
+.camera-feed:hover {
+  border-color: var(--accent);
+}
+.camera-feed:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+.camera-feed-scan {
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.03) 0px,
+    rgba(255, 255, 255, 0.03) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  pointer-events: none;
+}
+.camera-feed-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: #4a5765;
+  text-transform: uppercase;
+}
+.camera-feed-corner {
+  position: absolute;
+  right: 6px;
+  bottom: 5px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: #3a4550;
+}
+
 .label-sub {
   font-size: 10px;
   color: var(--accent);

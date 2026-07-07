@@ -1,7 +1,9 @@
+import { useMemo } from "react";
 import { useStore } from "../../store";
 import { bbox, polygonArea, polygonPerimeter } from "../../geo";
 import { formatArea, formatLength } from "../../format";
 import { CATEGORY_ORDER, CATEGORY_LABELS } from "../../categories";
+import { camerasSeeingUnit } from "../../security/coverage-link";
 import type { Category } from "../../types";
 
 const SECURITY_LEVELS: ReadonlyArray<"public" | "secure" | "restricted"> = [
@@ -19,7 +21,13 @@ export default function PropertiesPanel() {
   const renameUnit = useStore((s) => s.renameUnit);
   const setCategory = useStore((s) => s.setCategory);
   const setSecurity = useStore((s) => s.setSecurity);
+  const setSelectedCamera = useStore((s) => s.setSelectedCamera);
   const deleteUnit = useStore((s) => s.deleteUnit);
+  // Inverse of CameraPanel's Covers list — cameras whose coverage sees this unit.
+  const seenBy = useMemo(
+    () => (selectedId ? camerasSeeingUnit(building, selectedId) : []),
+    [building, selectedId],
+  );
   const u = building.units.find((x) => x.id === selectedId);
   if (!u)
     return (
@@ -67,6 +75,28 @@ export default function PropertiesPanel() {
           <span className="k">perim</span> {formatLength(polygonPerimeter(u.polygon), unit)}
         </div>
       </div>
+      <div className="panel-subtitle" style={{ marginTop: 12 }}>
+        Seen by
+      </div>
+      {seenBy.length === 0 ? (
+        <p className="hint">No camera coverage.</p>
+      ) : (
+        <div className="roomlist">
+          {seenBy.map((c) => (
+            <div className="roomrow" key={c.id}>
+              <button
+                className="camrow-select"
+                onClick={() => setSelectedCamera(c.id)}
+                title="Select camera"
+              >
+                <span className="vlabel">{c.name}</span>
+                <span className="camrow-kind">{c.kind}</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <button
         className={`wide ${activeTool === "vertex" ? "active" : ""}`}
         style={{ marginTop: 8 }}

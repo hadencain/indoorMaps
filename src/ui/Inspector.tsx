@@ -10,9 +10,13 @@ import CameraPanel from "./panels/CameraPanel";
 export default function Inspector() {
   const activeTool = useStore((s) => s.activeTool);
   const selectedId = useStore((s) => s.selectedId);
+  const selectedCameraId = useStore((s) => s.selectedCameraId);
 
   let body: ReactNode;
-  if (activeTool === "rect" || activeTool === "polygon") body = <DrawPanel />;
+  // A selected camera wins over tool/unit routing (mutually exclusive with unit
+  // selection), so clicking a camera in any tool shows its panel.
+  if (selectedCameraId) body = <CameraPanel />;
+  else if (activeTool === "rect" || activeTool === "polygon") body = <DrawPanel />;
   else if (activeTool === "link") body = <LinkPanel />;
   else if (activeTool === "route") body = <RoutePanel />;
   else if (activeTool === "camera") body = <CameraPanel />;
@@ -20,7 +24,7 @@ export default function Inspector() {
   else body = <FloorContentsPanel />;
 
   return (
-    <aside className="inspector" key={activeTool + (selectedId ?? "")}>
+    <aside className="inspector" key={activeTool + (selectedCameraId ?? selectedId ?? "")}>
       {body}
     </aside>
   );

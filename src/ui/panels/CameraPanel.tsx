@@ -1,10 +1,14 @@
+import { useMemo } from "react";
 import { useStore } from "../../store";
 import { useVisibility } from "../visibility";
 import { polygonArea } from "../../geo";
 import { formatArea } from "../../format";
+import { unitsCoveredByCamera } from "../../security/coverage-link";
 import type { CameraKind } from "../../types";
 
 const M_TO_FT = 3.280839895;
+/** Inert placeholder timestamp — the feed never streams (no network, ever). */
+const FEED_TIME = "00:00:00";
 const KINDS: ReadonlyArray<CameraKind> = ["fixed", "dome", "ptz"];
 const KIND_LABELS: Record<CameraKind, string> = {
   fixed: "Fixed",
@@ -19,11 +23,18 @@ export default function CameraPanel() {
   const selectedCameraId = useStore((s) => s.selectedCameraId);
   const showCoverage = useStore((s) => s.showCoverage);
   const setSelectedCamera = useStore((s) => s.setSelectedCamera);
+  const setSelected = useStore((s) => s.setSelected);
   const updateCamera = useStore((s) => s.updateCamera);
   const rotateCamera = useStore((s) => s.rotateCamera);
   const deleteCamera = useStore((s) => s.deleteCamera);
   const toggleCoverage = useStore((s) => s.toggleCoverage);
   const { polys: visPolys, coverage } = useVisibility();
+
+  // Derived spaces this camera sees (same-ordinal, from occlusion geometry).
+  const covered = useMemo(
+    () => (selectedCameraId ? unitsCoveredByCamera(building, selectedCameraId) : []),
+    [building, selectedCameraId],
+  );
 
   const level = building.levels.find((l) => l.ordinal === ordinal)?.name ?? `L${ordinal}`;
   const floorCams = building.cameras.filter((c) => c.ordinal === ordinal);
@@ -87,6 +98,23 @@ export default function CameraPanel() {
     <div className="panel">
       <div className="panel-title">Camera</div>
 
+      {/* Inert feed placeholder: presents as clickable, performs NO network I/O. */}
+      <div
+        className="camera-feed"
+        role="button"
+        tabIndex={0}
+        title="Live feed unavailable"
+        onClick={() => {
+          /* TODO: live feed — intentionally a no-op stub (no network). */
+        }}
+      >
+        <div className="camera-feed-scan" aria-hidden />
+        <div className="camera-feed-label">NO SIGNAL · OFFLINE</div>
+        <div className="camera-feed-corner">
+          {selected.id} · {FEED_TIME}
+        </div>
+      </div>
+
       <label>Name</label>
       <input
         value={selected.name}
@@ -146,8 +174,31 @@ export default function CameraPanel() {
       />
 
       <div className="readout mono" style={{ marginTop: 12 }}>
-        covers {formatArea(coversArea, unit)}
+        covers {formatArea(coversArea, unit)} · {covered.length} space
+        {covered.length === 1 ? "" : "s"}
       </div>
+
+      <div className="panel-subtitle" style={{ marginTop: 12 }}>
+        Covers
+      </div>
+      {covered.length === 0 ? (
+        <p className="hint">No spaces in view.</p>
+      ) : (
+        <div className="roomlist">
+          {covered.map((u) => (
+            <div className="roomrow" key={u.id}>
+              <button
+                className="camrow-select"
+                onClick={() => setSelected(u.id)}
+                title="Select space"
+              >
+                <span className="vlabel">{u.name}</span>
+                <span className="camrow-kind">{u.category}</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <button
         className="wide danger"

@@ -128,7 +128,7 @@ export const useStore = create<State>((set, get) => ({
   setTool: (t) => set({ activeTool: t, pendingLink: null, selectedCameraId: null }),
   setDraftCategory: (c) => set({ draftCategory: c }),
   setOrdinal: (o) => set({ ordinal: o }),
-  setSelected: (id) => set({ selectedId: id }),
+  setSelected: (id) => set({ selectedId: id, selectedCameraId: null }),
   setUnit: (u) => set({ unit: u }),
   toggleDims: () => set((s) => ({ showDims: !s.showDims })),
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
@@ -342,7 +342,8 @@ export const useStore = create<State>((set, get) => ({
       building: { ...s.building, cameras: s.building.cameras.filter((c) => c.id !== id) },
     })),
 
-  setSelectedCamera: (id) => set({ selectedCameraId: id }),
+  setSelectedCamera: (id) =>
+    set(id ? { selectedCameraId: id, selectedId: null } : { selectedCameraId: null }),
   toggleCoverage: () => set((s) => ({ showCoverage: !s.showCoverage })),
 
   importSvgText: (text) => {
