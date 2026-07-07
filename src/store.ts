@@ -62,6 +62,8 @@ interface State {
 
   addRoom: (polygon: MetreXY[], ordinal: number) => void;
   moveDoor: (doorId: string, at: MetreXY) => void;
+  setOpeningKind: (openingId: string, kind: "door" | "entrance") => void;
+  toggleOpeningKind: (openingId: string) => void;
   renameUnit: (id: string, name: string) => void;
   setCategory: (id: string, category: Category) => void;
   setSecurity: (id: string, level: "public" | "secure" | "restricted") => void;
@@ -129,6 +131,26 @@ export const useStore = create<State>((set, get) => ({
       building: {
         ...s.building,
         openings: s.building.openings.map((o) => (o.id === doorId ? { ...o, at } : o)),
+      },
+    })),
+
+  setOpeningKind: (openingId, kind) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        openings: s.building.openings.map((o) => (o.id === openingId ? { ...o, kind } : o)),
+      },
+    })),
+
+  toggleOpeningKind: (openingId) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        openings: s.building.openings.map((o) =>
+          o.id === openingId
+            ? { ...o, kind: o.kind === "entrance" ? "door" : "entrance" }
+            : o,
+        ),
       },
     })),
 
