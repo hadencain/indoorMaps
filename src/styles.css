@@ -400,6 +400,39 @@ button.wide.ghost {
   color: var(--danger);
 }
 
+/* Raster floorplan underlay controls (Floor contents panel) */
+.underlay-sec {
+  margin-top: var(--s4);
+  border-top: 1px solid var(--line);
+  padding-top: var(--s3);
+}
+.underlay-sec .warn {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+.nudge-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s1);
+  margin-bottom: var(--s3);
+}
+.nudge-pad button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 7px 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+.nudge-pad button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.nudge-pad span {
+  visibility: hidden;
+}
+
 /* View controls (floating over the canvas) */
 .viewctl {
   position: absolute;

@@ -9,6 +9,7 @@ export default function TopBar() {
   const planWidth = useStore((s) => s.planWidth);
   const setPlanWidth = useStore((s) => s.setPlanWidth);
   const importSvgText = useStore((s) => s.importSvgText);
+  const importRasterFile = useStore((s) => s.importRasterFile);
   const exportGeoJSON = useStore((s) => s.exportGeoJSON);
   const loadGeoJSONText = useStore((s) => s.loadGeoJSONText);
   const resetBuilding = useStore((s) => s.resetBuilding);
@@ -56,6 +57,19 @@ export default function TopBar() {
                   const f = e.target.files?.[0];
                   e.target.value = "";
                   if (f) importSvgText(await f.text());
+                }}
+              />
+            </label>
+            <label className="dm-item">
+              Import floorplan image…
+              <input
+                type="file"
+                accept="image/png,image/jpeg"
+                hidden
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) await importRasterFile(f);
                 }}
               />
             </label>
