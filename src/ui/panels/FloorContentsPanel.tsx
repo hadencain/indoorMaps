@@ -1,4 +1,5 @@
 import { useStore } from "../../store";
+import { isSpace } from "../../categories";
 
 export default function FloorContentsPanel() {
   const building = useStore((s) => s.building);
@@ -7,16 +8,16 @@ export default function FloorContentsPanel() {
   const setSelected = useStore((s) => s.setSelected);
   const renameUnit = useStore((s) => s.renameUnit);
   const deleteUnit = useStore((s) => s.deleteUnit);
-  const rooms = building.units.filter((u) => u.category === "room" && u.ordinal === ordinal);
+  const spaces = building.units.filter((u) => u.ordinal === ordinal && isSpace(u.category));
 
   return (
     <div className="panel">
       <div className="panel-title">Floor contents</div>
-      {rooms.length === 0 && (
-        <p className="hint">No rooms on this floor. Draw one with the ▢ or ⬡ tool.</p>
+      {spaces.length === 0 && (
+        <p className="hint">No spaces on this floor. Draw one with the ▢ or ⬡ tool.</p>
       )}
       <div className="roomlist">
-        {rooms.map((r) => (
+        {spaces.map((r) => (
           <div className={`roomrow ${r.id === selectedId ? "selected" : ""}`} key={r.id}>
             <input
               value={r.name}
