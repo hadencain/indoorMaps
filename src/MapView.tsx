@@ -201,6 +201,51 @@ export default function MapView() {
         source: "units",
         paint: { "line-color": "#31435c", "line-width": 1.5 },
       });
+      // Secure-perimeter overlay (P8): translucent tint + dashed outline for
+      // secure/restricted units. Filtered to those levels; floor filter applied
+      // in the floor-filter effect. Gated by layers.accessZones (P9).
+      const secureFilter: maplibregl.FilterSpecification = [
+        "in",
+        ["get", "security"],
+        ["literal", ["secure", "restricted"]],
+      ];
+      map.addLayer({
+        id: "unit-secure-fill",
+        type: "fill",
+        source: "units",
+        paint: {
+          "fill-color": [
+            "match",
+            ["get", "security"],
+            "restricted",
+            "#ff5c5c",
+            "secure",
+            "#f2c14e",
+            "#f2c14e",
+          ],
+          "fill-opacity": 0.18,
+        },
+        filter: secureFilter,
+      });
+      map.addLayer({
+        id: "unit-secure-outline",
+        type: "line",
+        source: "units",
+        paint: {
+          "line-color": [
+            "match",
+            ["get", "security"],
+            "restricted",
+            "#ff5c5c",
+            "secure",
+            "#f2c14e",
+            "#f2c14e",
+          ],
+          "line-width": 2,
+          "line-dasharray": [2, 2],
+        },
+        filter: secureFilter,
+      });
       map.addLayer({
         id: "unit-selected",
         type: "line",
@@ -407,6 +452,13 @@ export default function MapView() {
     ]);
     map.setFilter("coverage-fill", floorFilter);
     map.setFilter("blind-fill", floorFilter);
+    const secureOnFloor: maplibregl.FilterSpecification = [
+      "all",
+      floorFilter,
+      ["in", ["get", "security"], ["literal", ["secure", "restricted"]]],
+    ];
+    map.setFilter("unit-secure-fill", secureOnFloor);
+    map.setFilter("unit-secure-outline", secureOnFloor);
     map.setFilter("camera-fov-fill", floorFilter);
     map.setFilter("camera-fov-line", floorFilter);
     map.setFilter("camera-fov-selected", [
@@ -467,6 +519,25 @@ export default function MapView() {
           onToggleOpeningKind(op.id);
         });
         markersRef.current.push(marker);
+      }
+    }
+
+    // Badge-reader markers (P8): on openings whose OWNING unit is secure or
+    // restricted. Derived from unit security only (Opening.kind has no "badge"
+    // value). Annotation markers — non-draggable. Gated by layers.accessZones.
+    {
+      const secById = new Map(building.units.map((u) => [u.id, u.security ?? "public"]));
+      for (const op of building.openings) {
+        const sec = secById.get(op.unit);
+        const owner = building.units.find((u) => u.id === op.unit);
+        if (!owner || owner.ordinal !== ordinal) continue;
+        if (sec !== "secure" && sec !== "restricted") continue;
+        const el = labelEl("", `badge-reader badge-${sec}`);
+        markersRef.current.push(
+          new maplibregl.Marker({ element: el, draggable: false })
+            .setLngLat(m2ll(building.origin, op.at[0], op.at[1]))
+            .addTo(map),
+        );
       }
     }
 

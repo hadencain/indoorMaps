@@ -38,7 +38,15 @@ export function unitsToGeoJSON(b: Building): FC {
     type: "FeatureCollection",
     features: b.units.map((u) => ({
       type: "Feature",
-      properties: { id: u.id, ordinal: u.ordinal, category: u.category, name: u.name },
+      properties: {
+        id: u.id,
+        ordinal: u.ordinal,
+        category: u.category,
+        name: u.name,
+        // Access-control level for the secure-perimeter `match` filter (P8).
+        // Default "public" so the filter has a value on every feature.
+        security: u.security ?? "public",
+      },
       geometry: { type: "Polygon", coordinates: [polygonRing(b.origin, u.polygon)] },
     })),
   };

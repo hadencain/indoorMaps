@@ -1,5 +1,13 @@
 import { create } from "zustand";
-import type { Building, MetreXY, Category, RasterUnderlay, Camera, CameraKind } from "./types";
+import type {
+  Building,
+  MetreXY,
+  Category,
+  RasterUnderlay,
+  Camera,
+  CameraKind,
+  SecurityLevel,
+} from "./types";
 import { initialBuilding, doorForRoom } from "./building";
 import { defaultNameFor } from "./categories";
 import { parseSvgShapes } from "./svgImport";
@@ -80,7 +88,7 @@ interface State {
   toggleOpeningKind: (openingId: string) => void;
   renameUnit: (id: string, name: string) => void;
   setCategory: (id: string, category: Category) => void;
-  setSecurity: (id: string, level: "public" | "secure" | "restricted") => void;
+  setSecurity: (id: string, level: SecurityLevel) => void;
   deleteUnit: (id: string) => void;
   moveVertex: (id: string, index: number, at: MetreXY) => void;
   insertVertex: (id: string, edgeIndex: number) => void;

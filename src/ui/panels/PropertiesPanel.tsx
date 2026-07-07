@@ -4,13 +4,8 @@ import { bbox, polygonArea, polygonPerimeter } from "../../geo";
 import { formatArea, formatLength } from "../../format";
 import { CATEGORY_ORDER, CATEGORY_LABELS } from "../../categories";
 import { camerasSeeingUnit } from "../../security/coverage-link";
-import type { Category } from "../../types";
-
-const SECURITY_LEVELS: ReadonlyArray<"public" | "secure" | "restricted"> = [
-  "public",
-  "secure",
-  "restricted",
-];
+import { SECURITY_LEVELS, SECURITY_LABELS, SECURITY_COLORS, securityOf } from "../security";
+import type { Category, SecurityLevel } from "../../types";
 
 export default function PropertiesPanel() {
   const building = useStore((s) => s.building);
@@ -52,14 +47,14 @@ export default function PropertiesPanel() {
       </select>
       <label>Security</label>
       <select
-        value={u.security ?? "public"}
-        onChange={(e) =>
-          setSecurity(u.id, e.target.value as "public" | "secure" | "restricted")
-        }
+        className="sec-selector"
+        style={{ borderColor: SECURITY_COLORS[securityOf(u)] }}
+        value={securityOf(u)}
+        onChange={(e) => setSecurity(u.id, e.target.value as SecurityLevel)}
       >
         {SECURITY_LEVELS.map((lvl) => (
           <option key={lvl} value={lvl}>
-            {lvl}
+            {SECURITY_LABELS[lvl]}
           </option>
         ))}
       </select>

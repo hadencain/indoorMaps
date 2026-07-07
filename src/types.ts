@@ -28,6 +28,9 @@ export interface Level {
   name: string;
 }
 
+/** Access-control classification for a unit. Absent ⇒ treated as "public". */
+export type SecurityLevel = "public" | "secure" | "restricted";
+
 export interface Unit {
   id: string;
   ordinal: number;
@@ -39,7 +42,7 @@ export interface Unit {
    * Access is an attribute orthogonal to `category` (a restricted office is
    * `{ category: "office", security: "restricted" }`).
    */
-  security?: "public" | "secure" | "restricted";
+  security?: SecurityLevel;
   /** Polygon outline in local metres, as an open ring (no repeated last point). */
   polygon: MetreXY[];
 }

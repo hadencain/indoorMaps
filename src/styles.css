@@ -882,6 +882,23 @@ button.wide.ghost {
   letter-spacing: 0.02em;
 }
 
+/* Badge-reader marker on a secure/restricted unit's opening (P8). Annotation
+ * only — non-interactive. Small rounded square keyed to the security color. */
+.badge-reader {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  border: 1.5px solid #05070a;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.badge-secure {
+  background: #f2c14e;
+}
+.badge-restricted {
+  background: #ff5c5c;
+}
+
 /* Live dimension readout while drawing */
 .measure {
   font-size: 11px;
