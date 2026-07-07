@@ -1,4 +1,4 @@
-import type { Building, Category, LngLat, MetreXY, Opening, Unit } from "./types";
+import type { Building, Camera, CameraKind, Category, LngLat, MetreXY, Opening, Unit } from "./types";
 import { m2ll, ll2m, polygonRing, polygonCentroid } from "./geo";
 
 // IMDF-flavored GeoJSON export. Real IMDF is a zip of one FeatureCollection per
@@ -47,6 +47,26 @@ export function buildingToGeoJSON(b: Building): unknown {
     });
   }
 
+  // App-extension: cameras as Point features marked `indoormaps:type=camera`.
+  // IMDF has no camera feature type, so standard consumers ignore these; this
+  // app rehydrates them on import for a lossless round-trip.
+  for (const cam of b.cameras) {
+    features.push({
+      type: "Feature",
+      id: cam.id,
+      properties: {
+        "indoormaps:type": "camera",
+        ordinal: cam.ordinal,
+        heading: cam.heading,
+        fovDeg: cam.fovDeg,
+        rangeM: cam.rangeM,
+        kind: cam.kind,
+        name: cam.name,
+      },
+      geometry: { type: "Point", coordinates: m2ll(b.origin, cam.at[0], cam.at[1]) },
+    });
+  }
+
   return {
     type: "FeatureCollection",
     indoorMaps: { version: 1, origin: b.origin, levels: b.levels, verticals: b.verticals },
@@ -77,8 +97,23 @@ export function geoJSONToBuilding(text: string): Building | null {
 
   const units: Unit[] = [];
   const openings: Opening[] = [];
+  const cameras: Camera[] = [];
   for (const f of obj.features ?? []) {
     const ft = f.properties?.feature_type;
+    if (f.properties?.["indoormaps:type"] === "camera" && f.geometry?.type === "Point") {
+      const [lng, lat] = f.geometry.coordinates as [number, number];
+      cameras.push({
+        id: String(f.id ?? `cam-${cameras.length}`),
+        ordinal: Number(f.properties?.ordinal ?? 0),
+        at: ll2m(origin, lng, lat),
+        heading: Number(f.properties?.heading ?? 0),
+        fovDeg: Number(f.properties?.fovDeg ?? 90),
+        rangeM: Number(f.properties?.rangeM ?? 8),
+        kind: (f.properties?.kind as CameraKind) ?? "fixed",
+        name: String(f.properties?.name ?? `Camera ${cameras.length + 1}`),
+      });
+      continue;
+    }
     if (ft === "unit" && f.geometry?.type === "Polygon") {
       const ring = (f.geometry.coordinates as [number, number][][])[0] ?? [];
       const open = closesRing(ring) ? ring.slice(0, -1) : ring;
@@ -99,7 +134,14 @@ export function geoJSONToBuilding(text: string): Building | null {
     }
   }
   if (units.length === 0) return null;
-  return { origin, levels: meta.levels ?? [], units, openings, verticals: meta.verticals ?? [] };
+  return {
+    origin,
+    levels: meta.levels ?? [],
+    units,
+    openings,
+    verticals: meta.verticals ?? [],
+    cameras,
+  };
 }
 
 function closesRing(ring: [number, number][]): boolean {
