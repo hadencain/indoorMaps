@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import type { MetreXY, Category, LngLat, RasterUnderlay } from "./types";
 import type { FC } from "./render";
-import { unitsToGeoJSON } from "./render";
+import { unitsToGeoJSON, patrolsToGeoJSON } from "./render";
+import { INCIDENT_COLORS } from "./ui/panels/IncidentPanel";
 import {
   ll2m,
   m2ll,
@@ -38,6 +39,8 @@ export default function MapView() {
   const activeTool = useStore((s) => s.activeTool);
   const selectedId = useStore((s) => s.selectedId);
   const selectedCameraId = useStore((s) => s.selectedCameraId);
+  const selectedIncidentId = useStore((s) => s.selectedIncidentId);
+  const patrolDraft = useStore((s) => s.patrolDraft);
   const unit = useStore((s) => s.unit);
   const showDims = useStore((s) => s.showDims);
   const showGrid = useStore((s) => s.showGrid);
@@ -57,6 +60,8 @@ export default function MapView() {
   const linkMode = activeTool === "link";
   const vertexEdit = activeTool === "vertex";
   const cameraMode = activeTool === "camera";
+  const incidentMode = activeTool === "incident";
+  const patrolMode = activeTool === "patrol";
   const routeLines = geom?.lines ?? EMPTY;
   const routePoints = geom?.points ?? [];
 
@@ -76,6 +81,12 @@ export default function MapView() {
   const onMoveCamera = useStore((s) => s.moveCamera);
   const onRotateCamera = useStore((s) => s.rotateCamera);
   const onSelectCamera = useStore((s) => s.setSelectedCamera);
+  const onAddIncident = useStore((s) => s.addIncident);
+  const onMoveIncident = useStore((s) => s.moveIncident);
+  const onSelectIncident = useStore((s) => s.setSelectedIncident);
+  const onAddPatrolPoint = useStore((s) => s.addPatrolPoint);
+  const onCommitPatrol = useStore((s) => s.commitPatrol);
+  const onCancelPatrol = useStore((s) => s.cancelPatrol);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
@@ -110,6 +121,16 @@ export default function MapView() {
     onMoveCamera,
     onRotateCamera,
     onSelectCamera,
+    incidentMode,
+    patrolMode,
+    patrolDraft,
+    selectedIncidentId,
+    onAddIncident,
+    onMoveIncident,
+    onSelectIncident,
+    onAddPatrolPoint,
+    onCommitPatrol,
+    onCancelPatrol,
     layers,
   });
   live.current = {
@@ -135,6 +156,16 @@ export default function MapView() {
     onMoveCamera,
     onRotateCamera,
     onSelectCamera,
+    incidentMode,
+    patrolMode,
+    patrolDraft,
+    selectedIncidentId,
+    onAddIncident,
+    onMoveIncident,
+    onSelectIncident,
+    onAddPatrolPoint,
+    onCommitPatrol,
+    onCancelPatrol,
     layers,
   };
 
@@ -180,6 +211,7 @@ export default function MapView() {
       // Camera FOV: populated by the visibility effect from useVisibility() output.
       map.addSource("camera-fov", { type: "geojson", data: EMPTY });
       map.addSource("route", { type: "geojson", data: EMPTY });
+      map.addSource("patrols", { type: "geojson", data: patrolsToGeoJSON(building) });
       map.addSource("draft", { type: "geojson", data: EMPTY });
 
       map.addLayer({
@@ -305,6 +337,15 @@ export default function MapView() {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": "#00d7cd", "line-width": 4 },
       });
+      // Patrol paths (P10): dashed violet open polylines, floor-filtered + gated
+      // by layers.patrols. Distinct from the cyan wayfinding route.
+      map.addLayer({
+        id: "patrol-line",
+        type: "line",
+        source: "patrols",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#8b7bff", "line-width": 2.5, "line-dasharray": [3, 2] },
+      });
       map.addLayer({
         id: "draft-fill",
         type: "fill",
@@ -383,6 +424,26 @@ export default function MapView() {
     );
   }, [ready, building]);
 
+  // Rebuild the patrol source when the building changes (adds/edits/deletes).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    (map.getSource("patrols") as maplibregl.GeoJSONSource | undefined)?.setData(
+      patrolsToGeoJSON(building),
+    );
+  }, [ready, building]);
+
+  // Patrol draft preview — reuses the `draft` source (line + waypoint dots, no
+  // fill). Runs only in patrol mode; commit/cancel set patrolDraft = null which
+  // clears the source here. In other tools the polygon/rect flow owns `draft`.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (patrolMode) renderPatrolDraft(null);
+    else draftSource()?.setData(EMPTY); // leaving patrol clears its preview
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, patrolDraft, patrolMode]);
+
   // Feed the camera-FOV source from the occlusion-clipped visibility polygons
   // (P5). Drop-in geometry swap of the old naive-cone source — same layers,
   // same projection, same floor filter — only the ring geometry is now honest.
@@ -431,6 +492,7 @@ export default function MapView() {
     vis("unit-secure-fill", layers.accessZones);
     vis("unit-secure-outline", layers.accessZones);
     vis("route-line", layers.routes);
+    vis("patrol-line", layers.patrols);
     vis("grid-line", showGrid);
   }, [ready, layers, showGrid]);
 
@@ -470,6 +532,7 @@ export default function MapView() {
     map.setFilter("unit-fill", floorFilter);
     map.setFilter("unit-outline", floorFilter);
     map.setFilter("route-line", floorFilter);
+    map.setFilter("patrol-line", floorFilter);
     map.setFilter("unit-selected", [
       "all",
       floorFilter,
@@ -691,21 +754,67 @@ export default function MapView() {
         markersRef.current.push(hMarker);
       }
     }
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedCameraId, cameraMode, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers]);
+
+    // Incident pins (P10): HTML markers colored by kind, floor-filtered, gated by
+    // layers.incidents. Draggable + selectable only under the incident tool (like
+    // camera markers): drag commits on dragend, click selects for note entry.
+    if (layers.incidents) {
+      for (const inc of building.incidents ?? []) {
+        if (inc.ordinal !== ordinal) continue;
+        const el = document.createElement("div");
+        el.className = "inc-pin" + (inc.id === selectedIncidentId ? " selected" : "");
+        el.style.background = INCIDENT_COLORS[inc.kind];
+        el.title = inc.note || inc.kind;
+        const marker = new maplibregl.Marker({ element: el, draggable: incidentMode })
+          .setLngLat(m2ll(building.origin, inc.at[0], inc.at[1]))
+          .addTo(map);
+        el.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          if (live.current.incidentMode) live.current.onSelectIncident(inc.id);
+        });
+        if (incidentMode) {
+          marker.on("dragend", () => {
+            const ll = marker.getLngLat();
+            let at = ll2m(live.current.building.origin, ll.lng, ll.lat);
+            if (live.current.showGrid) at = snapPoint(at, live.current.gridSize);
+            live.current.onMoveIncident(inc.id, at);
+          });
+        }
+        markersRef.current.push(marker);
+      }
+    }
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers]);
 
   // Draw-tool changes: cursor, dbl-click zoom, and reset any in-progress draft.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
     map.getCanvas().style.cursor =
-      drawTool !== "none" || cameraMode ? "crosshair" : linkMode ? "pointer" : "";
-    if (drawTool === "none") {
+      drawTool !== "none" || cameraMode || incidentMode || patrolMode
+        ? "crosshair"
+        : linkMode
+          ? "pointer"
+          : "";
+    // Patrol needs double-click free to commit, so disable dbl-click zoom in it
+    // too. Only the plain "none" (non-patrol) tools clear the in-progress draft.
+    if (drawTool === "none" && !patrolMode) {
       map.doubleClickZoom.enable();
       cancelDraft();
     } else {
       map.doubleClickZoom.disable();
     }
-  }, [ready, drawTool, linkMode, cameraMode]);
+  }, [ready, drawTool, linkMode, cameraMode, incidentMode, patrolMode]);
+
+  // Patrol tool keyboard: Enter commits the draft, Escape cancels it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!live.current.patrolMode || live.current.patrolDraft === null) return;
+      if (e.key === "Enter") live.current.onCommitPatrol();
+      else if (e.key === "Escape") live.current.onCancelPatrol();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Close the properties menu on Escape, floor change, or if its unit is gone.
   useEffect(() => {
@@ -857,6 +966,34 @@ export default function MapView() {
     if (poly.length >= 3) live.current.onAddRoom([...poly], live.current.ordinal);
     cancelDraft();
   }
+  // Patrol draft preview into the shared `draft` source: an OPEN polyline (no
+  // fill) through committed waypoints, optionally rubber-banding to `cursor`.
+  // A null/empty draft clears the preview.
+  function renderPatrolDraft(cursor: MetreXY | null) {
+    const pts = live.current.patrolDraft;
+    const origin = live.current.building.origin;
+    if (!pts || pts.length === 0) {
+      draftSource()?.setData(EMPTY);
+      return;
+    }
+    const features: GeoJSON.Feature[] = [];
+    const linePts = cursor ? [...pts, cursor] : pts;
+    if (linePts.length >= 2) {
+      features.push({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "LineString", coordinates: pointsToLL(origin, linePts) },
+      });
+    }
+    for (const v of pts) {
+      features.push({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "Point", coordinates: pointsToLL(origin, [v])[0] },
+      });
+    }
+    draftSource()?.setData({ type: "FeatureCollection", features });
+  }
   function setMeasure(at: MetreXY, text: string) {
     const map = mapRef.current;
     if (!map) return;
@@ -921,6 +1058,12 @@ export default function MapView() {
           const area = polygonArea([...poly, cur]);
           setMeasure(cur, `${formatLength(edge, u)} · ${formatArea(area, u)}`);
         } else clearMeasure();
+      } else if (
+        live.current.patrolMode &&
+        live.current.patrolDraft &&
+        live.current.patrolDraft.length > 0
+      ) {
+        renderPatrolDraft(cur);
       }
     });
 
@@ -937,11 +1080,24 @@ export default function MapView() {
       }
     });
 
+    // Patrol mode: double-click commits the draft (needs >= 2 points).
+    map.on("dblclick", (e) => {
+      if (!live.current.patrolMode || live.current.patrolDraft === null) return;
+      e.preventDefault();
+      live.current.onCommitPatrol();
+    });
+
     map.on("contextmenu", (e) => {
       const tool = live.current.drawTool;
       if (tool === "polygon") {
         e.preventDefault();
         cancelDraft();
+        return;
+      }
+      // Patrol mode: right-click cancels the in-progress draft.
+      if (live.current.patrolMode && live.current.patrolDraft !== null) {
+        e.preventDefault();
+        live.current.onCancelPatrol();
         return;
       }
       if (tool !== "none") return;
@@ -966,6 +1122,20 @@ export default function MapView() {
         if (live.current.cameraMode) {
           const at = toMetre(e.lngLat);
           live.current.onAddCamera(at, live.current.ordinal);
+          return;
+        }
+        // Incident mode: empty-canvas click drops a pin (existing pins consume
+        // their own click). New pin is auto-selected for note entry.
+        if (live.current.incidentMode) {
+          live.current.onAddIncident(toMetre(e.lngLat), live.current.ordinal);
+          return;
+        }
+        // Patrol mode: click adds a waypoint (only while a draft is armed via the
+        // panel's "Draw patrol" = beginPatrol).
+        if (live.current.patrolMode) {
+          if (live.current.patrolDraft !== null) {
+            live.current.onAddPatrolPoint(toMetre(e.lngLat));
+          }
           return;
         }
         const hits = map.queryRenderedFeatures(e.point, { layers: ["unit-fill"] });

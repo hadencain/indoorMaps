@@ -936,6 +936,47 @@ button.wide.ghost {
   background: #ff5c5c;
 }
 
+/* Incident pin (P10): teardrop-ish dot, kind color set inline. Selected = ring. */
+.inc-pin {
+  width: 16px;
+  height: 16px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  border: 1.5px solid #05070a;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+}
+.inc-pin.selected {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+/* Small kind swatch used in the incident list rows. */
+.inc-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 7px;
+  flex: 0 0 auto;
+}
+
+/* Incident note editor */
+.notearea {
+  width: 100%;
+  background: #10161e;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+.notearea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* Live dimension readout while drawing */
 .measure {
   font-size: 11px;

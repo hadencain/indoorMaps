@@ -16,6 +16,7 @@ const ROWS: Row[] = [
   { label: "Grid", grid: true },
   { label: "Routes", key: "routes" },
   { label: "Incidents", key: "incidents" },
+  { label: "Patrol paths", key: "patrols" },
 ];
 
 /** Floating Layers control: view-state, always available while any tool is

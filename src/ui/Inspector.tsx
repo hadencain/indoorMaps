@@ -6,11 +6,14 @@ import DrawPanel from "./panels/DrawPanel";
 import LinkPanel from "./panels/LinkPanel";
 import RoutePanel from "./panels/RoutePanel";
 import CameraPanel from "./panels/CameraPanel";
+import IncidentPanel from "./panels/IncidentPanel";
+import PatrolPanel from "./panels/PatrolPanel";
 
 export default function Inspector() {
   const activeTool = useStore((s) => s.activeTool);
   const selectedId = useStore((s) => s.selectedId);
   const selectedCameraId = useStore((s) => s.selectedCameraId);
+  const selectedIncidentId = useStore((s) => s.selectedIncidentId);
 
   let body: ReactNode;
   // A selected camera wins over tool/unit routing (mutually exclusive with unit
@@ -20,11 +23,16 @@ export default function Inspector() {
   else if (activeTool === "link") body = <LinkPanel />;
   else if (activeTool === "route") body = <RoutePanel />;
   else if (activeTool === "camera") body = <CameraPanel />;
+  else if (activeTool === "incident") body = <IncidentPanel />;
+  else if (activeTool === "patrol") body = <PatrolPanel />;
   else if (activeTool === "vertex" || selectedId) body = <PropertiesPanel />;
   else body = <FloorContentsPanel />;
 
   return (
-    <aside className="inspector" key={activeTool + (selectedCameraId ?? selectedId ?? "")}>
+    <aside
+      className="inspector"
+      key={activeTool + (selectedCameraId ?? selectedIncidentId ?? selectedId ?? "")}
+    >
       {body}
     </aside>
   );
