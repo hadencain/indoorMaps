@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import type { Building, MetreXY, Category } from "./types";
-import type { FC, RoutePoint } from "./render";
+import type { MetreXY, Category } from "./types";
+import type { FC } from "./render";
 import { unitsToGeoJSON } from "./render";
 import {
   ll2m,
@@ -16,7 +16,8 @@ import {
 import { rectFromDrag } from "./building";
 import { gridToGeoJSON } from "./render";
 import { formatLength, formatArea } from "./format";
-import type { Unit } from "./format";
+import { useStore } from "./store";
+import { useRoute } from "./ui/route";
 
 const EMPTY: FC = { type: "FeatureCollection", features: [] };
 /** Click within this many metres of the first vertex to close a polygon. */
@@ -24,56 +25,37 @@ const CLOSE_SNAP_M = 2.5;
 
 export type DrawTool = "none" | "rect" | "polygon";
 
-interface Props {
-  building: Building;
-  ordinal: number;
-  drawTool: DrawTool;
-  selectedId: string | null;
-  unit: Unit;
-  showDims: boolean;
-  showGrid: boolean;
-  gridSize: number;
-  linkMode: boolean;
-  vertexEdit: boolean;
-  routeLines: FC;
-  routePoints: RoutePoint[];
-  onAddRoom: (polygon: MetreXY[], ordinal: number) => void;
-  onSelect: (id: string | null) => void;
-  onMoveDoor: (doorId: string, at: MetreXY) => void;
-  onRename: (id: string, name: string) => void;
-  onSetCategory: (id: string, category: Category) => void;
-  onDelete: (id: string) => void;
-  onLinkUnit: (id: string) => void;
-  onMoveVertex: (id: string, index: number, at: MetreXY) => void;
-  onInsertVertex: (id: string, edgeIndex: number) => void;
-  onDeleteVertex: (id: string, index: number) => void;
-}
-
 /** Renders the building + route; supports rectangle + polygon room authoring. */
-export default function MapView({
-  building,
-  ordinal,
-  drawTool,
-  selectedId,
-  unit,
-  showDims,
-  showGrid,
-  gridSize,
-  linkMode,
-  vertexEdit,
-  routeLines,
-  routePoints,
-  onAddRoom,
-  onSelect,
-  onMoveDoor,
-  onRename,
-  onSetCategory,
-  onDelete,
-  onLinkUnit,
-  onMoveVertex,
-  onInsertVertex,
-  onDeleteVertex,
-}: Props) {
+export default function MapView() {
+  const building = useStore((s) => s.building);
+  const ordinal = useStore((s) => s.ordinal);
+  const activeTool = useStore((s) => s.activeTool);
+  const selectedId = useStore((s) => s.selectedId);
+  const unit = useStore((s) => s.unit);
+  const showDims = useStore((s) => s.showDims);
+  const showGrid = useStore((s) => s.showGrid);
+  const gridSize = useStore((s) => s.gridSize);
+  const { geom } = useRoute();
+
+  // Legacy internal interaction modes, derived from the single active tool.
+  const drawTool: DrawTool =
+    activeTool === "rect" ? "rect" : activeTool === "polygon" ? "polygon" : "none";
+  const linkMode = activeTool === "link";
+  const vertexEdit = activeTool === "vertex";
+  const routeLines = geom?.lines ?? EMPTY;
+  const routePoints = geom?.points ?? [];
+
+  // Handlers come straight from the store (stable references).
+  const onAddRoom = useStore((s) => s.addRoom);
+  const onSelect = useStore((s) => s.setSelected);
+  const onMoveDoor = useStore((s) => s.moveDoor);
+  const onRename = useStore((s) => s.renameUnit);
+  const onSetCategory = useStore((s) => s.setCategory);
+  const onDelete = useStore((s) => s.deleteUnit);
+  const onLinkUnit = useStore((s) => s.linkUnit);
+  const onMoveVertex = useStore((s) => s.moveVertex);
+  const onInsertVertex = useStore((s) => s.insertVertex);
+  const onDeleteVertex = useStore((s) => s.deleteVertex);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
