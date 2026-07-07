@@ -38,6 +38,7 @@ export default function MapView() {
   const ordinal = useStore((s) => s.ordinal);
   const activeTool = useStore((s) => s.activeTool);
   const selectedId = useStore((s) => s.selectedId);
+  const selectedIds = useStore((s) => s.selectedIds);
   const selectedCameraId = useStore((s) => s.selectedCameraId);
   const selectedIncidentId = useStore((s) => s.selectedIncidentId);
   const patrolDraft = useStore((s) => s.patrolDraft);
@@ -68,6 +69,7 @@ export default function MapView() {
   // Handlers come straight from the store (stable references).
   const onAddRoom = useStore((s) => s.addRoom);
   const onSelect = useStore((s) => s.setSelected);
+  const onToggleSelected = useStore((s) => s.toggleSelected);
   const onMoveDoor = useStore((s) => s.moveDoor);
   const onToggleOpeningKind = useStore((s) => s.toggleOpeningKind);
   const onRename = useStore((s) => s.renameUnit);
@@ -104,7 +106,9 @@ export default function MapView() {
     drawTool,
     onAddRoom,
     onSelect,
+    onToggleSelected,
     selectedId,
+    selectedIds,
     unit,
     showDims,
     showGrid,
@@ -139,7 +143,9 @@ export default function MapView() {
     drawTool,
     onAddRoom,
     onSelect,
+    onToggleSelected,
     selectedId,
+    selectedIds,
     unit,
     showDims,
     showGrid,
@@ -536,7 +542,7 @@ export default function MapView() {
     map.setFilter("unit-selected", [
       "all",
       floorFilter,
-      ["==", ["get", "id"], selectedId ?? "__none__"],
+      ["in", ["get", "id"], ["literal", selectedIds]],
     ]);
     map.setFilter("coverage-fill", floorFilter);
     map.setFilter("blind-fill", floorFilter);
@@ -783,7 +789,7 @@ export default function MapView() {
         markersRef.current.push(marker);
       }
     }
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers]);
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers]);
 
   // Draw-tool changes: cursor, dbl-click zoom, and reset any in-progress draft.
   useEffect(() => {
@@ -1151,6 +1157,11 @@ export default function MapView() {
         // Vertex-edit: switch the edited room on a hit, but keep it on empty clicks.
         if (live.current.vertexEdit) {
           if (id) live.current.onSelect(id);
+          return;
+        }
+        // Shift-click a unit adds/removes it from the multi-selection (bulk edit).
+        if (id && e.originalEvent.shiftKey) {
+          live.current.onToggleSelected(id);
           return;
         }
         // Plain select: clicking the currently-selected unit toggles it off.

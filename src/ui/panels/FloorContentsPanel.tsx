@@ -4,8 +4,9 @@ import { isSpace } from "../../categories";
 export default function FloorContentsPanel() {
   const building = useStore((s) => s.building);
   const ordinal = useStore((s) => s.ordinal);
-  const selectedId = useStore((s) => s.selectedId);
+  const selectedIds = useStore((s) => s.selectedIds);
   const setSelected = useStore((s) => s.setSelected);
+  const toggleSelected = useStore((s) => s.toggleSelected);
   const renameUnit = useStore((s) => s.renameUnit);
   const deleteUnit = useStore((s) => s.deleteUnit);
   const setUnderlayWidth = useStore((s) => s.setUnderlayWidth);
@@ -24,9 +25,21 @@ export default function FloorContentsPanel() {
       )}
       <div className="roomlist">
         {spaces.map((r) => (
-          <div className={`roomrow ${r.id === selectedId ? "selected" : ""}`} key={r.id}>
+          <div
+            className={`roomrow ${selectedIds.includes(r.id) ? "selected" : ""}`}
+            key={r.id}
+          >
             <input
               value={r.name}
+              // Shift-click adds/removes the row from the multi-selection; the
+              // preventDefault stops the input focusing (which would otherwise
+              // fire onFocus → single-select and undo the toggle).
+              onMouseDown={(e) => {
+                if (e.shiftKey) {
+                  e.preventDefault();
+                  toggleSelected(r.id);
+                }
+              }}
               onFocus={() => setSelected(r.id)}
               onChange={(e) => renameUnit(r.id, e.target.value)}
             />

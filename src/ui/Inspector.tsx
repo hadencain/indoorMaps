@@ -8,10 +8,12 @@ import RoutePanel from "./panels/RoutePanel";
 import CameraPanel from "./panels/CameraPanel";
 import IncidentPanel from "./panels/IncidentPanel";
 import PatrolPanel from "./panels/PatrolPanel";
+import BulkPanel from "./panels/BulkPanel";
 
 export default function Inspector() {
   const activeTool = useStore((s) => s.activeTool);
   const selectedId = useStore((s) => s.selectedId);
+  const selectedIds = useStore((s) => s.selectedIds);
   const selectedCameraId = useStore((s) => s.selectedCameraId);
   const selectedIncidentId = useStore((s) => s.selectedIncidentId);
 
@@ -25,6 +27,9 @@ export default function Inspector() {
   else if (activeTool === "camera") body = <CameraPanel />;
   else if (activeTool === "incident") body = <IncidentPanel />;
   else if (activeTool === "patrol") body = <PatrolPanel />;
+  // A multi-selection (shift-click) routes to the bulk editor, ahead of the
+  // single-unit Properties branch but behind camera + active tool panels.
+  else if (selectedIds.length > 1) body = <BulkPanel />;
   else if (activeTool === "vertex" || selectedId) body = <PropertiesPanel />;
   else body = <FloorContentsPanel />;
 
