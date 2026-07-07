@@ -1,5 +1,6 @@
 import type { Building, MetreXY } from "./types";
 import { bbox } from "./geo";
+import { isSpace, isNonRoutable } from "./categories";
 
 // Hand-authored two-floor building, designed in local metres.
 // Ground (ordinal 0): Lobby / Cafe / Office 101 off a central corridor + elevator.
@@ -62,9 +63,13 @@ export const initialBuilding: Building = {
   verticals: [{ a: "elevator-g", b: "elevator-1", name: "Elevator" }],
 };
 
-/** Rooms a user can pick as a start/destination (excludes corridors/elevators). */
+/**
+ * Units a user can pick as a route start/destination: every authored space
+ * (room/office/restroom/lobby/retail/storage/mechanical/outside), excluding
+ * circulation (corridor/elevator/stairs) and security-restricted units.
+ */
 export function selectableUnits(b: Building) {
-  return b.units.filter((u) => u.category === "room");
+  return b.units.filter((u) => isSpace(u.category) && !isNonRoutable(u));
 }
 
 /**
