@@ -103,6 +103,37 @@ export interface Camera {
   name: string;
 }
 
+/** What an incident annotation records. Drives the pin color + kind dropdown. */
+export type IncidentKind =
+  | "trespass"
+  | "theft"
+  | "vandalism"
+  | "medical"
+  | "hazard"
+  | "alarm"
+  | "other";
+
+/** An annotation pin: something that happened at a point on a floor. Local
+ *  metres, same frame as Unit.polygon / Opening.at. Additive optional
+ *  collection on Building (persistence stays v3; defaults to []). */
+export interface Incident {
+  id: string;
+  ordinal: number;
+  at: MetreXY;
+  kind: IncidentKind;
+  note: string;
+}
+
+/** An ordered open polyline across a single floor — a hand-drawn or
+ *  auto-generated guard path. NOT a nav-graph route. `points` has >= 2
+ *  waypoints, open (no repeated last point), like Unit.polygon. */
+export interface PatrolPath {
+  id: string;
+  ordinal: number;
+  name: string;
+  points: MetreXY[];
+}
+
 export interface Building {
   /** SW origin of the local metre grid, as [lng, lat]. */
   origin: LngLat;
@@ -114,6 +145,10 @@ export interface Building {
   cameras: Camera[];
   /** Optional raster floorplan underlays, at most one per ordinal (P11c). */
   underlays?: RasterUnderlay[];
+  /** Incident annotation pins (P10). Additive; defaults to [] in loadBuilding. */
+  incidents?: Incident[];
+  /** Guard patrol paths (P10). Additive; defaults to [] in loadBuilding. */
+  patrols?: PatrolPath[];
 }
 
 /** Per-overlay visibility toggles (UI state; persisted separately from the
@@ -126,6 +161,7 @@ export interface LayerVisibility {
   labels: boolean; // room name/area labels
   routes: boolean; // A* route line + pins
   incidents: boolean; // incident markers (Phase E)
+  patrols: boolean; // patrol path lines (Phase E)
 }
 
 export interface NodeMeta {

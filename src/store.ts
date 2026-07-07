@@ -8,13 +8,29 @@ import type {
   CameraKind,
   SecurityLevel,
   LayerVisibility,
+  Incident,
+  IncidentKind,
+  PatrolPath,
 } from "./types";
 import { initialBuilding, doorForRoom } from "./building";
-import { defaultNameFor } from "./categories";
+import { defaultNameFor, isSpace } from "./categories";
 import { parseSvgShapes } from "./svgImport";
 import { buildingToGeoJSON, geoJSONToBuilding } from "./imdf";
+import { buildingToIMDFArchive } from "./imdfArchive";
+import { zipStore } from "./zip";
+import { buildSecurityReport } from "./report";
+import { polygonCentroid, distM } from "./geo";
 
-export type Tool = "select" | "rect" | "polygon" | "vertex" | "link" | "route" | "camera";
+export type Tool =
+  | "select"
+  | "rect"
+  | "polygon"
+  | "vertex"
+  | "link"
+  | "route"
+  | "camera"
+  | "incident"
+  | "patrol";
 
 // Kept at v3 deliberately: cameras are additive + defaulted (see below), so
 // legacy v3 payloads — including the raster underlays added under v3 — load
@@ -33,6 +49,7 @@ export const DEFAULT_LAYERS: LayerVisibility = {
   labels: true,
   routes: true,
   incidents: true,
+  patrols: true,
 };
 
 function loadLayers(): LayerVisibility {
@@ -66,8 +83,11 @@ function loadBuilding(): Building {
         b.units.every((u) => Array.isArray(u.polygon)) &&
         b.openings.every((o) => typeof o.id === "string");
       if (ok) {
-        // Additive migration: legacy payloads predate cameras — default them.
+        // Additive migration: legacy payloads predate these collections — default
+        // them in place (persistence stays v3; same pattern as cameras/underlays).
         if (!Array.isArray(b.cameras)) b.cameras = [];
+        if (!Array.isArray(b.incidents)) b.incidents = [];
+        if (!Array.isArray(b.patrols)) b.patrols = [];
         return b;
       }
     }
@@ -80,12 +100,17 @@ function loadBuilding(): Building {
 const CAM_DEFAULTS = { heading: 0, fovDeg: 90, rangeM: 8, kind: "fixed" as CameraKind };
 let camSeq = 0;
 let roomSeq = 0;
+let incSeq = 0;
+let patSeq = 0;
 
 interface State {
   building: Building;
   activeTool: Tool;
   selectedId: string | null;
   selectedCameraId: string | null;
+  selectedIncidentId: string | null;
+  incidentKind: IncidentKind;
+  patrolDraft: MetreXY[] | null;
   layers: LayerVisibility;
   ordinal: number;
   unit: "m" | "ft";
@@ -134,6 +159,21 @@ interface State {
   updateCamera: (id: string, patch: Partial<Omit<Camera, "id">>) => void;
   deleteCamera: (id: string) => void;
   setSelectedCamera: (id: string | null) => void;
+  addIncident: (at: MetreXY, ordinal: number) => void;
+  moveIncident: (id: string, at: MetreXY) => void;
+  updateIncident: (id: string, patch: Partial<Pick<Incident, "kind" | "note">>) => void;
+  deleteIncident: (id: string) => void;
+  setIncidentKind: (k: IncidentKind) => void;
+  setSelectedIncident: (id: string | null) => void;
+  beginPatrol: (ordinal: number) => void;
+  addPatrolPoint: (p: MetreXY) => void;
+  commitPatrol: () => void;
+  cancelPatrol: () => void;
+  autoPatrol: (ordinal: number) => void;
+  renamePatrol: (id: string, name: string) => void;
+  deletePatrol: (id: string) => void;
+  exportIMDFArchive: () => void;
+  exportSecurityReport: () => void;
   setLayer: (key: keyof LayerVisibility, on: boolean) => void;
   toggleLayer: (key: keyof LayerVisibility) => void;
   importSvgText: (text: string) => void;
@@ -152,6 +192,9 @@ export const useStore = create<State>((set, get) => ({
   activeTool: "select",
   selectedId: null,
   selectedCameraId: null,
+  selectedIncidentId: null,
+  incidentKind: "trespass",
+  patrolDraft: null,
   layers: loadLayers(),
   ordinal: 0,
   unit: "m",
@@ -167,10 +210,19 @@ export const useStore = create<State>((set, get) => ({
   importMsg: null,
   draftCategory: "room",
 
-  setTool: (t) => set({ activeTool: t, pendingLink: null, selectedCameraId: null }),
+  setTool: (t) =>
+    set({
+      activeTool: t,
+      pendingLink: null,
+      selectedCameraId: null,
+      selectedIncidentId: null,
+      // Abandon any in-progress patrol draft on a tool switch (re-armed via the
+      // patrol panel's "Draw patrol" button = beginPatrol).
+      patrolDraft: null,
+    }),
   setDraftCategory: (c) => set({ draftCategory: c }),
   setOrdinal: (o) => set({ ordinal: o }),
-  setSelected: (id) => set({ selectedId: id, selectedCameraId: null }),
+  setSelected: (id) => set({ selectedId: id, selectedCameraId: null, selectedIncidentId: null }),
   setUnit: (u) => set({ unit: u }),
   toggleDims: () => set((s) => ({ showDims: !s.showDims })),
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
@@ -385,7 +437,159 @@ export const useStore = create<State>((set, get) => ({
     })),
 
   setSelectedCamera: (id) =>
-    set(id ? { selectedCameraId: id, selectedId: null } : { selectedCameraId: null }),
+    set(
+      id
+        ? { selectedCameraId: id, selectedId: null, selectedIncidentId: null }
+        : { selectedCameraId: null },
+    ),
+
+  // ---- P10 incidents ----
+  addIncident: (at, ordinal) =>
+    set((s) => {
+      const id = `inc-${Date.now()}-${incSeq++}`;
+      const incident: Incident = { id, ordinal, at, kind: s.incidentKind, note: "" };
+      return {
+        selectedIncidentId: id,
+        selectedId: null,
+        selectedCameraId: null,
+        building: { ...s.building, incidents: [...(s.building.incidents ?? []), incident] },
+      };
+    }),
+
+  moveIncident: (id, at) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        incidents: (s.building.incidents ?? []).map((i) => (i.id === id ? { ...i, at } : i)),
+      },
+    })),
+
+  updateIncident: (id, patch) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        incidents: (s.building.incidents ?? []).map((i) =>
+          i.id === id ? { ...i, ...patch } : i,
+        ),
+      },
+    })),
+
+  deleteIncident: (id) =>
+    set((s) => ({
+      selectedIncidentId: s.selectedIncidentId === id ? null : s.selectedIncidentId,
+      building: {
+        ...s.building,
+        incidents: (s.building.incidents ?? []).filter((i) => i.id !== id),
+      },
+    })),
+
+  setIncidentKind: (k) => set({ incidentKind: k }),
+  setSelectedIncident: (id) =>
+    set(
+      id
+        ? { selectedIncidentId: id, selectedId: null, selectedCameraId: null }
+        : { selectedIncidentId: null },
+    ),
+
+  // ---- P10 patrols ----
+  beginPatrol: () => set({ patrolDraft: [] }),
+  addPatrolPoint: (p) =>
+    set((s) => ({ patrolDraft: [...(s.patrolDraft ?? []), p] })),
+
+  commitPatrol: () =>
+    set((s) => {
+      const draft = s.patrolDraft;
+      if (!draft || draft.length < 2) return { patrolDraft: null };
+      const id = `patrol-${Date.now()}-${patSeq++}`;
+      const n = (s.building.patrols ?? []).length + 1;
+      const patrol: PatrolPath = { id, ordinal: s.ordinal, name: `Patrol ${n}`, points: draft };
+      return {
+        patrolDraft: null,
+        building: { ...s.building, patrols: [...(s.building.patrols ?? []), patrol] },
+      };
+    }),
+
+  cancelPatrol: () => set({ patrolDraft: null }),
+
+  autoPatrol: (ordinal) =>
+    set((s) => {
+      // Greedy nearest-neighbour tour over the floor's room centroids. Straight
+      // segments — can cut through walls (accepted v1; A*-through-corridors is a
+      // noted enhancement).
+      const rooms = s.building.units.filter((u) => u.ordinal === ordinal && isSpace(u.category));
+      if (rooms.length < 2) return {};
+      const centroids = rooms.map((u) => polygonCentroid(u.polygon));
+      const used = new Array(centroids.length).fill(false);
+      const order: MetreXY[] = [];
+      let cur = 0;
+      used[0] = true;
+      order.push(centroids[0]);
+      for (let step = 1; step < centroids.length; step++) {
+        let best = -1;
+        let bestD = Infinity;
+        for (let i = 0; i < centroids.length; i++) {
+          if (used[i]) continue;
+          const d = distM(centroids[cur], centroids[i]);
+          if (d < bestD) {
+            bestD = d;
+            best = i;
+          }
+        }
+        if (best < 0) break;
+        used[best] = true;
+        order.push(centroids[best]);
+        cur = best;
+      }
+      const id = `patrol-${Date.now()}-${patSeq++}`;
+      const n = (s.building.patrols ?? []).length + 1;
+      const patrol: PatrolPath = { id, ordinal, name: `Auto patrol ${n}`, points: order };
+      return {
+        patrolDraft: null,
+        building: { ...s.building, patrols: [...(s.building.patrols ?? []), patrol] },
+      };
+    }),
+
+  renamePatrol: (id, name) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        patrols: (s.building.patrols ?? []).map((p) => (p.id === id ? { ...p, name } : p)),
+      },
+    })),
+
+  deletePatrol: (id) =>
+    set((s) => ({
+      building: {
+        ...s.building,
+        patrols: (s.building.patrols ?? []).filter((p) => p.id !== id),
+      },
+    })),
+
+  // ---- P11 exports ----
+  exportIMDFArchive: () => {
+    const b = get().building;
+    const blob = zipStore(buildingToIMDFArchive(b));
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "building-imdf.zip";
+    a.click();
+    URL.revokeObjectURL(url);
+    set({ importMsg: "Exported IMDF archive (building-imdf.zip)." });
+  },
+
+  exportSecurityReport: () => {
+    const b = get().building;
+    const md = buildSecurityReport(b);
+    const url = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "security-report.md";
+    a.click();
+    URL.revokeObjectURL(url);
+    set({ importMsg: "Exported security report (security-report.md)." });
+  },
+
   setLayer: (key, on) => set((s) => ({ layers: { ...s.layers, [key]: on } })),
   toggleLayer: (key) => set((s) => ({ layers: { ...s.layers, [key]: !s.layers[key] } })),
 
@@ -527,6 +731,8 @@ export const useStore = create<State>((set, get) => ({
       building: loaded,
       selectedId: null,
       selectedCameraId: null,
+      selectedIncidentId: null,
+      patrolDraft: null,
       importMsg: `Loaded ${loaded.units.length} units.`,
     });
   },
@@ -538,6 +744,8 @@ export const useStore = create<State>((set, get) => ({
       goalId: "lab",
       selectedId: null,
       selectedCameraId: null,
+      selectedIncidentId: null,
+      patrolDraft: null,
       importMsg: null,
     }),
 }));

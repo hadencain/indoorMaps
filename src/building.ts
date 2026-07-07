@@ -62,6 +62,8 @@ export const initialBuilding: Building = {
   ],
   verticals: [{ a: "elevator-g", b: "elevator-1", name: "Elevator" }],
   cameras: [],
+  incidents: [],
+  patrols: [],
 };
 
 /**

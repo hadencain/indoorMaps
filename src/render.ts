@@ -1,5 +1,5 @@
 import type { Building, Graph, LngLat } from "./types";
-import { polygonRing, distM, m2ll, bbox } from "./geo";
+import { polygonRing, distM, m2ll, bbox, pointsToLL } from "./geo";
 
 export type FC = GeoJSON.FeatureCollection;
 
@@ -30,6 +30,21 @@ export function gridToGeoJSON(b: Building, size: number): FC {
 
 function line(coordinates: LngLat[]): GeoJSON.Feature {
   return { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates } };
+}
+
+/** Patrol paths as open LineStrings (one Feature per path, tagged with ordinal
+ *  for the floor filter). Rendered as the dashed violet `patrol-line` layer. */
+export function patrolsToGeoJSON(b: Building): FC {
+  const features: GeoJSON.Feature[] = [];
+  for (const p of b.patrols ?? []) {
+    if (p.points.length < 2) continue;
+    features.push({
+      type: "Feature",
+      properties: { id: p.id, ordinal: p.ordinal, name: p.name },
+      geometry: { type: "LineString", coordinates: pointsToLL(b.origin, p.points) },
+    });
+  }
+  return { type: "FeatureCollection", features };
 }
 
 /** Unit polygons (one Feature per unit, tagged with ordinal + category). */
