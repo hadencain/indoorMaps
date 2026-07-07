@@ -4,6 +4,7 @@ import { useVisibility } from "../visibility";
 import { polygonArea } from "../../geo";
 import { formatArea } from "../../format";
 import { unitsCoveredByCamera } from "../../security/coverage-link";
+import SearchBox from "../SearchBox";
 import type { CameraKind } from "../../types";
 
 const M_TO_FT = 3.280839895;
@@ -22,6 +23,7 @@ export default function CameraPanel() {
   const unit = useStore((s) => s.unit);
   const selectedCameraId = useStore((s) => s.selectedCameraId);
   const showCoverage = useStore((s) => s.layers.coverage);
+  const searchQuery = useStore((s) => s.searchQuery);
   const setSelectedCamera = useStore((s) => s.setSelectedCamera);
   const setSelected = useStore((s) => s.setSelected);
   const updateCamera = useStore((s) => s.updateCamera);
@@ -37,7 +39,12 @@ export default function CameraPanel() {
   );
 
   const level = building.levels.find((l) => l.ordinal === ordinal)?.name ?? `L${ordinal}`;
-  const floorCams = building.cameras.filter((c) => c.ordinal === ordinal);
+  const q = searchQuery.trim().toLowerCase();
+  const floorCams = building.cameras.filter(
+    (c) =>
+      c.ordinal === ordinal &&
+      (q === "" || c.name.toLowerCase().includes(q) || c.kind.toLowerCase().includes(q)),
+  );
   const selected = building.cameras.find((c) => c.id === selectedCameraId) ?? null;
 
   // ---- No camera selected: place hint + coverage stub + camera list ----
@@ -63,6 +70,11 @@ export default function CameraPanel() {
           )}
         </div>
 
+        {building.cameras.some((c) => c.ordinal === ordinal) && (
+          <div style={{ marginTop: 12 }}>
+            <SearchBox placeholder="Search cameras…" />
+          </div>
+        )}
         {floorCams.length > 0 && (
           <div className="roomlist" style={{ marginTop: 12 }}>
             {floorCams.map((c) => (

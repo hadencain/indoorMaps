@@ -387,6 +387,37 @@ button.wide.ghost {
   color: var(--dim);
   margin-bottom: var(--s3);
 }
+.searchbox {
+  position: relative;
+  margin-bottom: var(--s3);
+}
+.searchbox input {
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 6px 26px 6px 8px;
+  font-size: 12px;
+}
+.searchbox input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.searchclear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+.searchclear:hover {
+  color: var(--accent);
+}
 .panel label {
   display: block;
   font-size: 10px;

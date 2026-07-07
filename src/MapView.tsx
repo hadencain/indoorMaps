@@ -42,6 +42,7 @@ export default function MapView() {
   const selectedCameraId = useStore((s) => s.selectedCameraId);
   const selectedIncidentId = useStore((s) => s.selectedIncidentId);
   const patrolDraft = useStore((s) => s.patrolDraft);
+  const searchQuery = useStore((s) => s.searchQuery);
   const unit = useStore((s) => s.unit);
   const showDims = useStore((s) => s.showDims);
   const showGrid = useStore((s) => s.showGrid);
@@ -501,6 +502,31 @@ export default function MapView() {
     vis("patrol-line", layers.patrols);
     vis("grid-line", showGrid);
   }, [ready, layers, showGrid]);
+
+  // Search dim (P12): when the search box is non-empty, dim units on the floor
+  // whose name/category doesn't match (case-insensitive substring); matches keep
+  // full opacity. Purely visual — never changes selection. Empty query restores
+  // the flat 0.9 fill. `index-of` returns >= 0 on a substring hit.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !map.getLayer("unit-fill")) return;
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) {
+      map.setPaintProperty("unit-fill", "fill-opacity", 0.9);
+      return;
+    }
+    const match: maplibregl.ExpressionSpecification = [
+      "any",
+      [">=", ["index-of", q, ["downcase", ["get", "name"]]], 0],
+      [">=", ["index-of", q, ["downcase", ["get", "category"]]], 0],
+    ];
+    map.setPaintProperty("unit-fill", "fill-opacity", [
+      "case",
+      match,
+      0.9,
+      0.12,
+    ] as maplibregl.ExpressionSpecification);
+  }, [ready, searchQuery]);
 
   // Rebuild the snap grid when toggled / resized / building extent changes.
   useEffect(() => {

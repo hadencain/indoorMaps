@@ -1,10 +1,12 @@
 import { useStore } from "../../store";
 import { isSpace } from "../../categories";
+import SearchBox from "../SearchBox";
 
 export default function FloorContentsPanel() {
   const building = useStore((s) => s.building);
   const ordinal = useStore((s) => s.ordinal);
   const selectedIds = useStore((s) => s.selectedIds);
+  const searchQuery = useStore((s) => s.searchQuery);
   const setSelected = useStore((s) => s.setSelected);
   const toggleSelected = useStore((s) => s.toggleSelected);
   const renameUnit = useStore((s) => s.renameUnit);
@@ -13,15 +15,26 @@ export default function FloorContentsPanel() {
   const setUnderlayOpacity = useStore((s) => s.setUnderlayOpacity);
   const nudgeUnderlay = useStore((s) => s.nudgeUnderlay);
   const removeUnderlay = useStore((s) => s.removeUnderlay);
-  const spaces = building.units.filter((u) => u.ordinal === ordinal && isSpace(u.category));
+  const q = searchQuery.trim().toLowerCase();
+  const spaces = building.units.filter(
+    (u) =>
+      u.ordinal === ordinal &&
+      isSpace(u.category) &&
+      (q === "" || u.name.toLowerCase().includes(q) || u.category.toLowerCase().includes(q)),
+  );
   const underlay = (building.underlays ?? []).find((u) => u.ordinal === ordinal);
   const NUDGE = 1; // metres per nudge step
 
   return (
     <div className="panel">
       <div className="panel-title">Floor contents</div>
+      <SearchBox />
       {spaces.length === 0 && (
-        <p className="hint">No spaces on this floor. Draw one with the ▢ or ⬡ tool.</p>
+        <p className="hint">
+          {q === ""
+            ? "No spaces on this floor. Draw one with the ▢ or ⬡ tool."
+            : "No spaces match your search."}
+        </p>
       )}
       <div className="roomlist">
         {spaces.map((r) => (
