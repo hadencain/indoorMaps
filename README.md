@@ -70,7 +70,7 @@ npm run build      # type-check + production build (tsc -b && vite build)
 npm run preview    # serve the production build locally
 ```
 
-The app opens on a **demo "secure complex"** — a three-floor facility (two wings per floor around a central breezeway, 36 rooms, escalating security by floor) pre-fitted with 73 cameras placed by standard coverage logic. Switch floors and toggle **Coverage** / **Blind spots** to see the occlusion engine at work. All edits persist automatically to the browser's local storage; if you've edited a previous building, use **Data → Reset building** to load the demo.
+The app opens on a **demo casino** — an irregular, two-level facility. Level 0 is a curved, no-right-angles gaming floor (a central concourse ringed by eight gaming-zone wedges, with structural columns that cast real occlusion shadows) and Level 1 is the rectangular staff back-of-house (Surveillance, Count Room, Vault, Server, Records). It's pre-fitted with 66 cameras by casino doctrine, giving ~98% gaming-floor and 100% back-of-house coverage. Switch floors and toggle **Coverage** / **Blind spots** to see the occlusion engine at work. All edits persist automatically to the browser's local storage; if you've edited a previous building, use **Data → Reset building** to load the demo.
 
 **Stack:** Vite · React 18 · TypeScript · MapLibre GL JS (rendering) · Zustand (state) · polygon-clipping (boolean geometry) · lucide-react (icons) · self-hosted Geist fonts. No runtime network requests.
 
