@@ -15,6 +15,7 @@ import {
   nearestPointOnPolygon,
 } from "./geo";
 import { rectFromDrag } from "./building";
+import { pointInRing } from "./coverage";
 import type { VisibilityPolygon } from "./coverage";
 import { gridToGeoJSON } from "./render";
 import { formatLength, formatArea } from "./format";
@@ -42,6 +43,7 @@ export default function MapView() {
   const selectedCameraId = useStore((s) => s.selectedCameraId);
   const selectedIncidentId = useStore((s) => s.selectedIncidentId);
   const patrolDraft = useStore((s) => s.patrolDraft);
+  const probe = useStore((s) => s.probe);
   const searchQuery = useStore((s) => s.searchQuery);
   const unit = useStore((s) => s.unit);
   const showDims = useStore((s) => s.showDims);
@@ -64,6 +66,7 @@ export default function MapView() {
   const cameraMode = activeTool === "camera";
   const incidentMode = activeTool === "incident";
   const patrolMode = activeTool === "patrol";
+  const inspectMode = activeTool === "inspect";
   const routeLines = geom?.lines ?? EMPTY;
   const routePoints = geom?.points ?? [];
 
@@ -90,9 +93,13 @@ export default function MapView() {
   const onAddPatrolPoint = useStore((s) => s.addPatrolPoint);
   const onCommitPatrol = useStore((s) => s.commitPatrol);
   const onCancelPatrol = useStore((s) => s.cancelPatrol);
+  const onSetProbe = useStore((s) => s.setProbe);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  // Dedicated ref for the inspect-mode probe dot, managed only by the probe
+  // effect so the main marker-rebuild effect can't wipe it out of sync.
+  const probeMarkerRef = useRef<maplibregl.Marker | null>(null);
   const measureRef = useRef<maplibregl.Marker | null>(null);
   const drawRef = useRef<{ poly: MetreXY[]; rectStart: MetreXY | null }>({
     poly: [],
@@ -136,6 +143,10 @@ export default function MapView() {
     onAddPatrolPoint,
     onCommitPatrol,
     onCancelPatrol,
+    inspectMode,
+    visPolys,
+    probe,
+    onSetProbe,
     layers,
   });
   live.current = {
@@ -173,6 +184,10 @@ export default function MapView() {
     onAddPatrolPoint,
     onCommitPatrol,
     onCancelPatrol,
+    inspectMode,
+    visPolys,
+    probe,
+    onSetProbe,
     layers,
   };
 
@@ -220,6 +235,8 @@ export default function MapView() {
       map.addSource("route", { type: "geojson", data: EMPTY });
       map.addSource("patrols", { type: "geojson", data: patrolsToGeoJSON(building) });
       map.addSource("draft", { type: "geojson", data: EMPTY });
+      // Inspect-mode sightline: selected camera → probed point (P-inspect).
+      map.addSource("probe-line", { type: "geojson", data: EMPTY });
 
       map.addLayer({
         id: "grid-line",
@@ -353,6 +370,20 @@ export default function MapView() {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": "#8b7bff", "line-width": 2.5, "line-dasharray": [3, 2] },
       });
+      // Sightline from the selected camera to the probed point (inspect mode).
+      // Thin dashed accent line; sits above coverage, below draft/markers.
+      map.addLayer({
+        id: "probe-line",
+        type: "line",
+        source: "probe-line",
+        layout: { "line-cap": "round" },
+        paint: {
+          "line-color": "#5cf6ee",
+          "line-width": 1.25,
+          "line-dasharray": [2, 2],
+          "line-opacity": 0.9,
+        },
+      });
       map.addLayer({
         id: "draft-fill",
         type: "fill",
@@ -478,6 +509,42 @@ export default function MapView() {
     (map.getSource("coverage") as maplibregl.GeoJSONSource | undefined)?.setData(cov);
     (map.getSource("blindspots") as maplibregl.GeoJSONSource | undefined)?.setData(blind);
   }, [ready, coverage, building.origin]);
+
+  // Inspect-mode probe visuals: a dot at the probed point + a sightline from the
+  // SELECTED camera to it. Managed independently of the main marker rebuild.
+  // Cleared when probe is null (tool switch / Esc set it null in the store). The
+  // sightline only draws when the selected camera is on the active floor.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const origin = building.origin;
+    probeMarkerRef.current?.remove();
+    probeMarkerRef.current = null;
+    const lineSrc = map.getSource("probe-line") as maplibregl.GeoJSONSource | undefined;
+    if (!probe) {
+      lineSrc?.setData(EMPTY);
+      return;
+    }
+    probeMarkerRef.current = new maplibregl.Marker({ element: labelEl("", "probe-dot") })
+      .setLngLat(m2ll(origin, probe.point[0], probe.point[1]))
+      .addTo(map);
+    const cam = building.cameras.find((c) => c.id === selectedCameraId);
+    if (cam && cam.ordinal === ordinal) {
+      lineSrc?.setData({
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            m2ll(origin, cam.at[0], cam.at[1]),
+            m2ll(origin, probe.point[0], probe.point[1]),
+          ],
+        },
+      });
+    } else {
+      lineSrc?.setData(EMPTY);
+    }
+  }, [ready, probe, selectedCameraId, ordinal, building]);
 
   // Layer-visibility (P9): toggle managed native layers on/off. Guards every id
   // with getLayer so a not-yet-built layer (e.g. incidents, Phase E) is a silent
@@ -824,7 +891,7 @@ export default function MapView() {
     const map = mapRef.current;
     if (!map || !ready) return;
     map.getCanvas().style.cursor =
-      drawTool !== "none" || cameraMode || incidentMode || patrolMode
+      drawTool !== "none" || cameraMode || incidentMode || patrolMode || inspectMode
         ? "crosshair"
         : linkMode
           ? "pointer"
@@ -837,7 +904,7 @@ export default function MapView() {
     } else {
       map.doubleClickZoom.disable();
     }
-  }, [ready, drawTool, linkMode, cameraMode, incidentMode, patrolMode]);
+  }, [ready, drawTool, linkMode, cameraMode, incidentMode, patrolMode, inspectMode]);
 
   // Patrol tool keyboard: Enter commits the draft, Escape cancels it.
   useEffect(() => {
@@ -856,6 +923,8 @@ export default function MapView() {
       if (e.key !== "Escape") return;
       setMenu(null);
       if (live.current.selectedCameraId) live.current.onSelectCamera(null);
+      // Clear any inspect-mode probe (dot + sightline) without leaving the tool.
+      if (live.current.probe) live.current.onSetProbe(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -1162,6 +1231,28 @@ export default function MapView() {
         // their own click). New pin is auto-selected for note entry.
         if (live.current.incidentMode) {
           live.current.onAddIncident(toMetre(e.lngLat), live.current.ordinal);
+          return;
+        }
+        // Inspect mode: resolve which cameras actually SEE the clicked point via
+        // the occlusion-clipped visibility rings (P5, NOT radial cones), ranked
+        // nearest-camera-first, and stash the transient probe. The raw click
+        // point is used (no grid snap) so the hit test matches the pixel clicked.
+        if (live.current.inspectMode) {
+          const origin = live.current.building.origin;
+          const pt = ll2m(origin, e.lngLat.lng, e.lngLat.lat);
+          const ord = live.current.ordinal;
+          const ringById = new Map(
+            live.current.visPolys.map((v) => [v.cameraId, v.ring]),
+          );
+          const hits = live.current.building.cameras.filter((c) => {
+            if (c.ordinal !== ord) return false;
+            const ring = ringById.get(c.id);
+            return !!ring && ring.length >= 3 && pointInRing(pt, ring);
+          });
+          hits.sort((a, b) => distM(a.at, pt) - distM(b.at, pt));
+          const rankedIds = hits.map((c) => c.id);
+          live.current.onSetProbe({ point: pt, cameraIds: rankedIds });
+          live.current.onSelectCamera(rankedIds[0] ?? null);
           return;
         }
         // Patrol mode: click adds a waypoint (the draft is auto-armed on entering
