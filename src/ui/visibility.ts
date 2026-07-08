@@ -84,7 +84,15 @@ export function useVisibility(): VisibilityInfo {
   // when the visibility set or floor geometry changes.
   const coverage = useMemo<CoverageResult | null>(() => {
     if (!coverageOn && !blindOn) return null;
-    return computeCoverage(building, ordinal, polys);
+    try {
+      return computeCoverage(building, ordinal, polys);
+    } catch {
+      // The boolean-geometry library (polygon-clipping) can throw on pathological
+      // / near-degenerate inputs (e.g. many overlapping high-vertex visibility
+      // polygons). Degrade to no coverage overlay rather than crash the render;
+      // the per-camera FOV cones still show.
+      return null;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coverageOn, blindOn, polys, walls, ordinal]);
 

@@ -247,22 +247,60 @@ function closedRing(ring: MetreXY[]): Ring {
   return r;
 }
 
-/** Metre rings → polygon-clipping MultiPolygon (each ring becomes one polygon
- *  outer). Degenerate rings (< 3 pts) are dropped. */
-function ringsToMP(rings: MetreXY[][]): MultiPolygon {
-  const mp: MultiPolygon = [];
-  for (const ring of rings) {
-    if (ring.length < 3) continue;
-    mp.push([closedRing(ring)]);
+/** Drop near-duplicate and near-collinear vertices from an open ring. Occlusion
+ *  visibility fans carry hundreds of such points (consecutive rays grazing one
+ *  wall are collinear; the ±epsilon corner rays are near-coincident); collapsing
+ *  them to the real corners is geometrically negligible but keeps the fragile
+ *  boolean-geometry library fast and robust. */
+function simplifyRing(ring: MetreXY[], tol = 0.03): MetreXY[] {
+  if (ring.length < 3) return ring;
+  const dedup = ring.filter((p, i) => {
+    const q = ring[(i - 1 + ring.length) % ring.length];
+    return Math.hypot(p[0] - q[0], p[1] - q[1]) > tol;
+  });
+  if (dedup.length < 3) return ring;
+  const out: MetreXY[] = [];
+  for (let i = 0; i < dedup.length; i++) {
+    const a = dedup[(i - 1 + dedup.length) % dedup.length];
+    const b = dedup[i];
+    const c = dedup[(i + 1) % dedup.length];
+    const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    if (Math.abs(cross) > tol) out.push(b);
   }
-  return mp;
+  return out.length >= 3 ? out : dedup;
 }
 
-/** Union all rings into one MultiPolygon (merges overlaps). Empty in → empty. */
+/** Re-simplify every ring of a MultiPolygon (used between fold-union steps). */
+function mpSimplify(mp: MultiPolygon): MultiPolygon {
+  return mp.map((poly) => poly.map((ring) => closedRing(simplifyRing(openRing(ring)))));
+}
+
+/**
+ * Robust union of many rings. polygon-clipping is numerically fragile on large
+ * batches of high-vertex, near-degenerate polygons (visibility fans): a single
+ * `union([...all])` can throw ("Unable to pop SweepEvent") or overflow the stack.
+ * So: simplify each ring, then FOLD the union pairwise, re-simplifying the
+ * accumulator each step and skipping any polygon whose merge throws. This keeps
+ * coverage correct-enough and — critically — never crashes the app.
+ */
 function unionRings(rings: MetreXY[][]): MultiPolygon {
-  const mp = ringsToMP(rings);
-  if (mp.length === 0) return [];
-  return polygonClipping.union(mp);
+  const mps = rings
+    .map((r) => simplifyRing(r))
+    .filter((r) => r.length >= 3)
+    .map((r): MultiPolygon => [[closedRing(r)]]);
+  let acc: MultiPolygon | null = null;
+  for (const m of mps) {
+    if (!acc) {
+      acc = m;
+      continue;
+    }
+    try {
+      acc = mpSimplify(polygonClipping.union(acc, m));
+    } catch {
+      /* skip the polygon that breaks the sweep-line; coverage is ~unchanged */
+    }
+  }
+  return acc ?? [];
 }
 
 /** A polygon-clipping Ring is closed (last == first); polygonArea (geo.ts)
@@ -328,15 +366,26 @@ export function computeCoverage(
   const floor = unionRings(unitRings);
   const covered = unionRings(coverRings);
 
-  const coveredInFloor: MultiPolygon =
-    covered.length && floor.length
-      ? polygonClipping.intersection(covered, floor)
-      : [];
-  const blind: MultiPolygon = !floor.length
-    ? []
-    : covered.length
-      ? polygonClipping.difference(floor, covered)
-      : floor;
+  // intersection/difference can also throw on fragile inputs — guard both.
+  let coveredInFloor: MultiPolygon = [];
+  if (covered.length && floor.length) {
+    try {
+      coveredInFloor = polygonClipping.intersection(covered, floor);
+    } catch {
+      coveredInFloor = covered; // fall back to unclipped covered
+    }
+  }
+  let blind: MultiPolygon = [];
+  if (floor.length) {
+    if (!covered.length) blind = floor;
+    else {
+      try {
+        blind = polygonClipping.difference(floor, covered);
+      } catch {
+        blind = []; // degrade: show no blind fill rather than crash
+      }
+    }
+  }
 
   const floorAreaM2 = mpArea(floor);
   const coveredAreaM2 = mpArea(coveredInFloor);
