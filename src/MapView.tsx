@@ -19,7 +19,7 @@ import { pointInRing } from "./coverage";
 import type { VisibilityPolygon } from "./coverage";
 import { gridToGeoJSON } from "./render";
 import { formatLength, formatArea } from "./format";
-import { CATEGORY_ORDER, CATEGORY_LABELS, categoryFillExpression } from "./categories";
+import { CATEGORY_ORDER, CATEGORY_LABELS, functionFillExpression } from "./categories";
 import { useStore } from "./store";
 import { useRoute } from "./ui/route";
 import { useVisibility } from "./ui/visibility";
@@ -51,6 +51,8 @@ export default function MapView() {
   const gridSize = useStore((s) => s.gridSize);
   const { geom } = useRoute();
   const layers = useStore((s) => s.layers);
+  const amenityFilter = useStore((s) => s.amenityFilter);
+  const highlightedPatrolId = useStore((s) => s.highlightedPatrolId);
   // Occlusion-clipped visibility polygons for the active floor's cameras (P5) +
   // coverage/blind analysis (P6, null unless the coverage/blind layer is on). Recomputed off
   // the render path by the hook's memo (per-camera cache) — a camera drag/param
@@ -207,6 +209,9 @@ export default function MapView() {
       dragRotate: false, // right-drag is free for the properties menu
     });
     mapRef.current = map;
+    // Metric scale bar — a professional-plan staple (bearing is locked to 0 since
+    // dragRotate is off, so the plan is always true north-up).
+    map.addControl(new maplibregl.ScaleControl({ unit: "metric", maxWidth: 120 }), "bottom-left");
     // Suppress the native browser context menu over the map (we render our own).
     containerRef.current.addEventListener("contextmenu", (e) => e.preventDefault());
 
@@ -252,7 +257,7 @@ export default function MapView() {
         type: "fill",
         source: "units",
         paint: {
-          "fill-color": categoryFillExpression() as maplibregl.ExpressionSpecification,
+          "fill-color": functionFillExpression() as maplibregl.ExpressionSpecification,
           "fill-opacity": 0.9,
         },
       });
@@ -284,7 +289,8 @@ export default function MapView() {
             "#f2c14e",
             "#f2c14e",
           ],
-          "fill-opacity": 0.18,
+          // Restricted (BOH money rooms) reads harder than secure.
+          "fill-opacity": ["match", ["get", "security"], "restricted", 0.32, 0.15] as maplibregl.ExpressionSpecification,
         },
         filter: secureFilter,
       });
@@ -302,7 +308,7 @@ export default function MapView() {
             "#f2c14e",
             "#f2c14e",
           ],
-          "line-width": 2,
+          "line-width": ["match", ["get", "security"], "restricted", 2.6, 1.8] as maplibregl.ExpressionSpecification,
           "line-dasharray": [2, 2],
         },
         filter: secureFilter,
@@ -464,9 +470,14 @@ export default function MapView() {
         { id: "fixture-line", type: "line", source: "fixtures", paint: { "line-color": "#0b0d10", "line-width": 0.5 } },
         "coverage-fill",
       );
-      // Thick exterior wall — the footprint outline, above fixtures, below overlays.
+      // Exterior wall with poché weight: a wide dark casing under a thin light
+      // core, so the perimeter reads as a solid drawn wall (real-plan grammar).
       map.addLayer(
-        { id: "footprint-wall", type: "line", source: "footprint", paint: { "line-color": "#5b6672", "line-width": 3 } },
+        { id: "footprint-wall-casing", type: "line", source: "footprint", paint: { "line-color": "#05070a", "line-width": 9, "line-opacity": 0.95 } },
+        "coverage-fill",
+      );
+      map.addLayer(
+        { id: "footprint-wall", type: "line", source: "footprint", paint: { "line-color": "#7c8898", "line-width": 2.4 } },
         "coverage-fill",
       );
 
@@ -689,6 +700,7 @@ export default function MapView() {
     map.setFilter("unit-fill", floorFilter);
     map.setFilter("unit-outline", floorFilter);
     map.setFilter("footprint-fill", floorFilter);
+    map.setFilter("footprint-wall-casing", floorFilter);
     map.setFilter("footprint-wall", floorFilter);
     map.setFilter("fixture-fill", floorFilter);
     map.setFilter("fixture-line", floorFilter);
@@ -953,6 +965,7 @@ export default function MapView() {
       };
       for (const am of building.amenities ?? []) {
         if (am.ordinal !== ordinal) continue;
+        if (amenityFilter[am.kind] === false) continue; // per-kind display filter
         const el = labelEl(glyph[am.kind] ?? "?", `amenity amenity-${am.kind}`);
         el.title = am.name || am.kind;
         markersRef.current.push(
@@ -960,7 +973,18 @@ export default function MapView() {
         );
       }
     }
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers]);
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter]);
+
+  // Patrol highlight (display mode): emphasize the selected route, dim the rest.
+  // Data-driven paint keyed on the feature `id` (patrolsToGeoJSON tags each line).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !map.getLayer("patrol-line")) return;
+    const hid = highlightedPatrolId;
+    map.setPaintProperty("patrol-line", "line-width", hid ? ["case", ["==", ["get", "id"], hid], 5, 1.5] : 2.5);
+    map.setPaintProperty("patrol-line", "line-opacity", hid ? ["case", ["==", ["get", "id"], hid], 1, 0.22] : 1);
+    map.setPaintProperty("patrol-line", "line-color", hid ? ["case", ["==", ["get", "id"], hid], "#b6acff", "#6a5db0"] : "#8b7bff");
+  }, [ready, highlightedPatrolId]);
 
   // Draw-tool changes: cursor, dbl-click zoom, and reset any in-progress draft.
   useEffect(() => {

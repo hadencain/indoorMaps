@@ -1,5 +1,6 @@
 import type { Building, Graph, LngLat } from "./types";
 import { polygonRing, distM, m2ll, bbox, pointsToLL } from "./geo";
+import { functionBucket } from "./categories";
 
 export type FC = GeoJSON.FeatureCollection;
 
@@ -82,6 +83,8 @@ export function unitsToGeoJSON(b: Building): FC {
         id: u.id,
         ordinal: u.ordinal,
         category: u.category,
+        // Functional bucket for the space-plan fill (drives functionFillExpression).
+        func: functionBucket(u),
         name: u.name,
         // Access-control level for the secure-perimeter `match` filter (P8).
         // Default "public" so the filter has a value on every feature.

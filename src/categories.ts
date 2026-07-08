@@ -76,3 +76,55 @@ export function categoryFillExpression(): unknown[] {
   cases.push("#171f2b"); // fallback
   return cases;
 }
+
+/**
+ * FUNCTIONAL fill buckets — a security/space plan reads by FUNCTION, not by the
+ * generic "room" category (every casino space is category "room"). Bucketed by
+ * unit id-prefix (the demo generator's convention) with a category fallback for
+ * generic buildings. Muted, tuned against the #191411 carpet slab; the
+ * secure/restricted tint still layers on top for access-control units.
+ */
+export const FUNCTION_LABELS: Record<string, string> = {
+  gaming: "Gaming floor",
+  circ: "Circulation",
+  premium: "Premium gaming",
+  fnb: "Food & bar",
+  show: "Entertainment",
+  sport: "Sportsbook",
+  cage: "Cage / cash",
+  boh: "Back of house",
+  core: "Vertical core",
+  outside: "Exterior",
+};
+export const FUNCTION_COLORS: Record<string, string> = {
+  gaming: "#1c232f",
+  circ: "#26314a",
+  premium: "#2c2442",
+  fnb: "#2d2519",
+  show: "#271d36",
+  sport: "#162b33",
+  cage: "#2b2113",
+  boh: "#1e242c",
+  core: "#0e3b3a",
+  outside: "#12261a",
+};
+export function functionBucket(u: Unit): string {
+  const id = u.id;
+  if (id.startsWith("pit-")) return "gaming";
+  if (id.startsWith("aisle-") || u.category === "corridor") return "circ";
+  if (id.startsWith("poker-") || id.startsWith("hilimit-")) return "premium";
+  if (id.startsWith("food-") || id.startsWith("bar-")) return "fnb";
+  if (id.startsWith("showroom-")) return "show";
+  if (id.startsWith("sport-")) return "sport";
+  if (id.startsWith("cage-")) return "cage";
+  if (id.startsWith("boh-")) return "boh";
+  if (u.category === "stairs" || u.category === "elevator") return "core";
+  if (u.category === "outside") return "outside";
+  return "gaming";
+}
+export function functionFillExpression(): unknown[] {
+  const cases: unknown[] = ["match", ["get", "func"]];
+  for (const k of Object.keys(FUNCTION_COLORS)) cases.push(k, FUNCTION_COLORS[k]);
+  cases.push(FUNCTION_COLORS.gaming); // fallback
+  return cases;
+}

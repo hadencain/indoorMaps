@@ -3,6 +3,8 @@ import MapView from "../MapView";
 import TopBar from "./TopBar";
 import ToolRail from "./ToolRail";
 import Inspector from "./Inspector";
+import OperatorPanel from "./panels/OperatorPanel";
+import MapChrome from "./MapChrome";
 import ViewControls from "./ViewControls";
 import StatusBar from "./StatusBar";
 import { useStore } from "../store";
@@ -10,6 +12,7 @@ import { selectableUnits } from "../building";
 
 export default function AppShell() {
   const building = useStore((s) => s.building);
+  const mode = useStore((s) => s.mode);
   const selectedId = useStore((s) => s.selectedId);
   const startId = useStore((s) => s.startId);
   const goalId = useStore((s) => s.goalId);
@@ -33,6 +36,7 @@ export default function AppShell() {
   // Delete/Backspace removes selected room (unless typing); Esc handled in MapView.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (useStore.getState().mode !== "edit") return; // no destructive keys in display
       if (e.key !== "Delete" && e.key !== "Backspace") return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
@@ -54,6 +58,7 @@ export default function AppShell() {
   // typing in a text field so editing a name/note keeps native undo.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (useStore.getState().mode !== "edit") return; // undo/redo is authoring-only
       if (!(e.ctrlKey || e.metaKey)) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
@@ -70,15 +75,17 @@ export default function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo]);
 
+  const display = mode === "display";
   return (
-    <div className="shell">
+    <div className={display ? "shell display" : "shell"}>
       <TopBar />
-      <ToolRail />
+      {!display && <ToolRail />}
       <div className="canvas-zone">
         <MapView />
         <ViewControls />
+        {display && <MapChrome />}
       </div>
-      <Inspector />
+      {display ? <OperatorPanel /> : <Inspector />}
       <StatusBar />
     </div>
   );
