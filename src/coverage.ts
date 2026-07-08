@@ -57,6 +57,30 @@ export function sectorRing(cam: Camera): MetreXY[] {
   return [[cx, cy], ...arc];
 }
 
+/**
+ * Even-odd point-in-polygon test (ray casting) on an OPEN ring — no repeated
+ * last point, same convention as Unit.polygon and VisibilityPolygon.ring.
+ *
+ * Cast a ray from `pt` along +x and count edge crossings; odd ⇒ inside. Points
+ * exactly on an edge are boundary cases (may report either way) — acceptable
+ * for a click-hit test where the user is clicking interior space, not tracing
+ * an edge to the pixel.
+ */
+export function pointInRing(pt: MetreXY, ring: MetreXY[]): boolean {
+  const [px, py] = pt;
+  let inside = false;
+  const n = ring.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const intersects =
+      yi > py !== yj > py &&
+      px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
 // ---------------------------------------------------------------------------
 // P5 — Wall occlusion (exact endpoint-casting visibility polygon)
 // ---------------------------------------------------------------------------

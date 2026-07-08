@@ -101,6 +101,11 @@ export interface Camera {
   rangeM: number; // useful sight range in metres (hard cap on sightline length)
   kind: CameraKind;
   name: string;
+  /** Freeform device/stream reference (RTSP URL, NVR channel, device id, …).
+   *  The live-console app resolves this to a real feed; the prototype only
+   *  stores + echoes it. Optional + additive — persistence stays v3 (a camera
+   *  with no `streamRef` loads unchanged; default undefined). */
+  streamRef?: string;
 }
 
 /** What an incident annotation records. Drives the pin color + kind dropdown. */

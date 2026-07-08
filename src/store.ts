@@ -32,7 +32,8 @@ export type Tool =
   | "route"
   | "camera"
   | "incident"
-  | "patrol";
+  | "patrol"
+  | "inspect";
 
 // Kept at v3 deliberately: cameras are additive + defaulted (see below), so
 // legacy v3 payloads — including the raster underlays added under v3 — load
@@ -111,6 +112,14 @@ let roomSeq = 0;
 let incSeq = 0;
 let patSeq = 0;
 
+/** Transient click-to-camera probe result. NOT persisted, NOT routed through
+ *  `commit`/undo — pure session UI state. `cameraIds` are the cameras whose
+ *  occlusion-clipped view contains `point`, ranked nearest-camera-first. */
+export interface Probe {
+  point: MetreXY;
+  cameraIds: string[];
+}
+
 interface State {
   building: Building;
   // Undo/redo — bounded in-memory snapshot stacks of the `building` slice only.
@@ -124,6 +133,8 @@ interface State {
   selectedIncidentId: string | null;
   incidentKind: IncidentKind;
   patrolDraft: MetreXY[] | null;
+  // Transient click-to-camera probe (inspect tool). Session-only; never persisted.
+  probe: Probe | null;
   layers: LayerVisibility;
   ordinal: number;
   unit: "m" | "ft";
@@ -173,6 +184,7 @@ interface State {
   updateCamera: (id: string, patch: Partial<Omit<Camera, "id">>) => void;
   deleteCamera: (id: string) => void;
   setSelectedCamera: (id: string | null) => void;
+  setProbe: (p: Probe | null) => void;
   addIncident: (at: MetreXY, ordinal: number) => void;
   moveIncident: (id: string, at: MetreXY) => void;
   updateIncident: (id: string, patch: Partial<Pick<Incident, "kind" | "note">>) => void;
@@ -238,6 +250,7 @@ export const useStore = create<State>((set, get) => {
     selectedIncidentId: null,
     incidentKind: "trespass",
     patrolDraft: null,
+    probe: null,
     layers: loadLayers(),
     ordinal: 0,
     unit: "m",
@@ -264,6 +277,8 @@ export const useStore = create<State>((set, get) => {
         // immediately (no separate "Draw patrol" step); any other tool switch
         // abandons an in-progress draft.
         patrolDraft: t === "patrol" ? [] : null,
+        // Any tool switch clears a transient probe (including leaving inspect).
+        probe: null,
       }),
     setDraftCategory: (c) => set({ draftCategory: c }),
     setOrdinal: (o) => set({ ordinal: o }),
@@ -465,6 +480,9 @@ export const useStore = create<State>((set, get) => {
           ? { selectedCameraId: id, selectedId: null, selectedIds: [], selectedIncidentId: null }
           : { selectedCameraId: null },
       ),
+
+    // Transient — never routed through commit/undo, never persisted.
+    setProbe: (p) => set({ probe: p }),
 
     // ---- P10 incidents ----
     addIncident: (at, ordinal) => {
