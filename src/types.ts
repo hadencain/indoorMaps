@@ -162,6 +162,28 @@ export interface Fixture {
   polygon: MetreXY[];
 }
 
+/** A point-of-interest marker (IMDF "amenity"): restroom, ATM, exit, etc. Drives
+ *  a small glyph badge on the map. Visual/wayfinding aid — not a unit. */
+export type AmenityKind =
+  | "restroom"
+  | "atm"
+  | "exit"
+  | "info"
+  | "firstaid"
+  | "ticketing"
+  | "dining"
+  | "bar"
+  | "coatcheck"
+  | "smoking";
+
+export interface Amenity {
+  id: string;
+  ordinal: number;
+  at: MetreXY;
+  kind: AmenityKind;
+  name?: string;
+}
+
 /** The building outline for one floor — a floor-slab base + thick exterior wall,
  *  drawn beneath everything so the plan reads as an enclosed building. Visual
  *  only; coverage still measures the units. */
@@ -189,6 +211,8 @@ export interface Building {
   fixtures?: Fixture[];
   /** Per-floor building outline (floor slab + exterior wall). Additive; visual. */
   footprints?: Footprint[];
+  /** Point-of-interest markers (restrooms, ATMs, exits…). Additive; visual. */
+  amenities?: Amenity[];
 }
 
 /** Per-overlay visibility toggles (UI state; persisted separately from the
@@ -203,6 +227,7 @@ export interface LayerVisibility {
   incidents: boolean; // incident markers (Phase E)
   patrols: boolean; // patrol path lines (Phase E)
   fixtures: boolean; // furniture/equipment (tables, machines, bars…)
+  amenities: boolean; // POI markers (restrooms, ATMs, exits…)
 }
 
 export interface NodeMeta {

@@ -9,6 +9,7 @@ type Row = { label: string; key: keyof LayerVisibility } | { label: string; grid
 
 const ROWS: Row[] = [
   { label: "Fixtures", key: "fixtures" },
+  { label: "Amenities", key: "amenities" },
   { label: "Cameras", key: "cameras" },
   { label: "Coverage", key: "coverage" },
   { label: "Blind spots", key: "blindSpots" },

@@ -985,6 +985,37 @@ button.wide.ghost {
   text-align: center;
 }
 
+/* Amenity POI badges (restrooms / ATMs / exits / info / …) */
+.amenity {
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #05070a;
+  background: #b9c2cc;
+  border: 1px solid #05070a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.amenity-exit {
+  background: #43d675;
+}
+.amenity-firstaid {
+  background: #ff5c5c;
+  color: #fff;
+}
+.amenity-atm {
+  background: #f2c14e;
+}
+.amenity-info {
+  background: #00d7cd;
+}
+
 .label-sub {
   font-size: 10px;
   color: var(--accent);

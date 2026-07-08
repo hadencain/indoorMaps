@@ -942,6 +942,22 @@ export default function MapView() {
         markersRef.current.push(marker);
       }
     }
+
+    // Amenity POI markers (restrooms / ATMs / exits / info / …), gated by layers.
+    if (layers.amenities) {
+      const glyph: Record<string, string> = {
+        restroom: "WC", atm: "$", exit: "EXIT", info: "i", firstaid: "+",
+        ticketing: "TIX", dining: "F", bar: "B", coatcheck: "C", smoking: "S",
+      };
+      for (const am of building.amenities ?? []) {
+        if (am.ordinal !== ordinal) continue;
+        const el = labelEl(glyph[am.kind] ?? "?", `amenity amenity-${am.kind}`);
+        el.title = am.name || am.kind;
+        markersRef.current.push(
+          new maplibregl.Marker({ element: el }).setLngLat(m2ll(building.origin, am.at[0], am.at[1])).addTo(map),
+        );
+      }
+    }
   }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers]);
 
   // Draw-tool changes: cursor, dbl-click zoom, and reset any in-progress draft.
