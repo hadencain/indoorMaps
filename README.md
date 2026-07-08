@@ -70,7 +70,7 @@ npm run build      # type-check + production build (tsc -b && vite build)
 npm run preview    # serve the production build locally
 ```
 
-The app opens on a hand-authored sample building so you have something to explore immediately. All edits persist automatically to the browser's local storage.
+The app opens on a **demo "secure complex"** — a three-floor facility (two wings per floor around a central breezeway, 36 rooms, escalating security by floor) pre-fitted with 73 cameras placed by standard coverage logic. Switch floors and toggle **Coverage** / **Blind spots** to see the occlusion engine at work. All edits persist automatically to the browser's local storage; if you've edited a previous building, use **Data → Reset building** to load the demo.
 
 **Stack:** Vite · React 18 · TypeScript · MapLibre GL JS (rendering) · Zustand (state) · polygon-clipping (boolean geometry) · lucide-react (icons) · self-hosted Geist fonts. No runtime network requests.
 
