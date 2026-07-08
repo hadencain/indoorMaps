@@ -20,7 +20,8 @@ import { buildingToGeoJSON, geoJSONToBuilding } from "./imdf";
 import { buildingToIMDFArchive } from "./imdfArchive";
 import { zipStore } from "./zip";
 import { buildSecurityReport } from "./report";
-import { polygonCentroid, distM } from "./geo";
+import { buildGraph } from "./graph";
+import { findRoute } from "./astar";
 
 export type Tool =
   | "select"
@@ -259,9 +260,10 @@ export const useStore = create<State>((set, get) => {
         pendingLink: null,
         selectedCameraId: null,
         selectedIncidentId: null,
-        // Abandon any in-progress patrol draft on a tool switch (re-armed via the
-        // patrol panel's "Draw patrol" button = beginPatrol).
-        patrolDraft: null,
+        // Entering the patrol tool arms an empty draft so a click starts drawing
+        // immediately (no separate "Draw patrol" step); any other tool switch
+        // abandons an in-progress draft.
+        patrolDraft: t === "patrol" ? [] : null,
       }),
     setDraftCategory: (c) => set({ draftCategory: c }),
     setOrdinal: (o) => set({ ordinal: o }),
@@ -525,37 +527,61 @@ export const useStore = create<State>((set, get) => {
     cancelPatrol: () => set({ patrolDraft: null }),
 
     autoPatrol: (ordinal) => {
-      // Greedy nearest-neighbour tour over the floor's room centroids. Straight
-      // segments — can cut through walls (accepted v1; A*-through-corridors is a
-      // noted enhancement).
+      // Graph-following patrol: visit every room on the floor in a greedy tour
+      // ordered by NAV-GRAPH cost (not straight-line distance), and materialize
+      // each leg along the actual A* path (room -> door -> corridor -> door ->
+      // room), so the route follows the building's circulation instead of cutting
+      // through walls.
       const s = get();
-      const rooms = s.building.units.filter((u) => u.ordinal === ordinal && isSpace(u.category));
+      const rooms = s.building.units.filter(
+        (u) => u.ordinal === ordinal && isSpace(u.category) && u.category !== "outside",
+      );
       if (rooms.length < 2) return;
-      const centroids = rooms.map((u) => polygonCentroid(u.polygon));
-      const used = new Array(centroids.length).fill(false);
-      const order: MetreXY[] = [];
-      let cur = 0;
-      used[0] = true;
-      order.push(centroids[0]);
-      for (let step = 1; step < centroids.length; step++) {
-        let best = -1;
-        let bestD = Infinity;
-        for (let i = 0; i < centroids.length; i++) {
-          if (used[i]) continue;
-          const d = distM(centroids[cur], centroids[i]);
-          if (d < bestD) {
-            bestD = d;
-            best = i;
+      const graph = buildGraph(s.building);
+      const ids = rooms.map((u) => u.id).filter((id) => graph.nodes.has(id));
+      if (ids.length < 2) return;
+
+      // Greedy nearest-neighbour by graph route cost (unreachable = Infinity).
+      const used = new Set<string>([ids[0]]);
+      const order: string[] = [ids[0]];
+      let cur = ids[0];
+      while (order.length < ids.length) {
+        let best: string | null = null;
+        let bestCost = Infinity;
+        for (const id of ids) {
+          if (used.has(id)) continue;
+          const r = findRoute(graph, cur, id);
+          if (r && r.cost < bestCost) {
+            bestCost = r.cost;
+            best = id;
           }
         }
-        if (best < 0) break;
-        used[best] = true;
-        order.push(centroids[best]);
+        if (!best) break; // remaining rooms are unreachable on this floor
+        used.add(best);
+        order.push(best);
         cur = best;
       }
+
+      // Concatenate each leg's node path into metre waypoints, keeping only nodes
+      // on this floor and dropping the duplicated junction between legs.
+      const points: MetreXY[] = [];
+      const pushPt = (p: MetreXY) => {
+        const last = points[points.length - 1];
+        if (!last || last[0] !== p[0] || last[1] !== p[1]) points.push(p);
+      };
+      for (let i = 0; i < order.length - 1; i++) {
+        const r = findRoute(graph, order[i], order[i + 1]);
+        if (!r) continue;
+        for (const nid of r.path) {
+          const node = graph.nodes.get(nid);
+          if (node && node.ordinal === ordinal) pushPt(node.xy);
+        }
+      }
+      if (points.length < 2) return;
+
       const id = `patrol-${Date.now()}-${patSeq++}`;
       const n = (s.building.patrols ?? []).length + 1;
-      const patrol: PatrolPath = { id, ordinal, name: `Auto patrol ${n}`, points: order };
+      const patrol: PatrolPath = { id, ordinal, name: `Auto patrol ${n}`, points };
       commit((b) => ({ ...b, patrols: [...(b.patrols ?? []), patrol] }));
       set({ patrolDraft: null });
     },

@@ -489,11 +489,13 @@ export default function MapView() {
     const vis = (id: string, on: boolean) => {
       if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     };
-    // Cameras toggle also hides their FOV cones (the cones are the cameras'
-    // native footprint; markers are gated separately in the marker effect).
-    vis("camera-fov-fill", layers.cameras);
-    vis("camera-fov-line", layers.cameras);
-    vis("camera-fov-selected", layers.cameras);
+    // The per-camera FOV cones ARE the coverage visualization (per-camera
+    // line-of-sight), so they gate with Coverage, not Cameras — turning Coverage
+    // off leaves a clean map (no lingering cone outlines). The camera MARKERS
+    // stay under Cameras (gated in the marker effect).
+    vis("camera-fov-fill", layers.coverage);
+    vis("camera-fov-line", layers.coverage);
+    vis("camera-fov-selected", layers.coverage);
     vis("coverage-fill", layers.coverage);
     vis("blind-fill", layers.blindSpots);
     vis("unit-secure-fill", layers.accessZones);
@@ -1162,12 +1164,15 @@ export default function MapView() {
           live.current.onAddIncident(toMetre(e.lngLat), live.current.ordinal);
           return;
         }
-        // Patrol mode: click adds a waypoint (only while a draft is armed via the
-        // panel's "Draw patrol" = beginPatrol).
+        // Patrol mode: click adds a waypoint (the draft is auto-armed on entering
+        // the tool). The 2nd click of a double-click (detail > 1) is the commit
+        // gesture — skip it so double-clicking to finish doesn't dump spurious
+        // waypoints at the end; the dblclick handler commits.
         if (live.current.patrolMode) {
-          if (live.current.patrolDraft !== null) {
-            live.current.onAddPatrolPoint(toMetre(e.lngLat));
-          }
+          if (e.originalEvent.detail > 1) return;
+          // addPatrolPoint treats a null draft as [] — so clicks auto-start a
+          // fresh patrol on entering the tool and again after each commit.
+          live.current.onAddPatrolPoint(toMetre(e.lngLat));
           return;
         }
         const hits = map.queryRenderedFeatures(e.point, { layers: ["unit-fill"] });
