@@ -139,6 +139,37 @@ export interface PatrolPath {
   points: MetreXY[];
 }
 
+/** Furniture / equipment drawn on the floor for realism (IMDF "fixture"). Purely
+ *  visual: fixtures are NOT units — they don't count as coverage floor, aren't
+ *  route endpoints, and don't occlude cameras. `kind` drives the fill colour. */
+export type FixtureKind =
+  | "blackjack"
+  | "roulette"
+  | "poker"
+  | "baccarat"
+  | "slot"
+  | "bar"
+  | "counter"
+  | "seating"
+  | "stage"
+  | "planter";
+
+export interface Fixture {
+  id: string;
+  ordinal: number;
+  kind: FixtureKind;
+  /** Outline in local metres, open ring (like Unit.polygon). */
+  polygon: MetreXY[];
+}
+
+/** The building outline for one floor — a floor-slab base + thick exterior wall,
+ *  drawn beneath everything so the plan reads as an enclosed building. Visual
+ *  only; coverage still measures the units. */
+export interface Footprint {
+  ordinal: number;
+  polygon: MetreXY[];
+}
+
 export interface Building {
   /** SW origin of the local metre grid, as [lng, lat]. */
   origin: LngLat;
@@ -154,6 +185,10 @@ export interface Building {
   incidents?: Incident[];
   /** Guard patrol paths (P10). Additive; defaults to [] in loadBuilding. */
   patrols?: PatrolPath[];
+  /** Furniture/equipment for realism (tables, machines, bars…). Additive; visual. */
+  fixtures?: Fixture[];
+  /** Per-floor building outline (floor slab + exterior wall). Additive; visual. */
+  footprints?: Footprint[];
 }
 
 /** Per-overlay visibility toggles (UI state; persisted separately from the
@@ -167,6 +202,7 @@ export interface LayerVisibility {
   routes: boolean; // A* route line + pins
   incidents: boolean; // incident markers (Phase E)
   patrols: boolean; // patrol path lines (Phase E)
+  fixtures: boolean; // furniture/equipment (tables, machines, bars…)
 }
 
 export interface NodeMeta {

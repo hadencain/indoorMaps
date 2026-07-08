@@ -59,6 +59,7 @@ export const DEFAULT_LAYERS: LayerVisibility = {
   routes: true,
   incidents: true,
   patrols: true,
+  fixtures: true,
 };
 
 function loadLayers(): LayerVisibility {

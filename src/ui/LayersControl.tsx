@@ -8,6 +8,7 @@ import type { LayerVisibility } from "../types";
 type Row = { label: string; key: keyof LayerVisibility } | { label: string; grid: true };
 
 const ROWS: Row[] = [
+  { label: "Fixtures", key: "fixtures" },
   { label: "Cameras", key: "cameras" },
   { label: "Coverage", key: "coverage" },
   { label: "Blind spots", key: "blindSpots" },

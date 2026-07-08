@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import type { MetreXY, Category, LngLat, RasterUnderlay } from "./types";
 import type { FC } from "./render";
-import { unitsToGeoJSON, patrolsToGeoJSON } from "./render";
+import { unitsToGeoJSON, patrolsToGeoJSON, fixturesToGeoJSON, footprintsToGeoJSON } from "./render";
 import { INCIDENT_COLORS } from "./ui/panels/IncidentPanel";
 import {
   ll2m,
@@ -225,6 +225,9 @@ export default function MapView() {
         ],
       });
       map.addSource("grid", { type: "geojson", data: EMPTY });
+      // Building footprint (floor slab + exterior wall) + fixtures (furniture).
+      map.addSource("footprint", { type: "geojson", data: footprintsToGeoJSON(building) });
+      map.addSource("fixtures", { type: "geojson", data: fixturesToGeoJSON(building) });
       map.addSource("units", { type: "geojson", data: unitsToGeoJSON(building) });
       // Coverage (P6): green covered union + red blind = floor − covered. Fed by
       // the coverage effect; per-overlay visibility gated by the layers effect.
@@ -422,6 +425,49 @@ export default function MapView() {
         "grid-line",
       );
 
+      // Building footprint floor slab (warm carpet) — beneath everything (above
+      // the underlay, below the grid), so the plan reads as an enclosed building.
+      map.addLayer(
+        { id: "footprint-fill", type: "fill", source: "footprint", paint: { "fill-color": "#191411", "fill-opacity": 1 } },
+        "grid-line",
+      );
+      // Fixtures (tables/machines/bars) ABOVE the unit fills, BELOW coverage/cameras.
+      map.addLayer(
+        {
+          id: "fixture-fill",
+          type: "fill",
+          source: "fixtures",
+          paint: {
+            "fill-color": [
+              "match",
+              ["get", "kind"],
+              "blackjack", "#1f6b3a",
+              "baccarat", "#1f6b3a",
+              "poker", "#245c37",
+              "roulette", "#2a7a45",
+              "slot", "#3a2c1c",
+              "bar", "#5a3d22",
+              "counter", "#3a4048",
+              "seating", "#2a2e36",
+              "stage", "#3a2a44",
+              "planter", "#1e3a24",
+              "#3a3f47",
+            ],
+            "fill-opacity": 0.95,
+          },
+        },
+        "coverage-fill",
+      );
+      map.addLayer(
+        { id: "fixture-line", type: "line", source: "fixtures", paint: { "line-color": "#0b0d10", "line-width": 0.5 } },
+        "coverage-fill",
+      );
+      // Thick exterior wall — the footprint outline, above fixtures, below overlays.
+      map.addLayer(
+        { id: "footprint-wall", type: "line", source: "footprint", paint: { "line-color": "#5b6672", "line-width": 3 } },
+        "coverage-fill",
+      );
+
       const b = new maplibregl.LngLatBounds();
       for (const f of unitsToGeoJSON(building).features) {
         for (const c of (f.geometry as GeoJSON.Polygon).coordinates[0]) {
@@ -453,12 +499,18 @@ export default function MapView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Rebuild the unit source when the building changes.
+  // Rebuild the unit / footprint / fixture sources when the building changes.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
     (map.getSource("units") as maplibregl.GeoJSONSource | undefined)?.setData(
       unitsToGeoJSON(building),
+    );
+    (map.getSource("footprint") as maplibregl.GeoJSONSource | undefined)?.setData(
+      footprintsToGeoJSON(building),
+    );
+    (map.getSource("fixtures") as maplibregl.GeoJSONSource | undefined)?.setData(
+      fixturesToGeoJSON(building),
     );
   }, [ready, building]);
 
@@ -569,6 +621,8 @@ export default function MapView() {
     vis("unit-secure-outline", layers.accessZones);
     vis("route-line", layers.routes);
     vis("patrol-line", layers.patrols);
+    vis("fixture-fill", layers.fixtures);
+    vis("fixture-line", layers.fixtures);
     vis("grid-line", showGrid);
   }, [ready, layers, showGrid]);
 
@@ -632,6 +686,10 @@ export default function MapView() {
     const floorFilter: maplibregl.FilterSpecification = ["==", ["get", "ordinal"], ordinal];
     map.setFilter("unit-fill", floorFilter);
     map.setFilter("unit-outline", floorFilter);
+    map.setFilter("footprint-fill", floorFilter);
+    map.setFilter("footprint-wall", floorFilter);
+    map.setFilter("fixture-fill", floorFilter);
+    map.setFilter("fixture-line", floorFilter);
     map.setFilter("route-line", floorFilter);
     map.setFilter("patrol-line", floorFilter);
     map.setFilter("unit-selected", [

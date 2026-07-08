@@ -47,6 +47,31 @@ export function patrolsToGeoJSON(b: Building): FC {
   return { type: "FeatureCollection", features };
 }
 
+/** Fixture polygons (furniture/equipment), tagged with ordinal + kind for the
+ *  kind-driven fill. Purely visual — not units, not coverage, not occlusion. */
+export function fixturesToGeoJSON(b: Building): FC {
+  return {
+    type: "FeatureCollection",
+    features: (b.fixtures ?? []).map((f) => ({
+      type: "Feature",
+      properties: { id: f.id, ordinal: f.ordinal, kind: f.kind },
+      geometry: { type: "Polygon", coordinates: [polygonRing(b.origin, f.polygon)] },
+    })),
+  };
+}
+
+/** Per-floor building footprint (floor slab + exterior wall), tagged with ordinal. */
+export function footprintsToGeoJSON(b: Building): FC {
+  return {
+    type: "FeatureCollection",
+    features: (b.footprints ?? []).map((fp) => ({
+      type: "Feature",
+      properties: { ordinal: fp.ordinal },
+      geometry: { type: "Polygon", coordinates: [polygonRing(b.origin, fp.polygon)] },
+    })),
+  };
+}
+
 /** Unit polygons (one Feature per unit, tagged with ordinal + category). */
 export function unitsToGeoJSON(b: Building): FC {
   return {
