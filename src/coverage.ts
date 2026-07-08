@@ -363,7 +363,11 @@ export function computeCoverage(
     .filter((v) => v.ordinal === ordinal && v.ring.length >= 3)
     .map((v) => v.ring);
 
-  const floor = unionRings(unitRings);
+  // The floor extent = the building footprint for this ordinal if one exists (so
+  // "coverage %" measures the whole floor — open areas included, as in a casino);
+  // otherwise fall back to the union of the units.
+  const fp = building.footprints?.find((f) => f.ordinal === ordinal && f.polygon.length >= 3);
+  const floor = unionRings(fp ? [fp.polygon] : unitRings);
   const covered = unionRings(coverRings);
 
   // intersection/difference can also throw on fragile inputs — guard both.
