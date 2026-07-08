@@ -966,6 +966,25 @@ button.wide.ghost {
   color: #3a4550;
 }
 
+/* Inspect (click-to-camera) probe: the clicked target point + blind state. */
+.probe-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #0b0d10;
+  box-shadow: 0 0 0 3px rgba(0, 215, 205, 0.35), 0 1px 6px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.probe-blind {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 13px;
+  text-align: center;
+}
+
 .label-sub {
   font-size: 10px;
   color: var(--accent);
