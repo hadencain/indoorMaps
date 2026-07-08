@@ -152,7 +152,9 @@ export type FixtureKind =
   | "counter"
   | "seating"
   | "stage"
-  | "planter";
+  | "planter"
+  | "parking"
+  | "car";
 
 export interface Fixture {
   id: string;

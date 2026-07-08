@@ -451,6 +451,8 @@ export default function MapView() {
               "seating", "#2a2e36",
               "stage", "#3a2a44",
               "planter", "#1e3a24",
+              "parking", "#5b6672",
+              "car", "#2b3038",
               "#3a3f47",
             ],
             "fill-opacity": 0.95,
