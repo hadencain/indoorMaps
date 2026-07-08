@@ -459,6 +459,8 @@ export default function MapView() {
               "planter", "#1e3a24",
               "parking", "#5b6672",
               "car", "#2b3038",
+              "craps", "#256e52",
+              "wheel", "#7a5a2a",
               "#3a3f47",
             ],
             "fill-opacity": 0.95,

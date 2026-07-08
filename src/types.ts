@@ -154,7 +154,9 @@ export type FixtureKind =
   | "stage"
   | "planter"
   | "parking"
-  | "car";
+  | "car"
+  | "craps"
+  | "wheel";
 
 export interface Fixture {
   id: string;
