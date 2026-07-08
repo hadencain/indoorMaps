@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { ChevronDown, Undo2, Redo2 } from "lucide-react";
+import { ChevronDown, Undo2, Redo2, Pencil, MonitorPlay } from "lucide-react";
 import { useStore } from "../store";
 
 export default function TopBar() {
   const levels = useStore((s) => s.building.levels);
+  const mode = useStore((s) => s.mode);
+  const setMode = useStore((s) => s.setMode);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const canUndo = useStore((s) => s.past.length > 0);
@@ -25,24 +27,24 @@ export default function TopBar() {
   return (
     <header className="topbar">
       <div className="wordmark">indoorMaps</div>
-      <div className="histbtns">
-        <button
-          className="histbtn"
-          title="Undo (Ctrl/Cmd+Z)"
-          disabled={!canUndo}
-          onClick={undo}
-        >
-          <Undo2 size={15} />
+      <div className="modetoggle" role="group" aria-label="Mode">
+        <button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")} title="Authoring — draw & edit the map">
+          <Pencil size={13} /> Edit
         </button>
-        <button
-          className="histbtn"
-          title="Redo (Ctrl/Cmd+Shift+Z)"
-          disabled={!canRedo}
-          onClick={redo}
-        >
-          <Redo2 size={15} />
+        <button className={mode === "display" ? "active" : ""} onClick={() => setMode("display")} title="Operator display — read-only, click-to-camera">
+          <MonitorPlay size={13} /> Display
         </button>
       </div>
+      {mode === "edit" && (
+        <div className="histbtns">
+          <button className="histbtn" title="Undo (Ctrl/Cmd+Z)" disabled={!canUndo} onClick={undo}>
+            <Undo2 size={15} />
+          </button>
+          <button className="histbtn" title="Redo (Ctrl/Cmd+Shift+Z)" disabled={!canRedo} onClick={redo}>
+            <Redo2 size={15} />
+          </button>
+        </div>
+      )}
       <div className="floorpills">
         {levels.map((lv) => (
           <button
@@ -60,43 +62,47 @@ export default function TopBar() {
         </button>
         {open && (
           <div className="datamenu-pop" onMouseLeave={() => setOpen(false)}>
-            <div className="dm-row">
-              <span>Plan width</span>
-              <input
-                type="number"
-                className="numin"
-                min={1}
-                value={planWidth}
-                onChange={(e) => setPlanWidth(Number(e.target.value))}
-              />{" "}
-              m
-            </div>
-            <label className="dm-item">
-              Import SVG…
-              <input
-                type="file"
-                accept=".svg,image/svg+xml"
-                hidden
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  e.target.value = "";
-                  if (f) importSvgText(await f.text());
-                }}
-              />
-            </label>
-            <label className="dm-item">
-              Import floorplan image…
-              <input
-                type="file"
-                accept="image/png,image/jpeg"
-                hidden
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  e.target.value = "";
-                  if (f) await importRasterFile(f);
-                }}
-              />
-            </label>
+            {mode === "edit" && (
+              <>
+                <div className="dm-row">
+                  <span>Plan width</span>
+                  <input
+                    type="number"
+                    className="numin"
+                    min={1}
+                    value={planWidth}
+                    onChange={(e) => setPlanWidth(Number(e.target.value))}
+                  />{" "}
+                  m
+                </div>
+                <label className="dm-item">
+                  Import SVG…
+                  <input
+                    type="file"
+                    accept=".svg,image/svg+xml"
+                    hidden
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (f) importSvgText(await f.text());
+                    }}
+                  />
+                </label>
+                <label className="dm-item">
+                  Import floorplan image…
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    hidden
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (f) await importRasterFile(f);
+                    }}
+                  />
+                </label>
+              </>
+            )}
             <button className="dm-item" onClick={exportGeoJSON}>
               Export GeoJSON
             </button>
@@ -106,22 +112,26 @@ export default function TopBar() {
             <button className="dm-item" onClick={exportSecurityReport}>
               Export security report…
             </button>
-            <label className="dm-item">
-              Load GeoJSON…
-              <input
-                type="file"
-                accept=".geojson,.json"
-                hidden
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  e.target.value = "";
-                  if (f) loadGeoJSONText(await f.text());
-                }}
-              />
-            </label>
-            <button className="dm-item danger" onClick={resetBuilding}>
-              Reset building
-            </button>
+            {mode === "edit" && (
+              <>
+                <label className="dm-item">
+                  Load GeoJSON…
+                  <input
+                    type="file"
+                    accept=".geojson,.json"
+                    hidden
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (f) loadGeoJSONText(await f.text());
+                    }}
+                  />
+                </label>
+                <button className="dm-item danger" onClick={resetBuilding}>
+                  Reset building
+                </button>
+              </>
+            )}
             {importMsg && <div className="dm-msg">{importMsg}</div>}
           </div>
         )}

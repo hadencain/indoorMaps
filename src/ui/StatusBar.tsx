@@ -10,10 +10,12 @@ const HINTS: Record<string, string> = {
   link: "Click a unit, switch floor, click its counterpart",
   route: "Pick From and To in the inspector",
   camera: "Click to place a camera · drag to move · drag the handle to aim · sightlines clip to walls",
+  inspect: "Click any point to see which camera covers it · click a camera for its feed",
 };
 
 export default function StatusBar() {
   const activeTool = useStore((s) => s.activeTool);
+  const mode = useStore((s) => s.mode);
   const building = useStore((s) => s.building);
   const ordinal = useStore((s) => s.ordinal);
   const showGrid = useStore((s) => s.showGrid);
@@ -28,6 +30,20 @@ export default function StatusBar() {
   const floors = geom ? `${geom.floors.length} floor${geom.floors.length === 1 ? "" : "s"}` : "";
   const floorName = building.levels.find((l) => l.ordinal === ordinal)?.name ?? `L${ordinal}`;
   const camCount = building.cameras.filter((c) => c.ordinal === ordinal).length;
+
+  if (mode === "display") {
+    return (
+      <footer className="statusbar mono">
+        <span className="st-tool">display</span>
+        <span className="st-sep">·</span>
+        <span>
+          {floorName} · {camCount} cameras
+          {showCoverage && coverage ? ` · coverage ${(coverage.coveragePct * 100).toFixed(0)}%` : ""}
+        </span>
+        <span className="st-hint">{HINTS.inspect}</span>
+      </footer>
+    );
+  }
 
   return (
     <footer className="statusbar mono">

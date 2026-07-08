@@ -12,6 +12,7 @@ import type {
   IncidentKind,
   PatrolPath,
   Unit,
+  AmenityKind,
 } from "./types";
 import { initialBuilding, doorForRoom } from "./building";
 import { defaultNameFor, isSpace } from "./categories";
@@ -35,6 +36,16 @@ export type Tool =
   | "patrol"
   | "inspect";
 
+/** The two top-level surfaces. `edit` is the authoring tool (draw/place/wire);
+ *  `display` is the read-only operator console the security team runs on routine
+ *  — no editing chrome, click-to-camera as the default interaction. */
+export type Mode = "edit" | "display";
+
+export const ALL_AMENITY_KINDS: AmenityKind[] = [
+  "restroom", "atm", "exit", "info", "firstaid",
+  "ticketing", "dining", "bar", "coatcheck", "smoking",
+];
+
 // Kept at v3 deliberately: cameras are additive + defaulted (see below), so
 // legacy v3 payloads — including the raster underlays added under v3 — load
 // unchanged. Bumping the key would discard the persisted building. Cameras
@@ -46,6 +57,33 @@ const STORAGE_KEY = "indoormaps:building:v3";
 // Layer-visibility prefs live under their OWN key, never folded into the
 // building payload (a shared GeoJSON export must not carry operator view prefs).
 const LAYERS_KEY = "indoormaps:layers:v1";
+// Operator/display prefs (current mode + which amenity kinds are shown). Own key
+// so the display filter never rides along with a shared building export.
+const DISPLAY_KEY = "indoormaps:display:v1";
+
+type AmenityFilter = Record<AmenityKind, boolean>;
+const allAmenities = (on: boolean): AmenityFilter => {
+  const o = {} as AmenityFilter;
+  for (const k of ALL_AMENITY_KINDS) o[k] = on;
+  return o;
+};
+function loadDisplay(): { mode: Mode; amenityFilter: AmenityFilter } {
+  const base = { mode: "edit" as Mode, amenityFilter: allAmenities(true) };
+  try {
+    const raw = localStorage.getItem(DISPLAY_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as { mode?: unknown; amenityFilter?: Record<string, unknown> };
+      if (p.mode === "display" || p.mode === "edit") base.mode = p.mode;
+      if (p.amenityFilter && typeof p.amenityFilter === "object")
+        for (const k of ALL_AMENITY_KINDS)
+          if (typeof p.amenityFilter[k] === "boolean") base.amenityFilter[k] = p.amenityFilter[k] as boolean;
+    }
+  } catch {
+    /* fall through */
+  }
+  return base;
+}
+const DISPLAY0 = loadDisplay();
 
 // Bounded snapshot history: cap the number of retained past/future buildings.
 const HISTORY_LIMIT = 50;
@@ -129,6 +167,12 @@ interface State {
   past: Building[];
   future: Building[];
   activeTool: Tool;
+  // Top-level surface: authoring vs read-only operator display.
+  mode: Mode;
+  // Which amenity kinds are shown (display-mode POI filter; also gates markers in edit).
+  amenityFilter: AmenityFilter;
+  // The patrol route currently emphasized on the map (others dimmed). Session-only.
+  highlightedPatrolId: string | null;
   selectedId: string | null;
   selectedIds: string[];
   selectedCameraId: string | null;
@@ -154,6 +198,10 @@ interface State {
   searchQuery: string;
 
   setTool: (t: Tool) => void;
+  setMode: (m: Mode) => void;
+  toggleAmenityKind: (k: AmenityKind) => void;
+  setAllAmenityKinds: (on: boolean) => void;
+  setHighlightedPatrol: (id: string | null) => void;
   setDraftCategory: (c: Category) => void;
   setOrdinal: (o: number) => void;
   setSelected: (id: string | null) => void;
@@ -245,7 +293,10 @@ export const useStore = create<State>((set, get) => {
     building: loadBuilding(),
     past: [],
     future: [],
-    activeTool: "select",
+    activeTool: DISPLAY0.mode === "display" ? "inspect" : "select",
+    mode: DISPLAY0.mode,
+    amenityFilter: DISPLAY0.amenityFilter,
+    highlightedPatrolId: null,
     selectedId: null,
     selectedIds: [],
     selectedCameraId: null,
@@ -282,6 +333,33 @@ export const useStore = create<State>((set, get) => {
         // Any tool switch clears a transient probe (including leaving inspect).
         probe: null,
       }),
+    // Switching surface. Entering display forces the inspect interaction
+    // (click-to-camera) and drops any authoring selection/draft; returning to
+    // edit resets to the select tool and clears display-only transient state.
+    setMode: (m) =>
+      set(() =>
+        m === "display"
+          ? {
+              mode: m,
+              activeTool: "inspect",
+              selectedId: null,
+              selectedIds: [],
+              selectedIncidentId: null,
+              patrolDraft: null,
+              pendingLink: null,
+              probe: null,
+            }
+          : {
+              mode: m,
+              activeTool: "select",
+              probe: null,
+              selectedCameraId: null,
+              highlightedPatrolId: null,
+            },
+      ),
+    toggleAmenityKind: (k) => set((s) => ({ amenityFilter: { ...s.amenityFilter, [k]: !s.amenityFilter[k] } })),
+    setAllAmenityKinds: (on) => set({ amenityFilter: allAmenities(on) }),
+    setHighlightedPatrol: (id) => set((s) => ({ highlightedPatrolId: s.highlightedPatrolId === id ? null : id })),
     setDraftCategory: (c) => set({ draftCategory: c }),
     setOrdinal: (o) => set({ ordinal: o }),
     setSelected: (id) =>
@@ -916,6 +994,16 @@ useStore.subscribe((s, prev) => {
   if (s.layers === prev.layers) return;
   try {
     localStorage.setItem(LAYERS_KEY, JSON.stringify(s.layers));
+  } catch {
+    /* storage unavailable — non-fatal */
+  }
+});
+
+// Display prefs (mode + amenity-kind filter) persist under their own key.
+useStore.subscribe((s, prev) => {
+  if (s.mode === prev.mode && s.amenityFilter === prev.amenityFilter) return;
+  try {
+    localStorage.setItem(DISPLAY_KEY, JSON.stringify({ mode: s.mode, amenityFilter: s.amenityFilter }));
   } catch {
     /* storage unavailable — non-fatal */
   }
