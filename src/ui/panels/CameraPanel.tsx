@@ -5,11 +5,10 @@ import { polygonArea } from "../../geo";
 import { formatArea } from "../../format";
 import { unitsCoveredByCamera } from "../../security/coverage-link";
 import SearchBox from "../SearchBox";
+import FeedPlaceholder from "./FeedPlaceholder";
 import type { CameraKind } from "../../types";
 
 const M_TO_FT = 3.280839895;
-/** Inert placeholder timestamp — the feed never streams (no network, ever). */
-const FEED_TIME = "00:00:00";
 const KINDS: ReadonlyArray<CameraKind> = ["fixed", "dome", "ptz"];
 const KIND_LABELS: Record<CameraKind, string> = {
   fixed: "Fixed",
@@ -111,26 +110,19 @@ export default function CameraPanel() {
       <div className="panel-title">Camera</div>
 
       {/* Inert feed placeholder: presents as clickable, performs NO network I/O. */}
-      <div
-        className="camera-feed"
-        role="button"
-        tabIndex={0}
-        title="Live feed unavailable"
-        onClick={() => {
-          /* TODO: live feed — intentionally a no-op stub (no network). */
-        }}
-      >
-        <div className="camera-feed-scan" aria-hidden />
-        <div className="camera-feed-label">NO SIGNAL · OFFLINE</div>
-        <div className="camera-feed-corner">
-          {selected.id} · {FEED_TIME}
-        </div>
-      </div>
+      <FeedPlaceholder camera={selected} />
 
       <label>Name</label>
       <input
         value={selected.name}
         onChange={(e) => updateCamera(selected.id, { name: e.target.value })}
+      />
+
+      <label>Stream / device</label>
+      <input
+        value={selected.streamRef ?? ""}
+        placeholder="RTSP URL, NVR channel, device id…"
+        onChange={(e) => updateCamera(selected.id, { streamRef: e.target.value })}
       />
 
       <label>Kind</label>

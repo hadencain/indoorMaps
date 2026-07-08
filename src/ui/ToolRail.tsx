@@ -8,6 +8,7 @@ import {
   Cctv,
   MapPin,
   Footprints,
+  Eye,
 } from "lucide-react";
 import { useStore } from "../store";
 import type { Tool } from "../store";
@@ -22,6 +23,7 @@ const TOOLS: { id: Tool; label: string; Icon: typeof Square; needsSelection?: bo
   { id: "camera", label: "Cameras", Icon: Cctv },
   { id: "incident", label: "Incidents", Icon: MapPin },
   { id: "patrol", label: "Patrol paths", Icon: Footprints },
+  { id: "inspect", label: "Inspect / live preview", Icon: Eye },
 ];
 
 export default function ToolRail() {
