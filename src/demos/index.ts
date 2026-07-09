@@ -1,6 +1,7 @@
 import type { Building } from "../types";
 import { casinoBuilding } from "./casino";
 import { airportBuilding } from "./airport";
+import { mallBuilding } from "./mall";
 import { venueSmallBuilding } from "./venue-small";
 
 /** A shipped demo property. All demos are statically imported — bundle grows
@@ -15,6 +16,7 @@ export interface DemoProperty {
 export const DEMOS: DemoProperty[] = [
   { id: "casino", name: "Grand Casino", building: casinoBuilding },
   { id: "airport", name: "Meridian International Airport", building: airportBuilding },
+  { id: "mall", name: "Northgate Galleria", building: mallBuilding },
   { id: "venue-small", name: "The Basement", building: venueSmallBuilding },
 ];
 
