@@ -26,3 +26,17 @@ export function zoomStep(
   if (next === fovDeg) return { fovDeg, rangeM };
   return { fovDeg: next, rangeM: rangeM * Math.sqrt(fovDeg / next) };
 }
+
+export const TILT_STEP_DEG = 5;
+export const TILT_MIN = 12;
+export const TILT_MAX = 80;
+/** First tilt press on a legacy planar camera starts from here. */
+export const TILT_DEFAULT = 35;
+
+/** One tilt press. dir 1 = tilt DOWN (band pulls in close), -1 = tilt UP
+ *  (band reaches farther, near-field blind hole grows). A camera that has
+ *  never been tilted (undefined) starts from TILT_DEFAULT. */
+export function tiltStep(tiltDeg: number | undefined, dir: 1 | -1): number {
+  const base = tiltDeg ?? TILT_DEFAULT;
+  return Math.min(TILT_MAX, Math.max(TILT_MIN, base + dir * TILT_STEP_DEG));
+}

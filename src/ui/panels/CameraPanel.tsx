@@ -162,6 +162,22 @@ export default function CameraPanel() {
               })
             }
           />
+          <label>Tilt (° down · blank = flat wedge)</label>
+          <input
+            type="number"
+            min={0}
+            max={85}
+            placeholder="planar"
+            value={selected.tiltDeg ?? ""}
+            onChange={(e) => {
+              // Blank clears tilt back to the legacy planar wedge; a number
+              // projects the annular ground band (see tiltBand in coverage.ts).
+              const raw = e.target.value;
+              updateCamera(selected.id, {
+                tiltDeg: raw === "" ? undefined : Math.min(85, Math.max(0, Number(raw) || 0)),
+              });
+            }}
+          />
         </>
       )}
 

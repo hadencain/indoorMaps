@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { panStep, zoomStep, FOV_MIN, FOV_MAX } from "./ptz";
+import { panStep, zoomStep, tiltStep, FOV_MIN, FOV_MAX, TILT_MIN, TILT_MAX, TILT_DEFAULT } from "./ptz";
+
+describe("tiltStep", () => {
+  it("steps 5 degrees down (dir 1) and up (dir -1)", () => {
+    expect(tiltStep(35, 1)).toBe(40);
+    expect(tiltStep(35, -1)).toBe(30);
+  });
+  it("initializes a never-tilted camera from the default", () => {
+    expect(tiltStep(undefined, 1)).toBe(TILT_DEFAULT + 5);
+    expect(tiltStep(undefined, -1)).toBe(TILT_DEFAULT - 5);
+  });
+  it("clamps at both ends", () => {
+    expect(tiltStep(TILT_MAX, 1)).toBe(TILT_MAX);
+    expect(tiltStep(TILT_MIN, -1)).toBe(TILT_MIN);
+    expect(tiltStep(TILT_MAX - 2, 1)).toBe(TILT_MAX);
+  });
+});
 
 describe("panStep", () => {
   it("steps 5 degrees", () => {

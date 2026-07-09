@@ -5,7 +5,7 @@ import { m2ll } from "../geo";
 import { rankCamerasForPoint } from "../coverage";
 import { useVisibility } from "./visibility";
 import FeedPlaceholder from "./panels/FeedPlaceholder";
-import { panStep, zoomStep } from "../security/ptz";
+import { panStep, zoomStep, tiltStep } from "../security/ptz";
 
 /** Session-remembered window width (px) — survives re-spawns, never persisted. */
 let lastWidth = 360;
@@ -181,6 +181,11 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
     const s = useStore.getState();
     const cam = s.building.cameras.find((c) => c.id === anchorId);
     if (cam) s.updateCameraLive(cam.id, zoomStep(cam.fovDeg, cam.rangeM, dir));
+  };
+  const ptzTilt = (dir: 1 | -1) => () => {
+    const s = useStore.getState();
+    const cam = s.building.cameras.find((c) => c.id === anchorId);
+    if (cam) s.updateCameraLive(cam.id, { tiltDeg: tiltStep(cam.tiltDeg, dir) });
   };
 
   // Spawn near the click; keyed to the probe ONLY (drag must not re-trigger).
@@ -359,6 +364,19 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
                 label="▶"
                 title="Pan right (hold to sweep)"
                 onFire={ptzPan(-1)}
+                onBegin={() => useStore.getState().beginCameraGesture()}
+              />
+              <span className="ptz-label">Tilt</span>
+              <HoldButton
+                label="▲"
+                title="Tilt up (see farther; opens a near blind hole)"
+                onFire={ptzTilt(-1)}
+                onBegin={() => useStore.getState().beginCameraGesture()}
+              />
+              <HoldButton
+                label="▼"
+                title="Tilt down (pull the view in close)"
+                onFire={ptzTilt(1)}
                 onBegin={() => useStore.getState().beginCameraGesture()}
               />
               <span className="ptz-label">Zoom</span>

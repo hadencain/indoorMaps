@@ -106,6 +106,14 @@ export interface Camera {
    *  stores + echoes it. Optional + additive — persistence stays v3 (a camera
    *  with no `streamRef` loads unchanged; default undefined). */
   streamRef?: string;
+  /** Tilt in degrees BELOW horizontal for fixed/ptz cameras. When set, the
+   *  visible footprint becomes an annular band on the floor (tilting up sees
+   *  farther but opens a near-field blind hole under the mount; tilting down
+   *  pulls the band in close) — see `tiltBand` in coverage.ts. Optional +
+   *  additive: undefined = legacy planar wedge (full sector from the camera),
+   *  which keeps every existing demo and save rendering unchanged. Ignored for
+   *  domes (overhead 360° view). */
+  tiltDeg?: number;
 }
 
 /** What an incident annotation records. Drives the pin color + kind dropdown. */

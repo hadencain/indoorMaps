@@ -6,7 +6,7 @@ import type { Camera } from "../types";
 
 /** Cheap per-camera signature: changes iff the camera's geometry inputs change. */
 function camSig(c: Camera): string {
-  return `${c.at[0]},${c.at[1]}:${c.heading}:${c.fovDeg}:${c.rangeM}:${c.kind}`;
+  return `${c.at[0]},${c.at[1]}:${c.heading}:${c.fovDeg}:${c.rangeM}:${c.kind}:${c.tiltDeg ?? ""}`;
 }
 
 interface CacheEntry {

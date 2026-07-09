@@ -188,12 +188,45 @@ function wrapPi(a: number): number {
  * Heading convention: degrees from +x axis, CCW positive (atan2-native).
  * Returns an open ring (no repeated last point), matching Unit.polygon.
  */
+/** Camera mount height for the tilt model (metres). One constant for the whole
+ *  demo world — a per-camera field is a knob nobody has needed yet. */
+export const MOUNT_H = 4;
+
+/** Vertical half-FOV in radians, derived from the horizontal FOV via a 16:9
+ *  sensor aspect, clamped to a plausible optics window. */
+function vfovHalfRad(fovDeg: number): number {
+  const vfov = Math.min(60, Math.max(15, fovDeg * (9 / 16)));
+  return (vfov * Math.PI) / 360;
+}
+
+/** The ground band a tilted camera sees: `nearM`..`farM` from the mount.
+ *  Projection of a camera at MOUNT_H tilted `tiltDeg` below horizontal: the
+ *  lower FOV edge (tilt + vhalf) sets where floor vision STARTS, the upper
+ *  edge (tilt − vhalf) where it ENDS (∞ → range-capped once the upper edge
+ *  reaches the horizon). Tilt up → the band reaches farther but a near-field
+ *  blind hole opens under the mount; tilt down → the band pulls in close.
+ *  Returns null for domes (overhead 360°) and legacy planar cameras
+ *  (tiltDeg undefined) — those keep the full wedge from the camera. */
+export function tiltBand(cam: Camera): { nearM: number; farM: number } | null {
+  if (cam.tiltDeg == null || cam.kind === "dome" || cam.fovDeg >= 360) return null;
+  const vhalf = vfovHalfRad(cam.fovDeg);
+  const tilt = (cam.tiltDeg * Math.PI) / 180;
+  const lower = tilt + vhalf;
+  const upper = tilt - vhalf;
+  const nearM = lower >= Math.PI / 2 ? 0 : MOUNT_H / Math.tan(lower);
+  const farM = upper <= 0.035 ? Infinity : MOUNT_H / Math.tan(upper); // ~2° horizon guard
+  return { nearM: Math.max(0, nearM), farM: Math.max(nearM, farM) };
+}
+
 export function computeVisibility(cam: Camera, walls: Segment[]): MetreXY[] {
   const at = cam.at;
   const full = cam.kind === "dome" || cam.fovDeg >= 360;
   const h = (cam.heading * Math.PI) / 180;
   const half = full ? Math.PI : (cam.fovDeg * Math.PI) / 180 / 2;
-  const R = cam.rangeM;
+  // Tilted cameras see an annular ground band, not the full wedge: the far
+  // edge caps every ray; the near edge is carved back out of the ring below.
+  const band = tiltBand(cam);
+  const R = band ? Math.min(cam.rangeM, band.farM) : cam.rangeM;
 
   // --- gather candidate ray angles, as offsets `rel` from heading h ---
   const rels: number[] = [];
@@ -220,6 +253,8 @@ export function computeVisibility(cam: Camera, walls: Segment[]): MetreXY[] {
   // --- for each ray (ascending, deduped), find the nearest hit within range ---
   rels.sort((x, y) => x - y);
   const hits: MetreXY[] = [];
+  const dists: number[] = [];
+  const angles: number[] = [];
   let last = NaN;
   for (const rel of rels) {
     if (rel === last) continue;
@@ -232,9 +267,27 @@ export function computeVisibility(cam: Camera, walls: Segment[]): MetreXY[] {
       if (t != null && t < best) best = t;
     }
     hits.push([at[0] + dir[0] * best, at[1] + dir[1] * best]);
+    dists.push(best);
+    angles.push(a);
   }
 
-  return full ? hits : [at, ...hits];
+  if (full) return hits;
+
+  // Annular sector for a tilted camera: outer boundary forward, then the near
+  // edge walked BACK. Where a wall sits closer than the near edge the two
+  // boundaries pinch to a hair (0.999 nudge keeps the ring simple for the
+  // boolean-union engine instead of exactly self-touching).
+  const nearR = band ? Math.min(band.nearM, R) : 0;
+  if (nearR > 0.3) {
+    const inner: MetreXY[] = [];
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const r = Math.min(nearR, dists[i] * 0.999);
+      inner.push([at[0] + Math.cos(angles[i]) * r, at[1] + Math.sin(angles[i]) * r]);
+    }
+    return [...hits, ...inner];
+  }
+
+  return [at, ...hits];
 }
 
 // ---------------------------------------------------------------------------
