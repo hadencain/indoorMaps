@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { ChevronDown, Undo2, Redo2, Pencil, MonitorPlay } from "lucide-react";
 import { useStore } from "../store";
+import { DEMOS, demoById } from "../demos";
 
 export default function TopBar() {
   const levels = useStore((s) => s.building.levels);
+  const propertyId = useStore((s) => s.propertyId);
+  const setProperty = useStore((s) => s.setProperty);
+  const [propOpen, setPropOpen] = useState(false);
   const mode = useStore((s) => s.mode);
   const setMode = useStore((s) => s.setMode);
   const undo = useStore((s) => s.undo);
@@ -28,6 +32,27 @@ export default function TopBar() {
   return (
     <header className="topbar">
       <div className="wordmark">indoorMaps</div>
+      <div className="prop-picker">
+        <button className="datamenu-trigger" onClick={() => setPropOpen((v) => !v)}>
+          {demoById(propertyId).name} <ChevronDown size={14} />
+        </button>
+        {propOpen && (
+          <div className="datamenu-pop" onMouseLeave={() => setPropOpen(false)}>
+            {DEMOS.map((d) => (
+              <button
+                key={d.id}
+                className={`dm-item ${d.id === propertyId ? "on" : ""}`}
+                onClick={() => {
+                  setProperty(d.id);
+                  setPropOpen(false);
+                }}
+              >
+                {d.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="modetoggle" role="group" aria-label="Mode">
         <button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")} title="Authoring — draw & edit the map">
           <Pencil size={13} /> Edit

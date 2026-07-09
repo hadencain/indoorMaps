@@ -227,6 +227,13 @@ button.wide.ghost {
   font-size: 14px;
   letter-spacing: 0.02em;
 }
+.prop-picker {
+  position: relative;
+  margin-left: 12px;
+}
+.prop-picker .dm-item.on {
+  color: var(--accent);
+}
 .histbtns {
   display: flex;
   gap: var(--s1);

@@ -37,6 +37,7 @@ export type DrawTool = "none" | "rect" | "polygon";
 /** Renders the building + route; supports rectangle + polygon room authoring. */
 export default function MapView() {
   const building = useStore((s) => s.building);
+  const propertyId = useStore((s) => s.propertyId);
   const ordinal = useStore((s) => s.ordinal);
   const activeTool = useStore((s) => s.activeTool);
   const selectedId = useStore((s) => s.selectedId);
@@ -534,6 +535,19 @@ export default function MapView() {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A property switch swaps the whole building (different extent AND origin) —
+  // re-frame or the user stares at empty ocean. Keyed on propertyId (not
+  // building) so in-place edits to the SAME building never yank the viewport.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const b = new maplibregl.LngLatBounds();
+    for (const f of unitsToGeoJSON(building).features)
+      for (const c of (f.geometry as GeoJSON.Polygon).coordinates[0]) b.extend(c as [number, number]);
+    if (!b.isEmpty()) map.fitBounds(b, { padding: 60, duration: 0 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, propertyId]);
 
   // Rebuild the unit / footprint / fixture sources when the building changes.
   useEffect(() => {

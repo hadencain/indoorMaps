@@ -24,6 +24,12 @@ import { buildSecurityReport } from "./report";
 import { buildCameraIndex, indexStats } from "./security/coverage-link";
 import { buildGraph } from "./graph";
 import { findRoute } from "./astar";
+import { buildingKey, migrateLegacyBuilding } from "./persistence";
+import { DEMOS, DEFAULT_PROPERTY_ID, demoById } from "./demos";
+
+// One-time migration: pre-gallery saves lived at the un-suffixed key and were
+// always the casino. Must run before loadBuilding() reads the casino key.
+migrateLegacyBuilding(localStorage);
 
 export type Tool =
   | "select"
@@ -54,7 +60,9 @@ export const ALL_AMENITY_KINDS: AmenityKind[] = [
 //
 // Undo/redo (P12) is IN-MEMORY only: `past`/`future` are never persisted, so
 // the persisted shape is unchanged and the key stays v3.
-const STORAGE_KEY = "indoormaps:building:v3";
+//
+// Per-property key scheme + legacy migration live in persistence.ts (pure,
+// storage-injected so they're node-testable without jsdom).
 // Layer-visibility prefs live under their OWN key, never folded into the
 // building payload (a shared GeoJSON export must not carry operator view prefs).
 const LAYERS_KEY = "indoormaps:layers:v1";
@@ -68,16 +76,18 @@ const allAmenities = (on: boolean): AmenityFilter => {
   for (const k of ALL_AMENITY_KINDS) o[k] = on;
   return o;
 };
-function loadDisplay(): { mode: Mode; amenityFilter: AmenityFilter } {
-  const base = { mode: "edit" as Mode, amenityFilter: allAmenities(true) };
+function loadDisplay(): { mode: Mode; amenityFilter: AmenityFilter; propertyId: string } {
+  const base = { mode: "edit" as Mode, amenityFilter: allAmenities(true), propertyId: DEFAULT_PROPERTY_ID };
   try {
     const raw = localStorage.getItem(DISPLAY_KEY);
     if (raw) {
-      const p = JSON.parse(raw) as { mode?: unknown; amenityFilter?: Record<string, unknown> };
+      const p = JSON.parse(raw) as { mode?: unknown; amenityFilter?: Record<string, unknown>; propertyId?: unknown };
       if (p.mode === "display" || p.mode === "edit") base.mode = p.mode;
       if (p.amenityFilter && typeof p.amenityFilter === "object")
         for (const k of ALL_AMENITY_KINDS)
           if (typeof p.amenityFilter[k] === "boolean") base.amenityFilter[k] = p.amenityFilter[k] as boolean;
+      if (typeof p.propertyId === "string" && DEMOS.some((d) => d.id === p.propertyId))
+        base.propertyId = p.propertyId;
     }
   } catch {
     /* fall through */
@@ -121,9 +131,9 @@ function loadLayers(): LayerVisibility {
   return { ...DEFAULT_LAYERS };
 }
 
-function loadBuilding(): Building {
+function loadBuilding(propertyId: string): Building {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(buildingKey(propertyId));
     if (raw) {
       const b = JSON.parse(raw) as Building;
       const ok =
@@ -144,7 +154,7 @@ function loadBuilding(): Building {
   } catch {
     /* fall through */
   }
-  return initialBuilding;
+  return demoById(propertyId).building;
 }
 
 const CAM_DEFAULTS = { heading: 0, fovDeg: 90, rangeM: 8, kind: "fixed" as CameraKind };
@@ -164,6 +174,7 @@ export interface Probe {
 }
 
 interface State {
+  propertyId: string;
   building: Building;
   // Undo/redo — bounded in-memory snapshot stacks of the `building` slice only.
   // NEVER persisted (session-only; reset on reload).
@@ -202,6 +213,7 @@ interface State {
 
   setTool: (t: Tool) => void;
   setMode: (m: Mode) => void;
+  setProperty: (id: string) => void;
   toggleAmenityKind: (k: AmenityKind) => void;
   setAllAmenityKinds: (on: boolean) => void;
   setHighlightedPatrol: (id: string | null) => void;
@@ -298,7 +310,8 @@ export const useStore = create<State>((set, get) => {
     });
 
   return {
-    building: loadBuilding(),
+    propertyId: DISPLAY0.propertyId,
+    building: loadBuilding(DISPLAY0.propertyId),
     past: [],
     future: [],
     activeTool: DISPLAY0.mode === "display" ? "inspect" : "select",
@@ -365,6 +378,34 @@ export const useStore = create<State>((set, get) => {
               highlightedPatrolId: null,
             },
       ),
+    // Switch the demo property: flush any pending debounced persist under the
+    // OLD property's key first (so the last edit actually lands), then load the
+    // new property's building and reset every piece of session UI state that
+    // could otherwise reference ids from the old building (selection, undo
+    // history, in-progress drafts, the floor index). Route start/goal are NOT
+    // reset here — AppShell already self-heals them whenever `building` changes
+    // and the current id isn't among the new building's selectable units.
+    setProperty: (id) => {
+      const s = get();
+      if (id === s.propertyId) return;
+      flushPendingPersist();
+      set({
+        propertyId: id,
+        building: loadBuilding(id),
+        ordinal: 0,
+        probe: null,
+        selectedCameraId: null,
+        selectedId: null,
+        selectedIds: [],
+        selectedIncidentId: null,
+        patrolDraft: null,
+        pendingLink: null,
+        highlightedPatrolId: null,
+        searchQuery: "",
+        past: [],
+        future: [],
+      });
+    },
     toggleAmenityKind: (k) => set((s) => ({ amenityFilter: { ...s.amenityFilter, [k]: !s.amenityFilter[k] } })),
     setAllAmenityKinds: (on) => set({ amenityFilter: allAmenities(on) }),
     setHighlightedPatrol: (id) => set((s) => ({ highlightedPatrolId: s.highlightedPatrolId === id ? null : id })),
@@ -1021,7 +1062,7 @@ export const useStore = create<State>((set, get) => {
   };
 });
 
-// Persist building to localStorage on change (validated shape, v3 key).
+// Persist building to localStorage on change (validated shape, per-property v3 key).
 //
 // Only `s.building` is persisted — `past`/`future` are session-only history and
 // never written (keeps localStorage small; undo does not survive reload).
@@ -1032,16 +1073,16 @@ export const useStore = create<State>((set, get) => {
 // So on quota failure we retry persisting a copy with each underlay `dataUrl`
 // stripped to "" (metadata kept). Net: the building always persists; oversized
 // underlay images are session-only and must be re-imported after reload.
-function persistBuilding(building: Building) {
+function persistBuilding(building: Building, key: string) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(building));
+    localStorage.setItem(key, JSON.stringify(building));
   } catch {
     try {
       const stripped: Building = {
         ...building,
         underlays: building.underlays?.map((u) => ({ ...u, dataUrl: "" })),
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(stripped));
+      localStorage.setItem(key, JSON.stringify(stripped));
     } catch {
       /* storage unavailable — non-fatal */
     }
@@ -1051,25 +1092,39 @@ function persistBuilding(building: Building) {
 // Debounced (trailing, ~400ms): a held PTZ sweep mutates `building` every
 // 150ms via updateCameraLive — without this, that's a full-building
 // JSON.stringify + localStorage write ~7x/sec. Write once per burst instead.
+//
+// `pendingPersistKey` is captured at SCHEDULE time (the property active when the
+// edit happened), not re-read at fire time — a property switch mid-debounce
+// must not let a pending write land under the NEW property's key. `setProperty`
+// flushes any pending write (under the OLD key) before switching; see below.
 let persistTimer: number | null = null;
+let pendingPersistKey: string | null = null;
+
+function flushPendingPersist() {
+  if (persistTimer === null) return;
+  window.clearTimeout(persistTimer);
+  persistTimer = null;
+  const key = pendingPersistKey;
+  pendingPersistKey = null;
+  if (key !== null) persistBuilding(useStore.getState().building, key);
+}
+
 useStore.subscribe((s, prev) => {
   if (s.building === prev.building) return;
   if (persistTimer !== null) window.clearTimeout(persistTimer);
+  pendingPersistKey = buildingKey(s.propertyId);
   persistTimer = window.setTimeout(() => {
     persistTimer = null;
-    persistBuilding(useStore.getState().building);
+    const key = pendingPersistKey;
+    pendingPersistKey = null;
+    if (key !== null) persistBuilding(useStore.getState().building, key);
   }, 400);
 });
 
 // The debounce trades write frequency for a data-loss window at unload —
 // edit-then-refresh inside 400ms would silently drop the change, and
 // localStorage is the ONLY persistence. Flush any pending write on pagehide.
-window.addEventListener("pagehide", () => {
-  if (persistTimer === null) return;
-  window.clearTimeout(persistTimer);
-  persistTimer = null;
-  persistBuilding(useStore.getState().building);
-});
+window.addEventListener("pagehide", flushPendingPersist);
 
 // Layer-visibility prefs persist under their own key, separate from the building.
 useStore.subscribe((s, prev) => {
@@ -1081,11 +1136,15 @@ useStore.subscribe((s, prev) => {
   }
 });
 
-// Display prefs (mode + amenity-kind filter) persist under their own key.
+// Display prefs (mode + amenity-kind filter + active property) persist under
+// their own key.
 useStore.subscribe((s, prev) => {
-  if (s.mode === prev.mode && s.amenityFilter === prev.amenityFilter) return;
+  if (s.mode === prev.mode && s.amenityFilter === prev.amenityFilter && s.propertyId === prev.propertyId) return;
   try {
-    localStorage.setItem(DISPLAY_KEY, JSON.stringify({ mode: s.mode, amenityFilter: s.amenityFilter }));
+    localStorage.setItem(
+      DISPLAY_KEY,
+      JSON.stringify({ mode: s.mode, amenityFilter: s.amenityFilter, propertyId: s.propertyId }),
+    );
   } catch {
     /* storage unavailable — non-fatal */
   }
