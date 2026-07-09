@@ -13,6 +13,7 @@ import {
   polygonArea,
   snapPoint,
   nearestPointOnPolygon,
+  bbox,
 } from "./geo";
 import { rectFromDrag } from "./building";
 import { rankCamerasForPoint } from "./coverage";
@@ -514,6 +515,7 @@ export default function MapView() {
       map.fitBounds(b, { padding: 60, duration: 0 });
 
       bindDrawing(map);
+      map.on("zoom", updateZoomDeclutter);
       setReady(true);
     });
 
@@ -773,6 +775,7 @@ export default function MapView() {
     // Room labels for the active floor (+ area when dimensions are shown).
     if (layers.labels) {
       const areaById = new Map(building.units.map((u) => [u.id, polygonArea(u.polygon)]));
+      const unitById = new Map(building.units.map((u) => [u.id, u]));
       for (const f of unitsToGeoJSON(building).features) {
         const props = f.properties as {
           id: string;
@@ -787,6 +790,14 @@ export default function MapView() {
           (f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][],
         );
         const el = labelEl(props.name, "label");
+        // Stamp the unit's metre width so the zoom declutterer can cull labels
+        // wider than their room on screen (dense rows of narrow rooms otherwise
+        // collide into soup — airport tenant strip, stadium BOH wing).
+        const u = unitById.get(props.id);
+        if (u) {
+          const [x0, , x1] = bbox(u.polygon);
+          el.dataset.wm = String(Math.max(1, x1 - x0));
+        }
         if (showDims) {
           const sub = document.createElement("div");
           sub.className = "label-sub";
@@ -906,13 +917,19 @@ export default function MapView() {
       const isSelected = cam.id === selectedCameraId;
       const el = document.createElement("div");
       el.className = `camera ${cam.kind}` + (isSelected ? " selected" : "");
+      // Scale wrapper: MapLibre owns the outer element's transform (positioning)
+      // and the body's transform carries the aim rotation, so zoom-driven
+      // shrinking (--cam-scale, set by the zoom declutterer) needs its own layer.
+      const scaler = document.createElement("div");
+      scaler.className = "camera-scaler";
       const bodyEl = document.createElement("div");
       bodyEl.className = "camera-body";
       // CSS rotation is clockwise; metre heading is CCW (atan2). Screen y-up
       // matches metre y-up here, so the visual angle is `-heading` degrees.
       // Dome has no meaningful aim — leave its body unrotated.
       if (cam.kind !== "dome") bodyEl.style.transform = `rotate(${-cam.heading}deg)`;
-      el.appendChild(bodyEl);
+      scaler.appendChild(bodyEl);
+      el.appendChild(scaler);
 
       const marker = new maplibregl.Marker({ element: el, draggable: cameraMode })
         .setLngLat(m2ll(building.origin, cam.at[0], cam.at[1]))
@@ -1012,6 +1029,10 @@ export default function MapView() {
         );
       }
     }
+
+    // Freshly-rebuilt markers need their zoom-dependent state applied now —
+    // the zoom listener alone only covers zoom changes, not rebuilds.
+    updateZoomDeclutter();
   }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter]);
 
   // Patrol highlight (display mode): emphasize the selected route, dim the rest.
@@ -1259,6 +1280,31 @@ export default function MapView() {
   function clearMeasure() {
     measureRef.current?.remove();
     measureRef.current = null;
+  }
+
+  // ---- zoom declutter (room labels + camera markers) ----
+  // Published-plan legibility: dense venues (airport tenant strip, stadium BOH
+  // wing) collide labels and stack corner cameras at plan-wide zooms. A label
+  // wider than its room on screen is culled; camera markers shrink toward 45%
+  // as the view zooms out. Runs on every zoom tick + after marker rebuilds.
+  function updateZoomDeclutter() {
+    const map = mapRef.current;
+    const container = containerRef.current;
+    if (!map || !container) return;
+    const lat = map.getCenter().lat;
+    const ppm =
+      (512 * Math.pow(2, map.getZoom())) /
+      (40075016.686 * Math.cos((lat * Math.PI) / 180));
+    const s = Math.max(0.45, Math.min(1, ppm / 6));
+    container.style.setProperty("--cam-scale", s.toFixed(3));
+    for (const el of Array.from(container.querySelectorAll<HTMLElement>(".label[data-wm]"))) {
+      // Cache the label's natural width on first visible measure — offsetWidth
+      // reads 0 once the label is display:none'd.
+      if (!el.dataset.lw && el.offsetWidth > 0) el.dataset.lw = String(el.offsetWidth);
+      const need = (el.dataset.lw ? parseFloat(el.dataset.lw) : el.offsetWidth) + 4;
+      const roomPx = parseFloat(el.dataset.wm!) * ppm;
+      el.classList.toggle("label-hidden", roomPx < need);
+    }
   }
 
   // Deeper camera click-through (open live feed / incident timeline) is a wired

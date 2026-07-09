@@ -842,6 +842,17 @@ button.wide.ghost {
 .camera {
   cursor: grab;
 }
+/* Zoom declutter: the outer .camera transform belongs to MapLibre (position)
+   and .camera-body's carries the aim rotation — scaling gets its own layer,
+   driven by --cam-scale on the map container. */
+.camera-scaler {
+  transform: scale(var(--cam-scale, 1));
+  transform-origin: center;
+}
+/* Room label culled because it is wider than its room at this zoom. */
+.label-hidden {
+  display: none;
+}
 .camera:active {
   cursor: grabbing;
 }
