@@ -2895,7 +2895,7 @@ export const venueLargeBuilding: Building = {
       "fovDeg": 110,
       "rangeM": 45,
       "kind": "ptz",
-      "name": "Concourse · PTZ 99",
+      "name": "West Perimeter · PTZ 99",
       "streamRef": "rtsp://10.1.50.99/main"
     },
     {
@@ -2923,7 +2923,7 @@ export const venueLargeBuilding: Building = {
       "fovDeg": 110,
       "rangeM": 45,
       "kind": "ptz",
-      "name": "Concourse · PTZ 101",
+      "name": "West Perimeter · PTZ 101",
       "streamRef": "rtsp://10.1.50.101/main"
     },
     {
