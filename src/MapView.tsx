@@ -745,7 +745,9 @@ export default function MapView() {
           name: string;
           category: string;
         };
-        if (props.ordinal !== ordinal || props.category === "corridor") continue;
+        // Skip circulation + tiny vertical cores — their labels only collide
+        // (the ↕ transition markers already identify them).
+        if (props.ordinal !== ordinal || props.category === "corridor" || props.category === "stairs" || props.category === "elevator") continue;
         const c = ringCentroid(
           (f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][],
         );
