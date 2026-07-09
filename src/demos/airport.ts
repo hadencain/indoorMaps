@@ -6,7 +6,9 @@ import type { Building } from "../types";
 // customs primary+secondary (restricted, choke), international sterile arrivals
 // corridor, baggage handling hall (restricted BOH, choke) in the north pier bay.
 // L1 Departures/Sterile: TSA checkpoint (choke) with serpentine queue + private
-// screening room (secure) + K9 staging, sterile concourse (pier bay) with 8 gate
+// screening room (secure) + K9 staging, sterile concourse (pier bay; category
+// "corridor" — it is the walkway every L1 door opens onto, and the route graph
+// requires a corridor hub per floor with plain doors) with 8 gate
 // holdrooms, airline lounge, duty-free, food court, ramp control, comm/server room
 // (restricted, dome), AOA vestibules A/B (restricted, choke). 2 escalator banks +
 // 2 elevators link L0<->L1. The point of this venue: halls are sparsely patrolled
@@ -56,7 +58,7 @@ export const airportBuilding: Building = {
     {"id":"dutyfree-1","ordinal":1,"name":"Duty-Free Shop","category":"retail","polygon":[[354,2],[410,2],[410,34],[354,34]]},
     {"id":"foodcourt-1","ordinal":1,"name":"Food Court","category":"room","polygon":[[354,36],[516,36],[516,90],[354,90]]},
     {"id":"aoaB-1","ordinal":1,"name":"AOA Vestibule B","category":"room","polygon":[[410,94],[446,94],[446,130],[410,130]],"security":"restricted"},
-    {"id":"concourse-1","ordinal":1,"name":"Sterile Concourse","category":"lobby","polygon":[[206,142],[314,142],[314,218],[206,218]]},
+    {"id":"concourse-1","ordinal":1,"name":"Sterile Concourse","category":"corridor","polygon":[[206,142],[314,142],[314,218],[206,218]]},
     {"id":"gateW-0","ordinal":1,"name":"Gate A1","category":"room","polygon":[[182,142],[204,142],[204,159],[182,159]]},
     {"id":"gateW-1","ordinal":1,"name":"Gate A2","category":"room","polygon":[[182,161],[204,161],[204,178],[182,178]]},
     {"id":"gateW-2","ordinal":1,"name":"Gate A3","category":"room","polygon":[[182,180],[204,180],[204,197],[182,197]]},
