@@ -11,6 +11,7 @@
 
 ## Dev
 - vite, @vitejs/plugin-react, typescript, @types/react, @types/react-dom
+- vitest — unit tests for pure logic (first use: PTZ step math, src/security/ptz.test.ts). Run: `npm test`.
 
 ## Notes
 - No network at runtime: fonts bundled, map style empty.
