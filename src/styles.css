@@ -1347,3 +1347,80 @@ button.wide.ghost {
   vertical-align: middle;
   margin-left: 4px;
 }
+
+/* ---- Floating camera window (display-mode probe) ---- */
+.camwin {
+  position: absolute;
+  z-index: 6;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+}
+.camwin-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  cursor: grab;
+  user-select: none;
+}
+.camwin-head:active {
+  cursor: grabbing;
+}
+.camwin-title {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.camwin-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+.camwin-head .del {
+  margin-left: auto;
+}
+.camwin-body {
+  padding: 10px;
+}
+.camwin-switch {
+  margin-top: 8px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.camwin-foot {
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+}
+.camwin-foot-line {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.camwin-blind {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #ff8080;
+  padding: 4px 0 8px;
+}
+.camwin-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, var(--line) 50%);
+}

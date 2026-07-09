@@ -23,6 +23,7 @@ import { CATEGORY_ORDER, CATEGORY_LABELS, functionFillExpression } from "./categ
 import { useStore } from "./store";
 import { useRoute } from "./ui/route";
 import { useVisibility } from "./ui/visibility";
+import CameraWindow from "./ui/CameraWindow";
 
 const EMPTY: FC = { type: "FeatureCollection", features: [] };
 /** 1×1 transparent pixel — placeholder image for the underlay source until a real one loads. */
@@ -44,6 +45,7 @@ export default function MapView() {
   const selectedIncidentId = useStore((s) => s.selectedIncidentId);
   const patrolDraft = useStore((s) => s.patrolDraft);
   const probe = useStore((s) => s.probe);
+  const mode = useStore((s) => s.mode);
   const searchQuery = useStore((s) => s.searchQuery);
   const unit = useStore((s) => s.unit);
   const showDims = useStore((s) => s.showDims);
@@ -1146,6 +1148,10 @@ export default function MapView() {
             Delete unit
           </button>
         </div>
+      )}
+
+      {ready && mode === "display" && probe && mapRef.current && (
+        <CameraWindow map={mapRef.current} />
       )}
     </div>
   );
