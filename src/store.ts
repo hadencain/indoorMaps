@@ -1061,6 +1061,16 @@ useStore.subscribe((s, prev) => {
   }, 400);
 });
 
+// The debounce trades write frequency for a data-loss window at unload —
+// edit-then-refresh inside 400ms would silently drop the change, and
+// localStorage is the ONLY persistence. Flush any pending write on pagehide.
+window.addEventListener("pagehide", () => {
+  if (persistTimer === null) return;
+  window.clearTimeout(persistTimer);
+  persistTimer = null;
+  persistBuilding(useStore.getState().building);
+});
+
 // Layer-visibility prefs persist under their own key, separate from the building.
 useStore.subscribe((s, prev) => {
   if (s.layers === prev.layers) return;

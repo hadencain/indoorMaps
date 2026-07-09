@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type maplibregl from "maplibre-gl";
 import { useStore } from "../store";
 import { m2ll } from "../geo";
@@ -63,15 +63,18 @@ function HoldButton({
   onBegin?: () => void;
 }) {
   const timer = useRef<number | null>(null);
-  const stop = () => {
+  // Stable identity (only touches refs): PTZ ticks re-render the parent every
+  // 150ms, so a per-render closure would make removeEventListener("blur", stop)
+  // miss the function added at pointerdown and leak one listener per gesture.
+  const stop = useCallback(() => {
     if (timer.current !== null) {
       window.clearInterval(timer.current);
       timer.current = null;
     }
     // Only relevant while a timer is armed, but harmless to call unconditionally.
     window.removeEventListener("blur", stop);
-  };
-  useEffect(() => stop, []);
+  }, []);
+  useEffect(() => stop, [stop]);
   return (
     <button
       className="ptz-btn"
@@ -247,14 +250,14 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
     gestureCleanup.current?.();
     const sw = widthRef.current;
     const sx = e.clientX;
-    // Resize only changes width, so the height estimate is captured once.
-    const h = winRef.current?.offsetHeight ?? 240;
     const onMove = (ev: PointerEvent) => {
       const w = Math.min(MAX_W, Math.max(MIN_W, sw + (ev.clientX - sx)));
       setWidth(w);
       lastWidth = w;
       // Widening near the container's right edge can push the window past
-      // the map bounds — re-clamp position against the new width too.
+      // the map bounds — re-clamp position against the new width too. Height
+      // is read live: the 16:9 feed grows the window taller as width grows.
+      const h = winRef.current?.offsetHeight ?? 240;
       setPos((p) => (p ? clampPos(p, w, h, map) : p));
     };
     const end = () => {
