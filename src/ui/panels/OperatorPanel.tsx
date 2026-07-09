@@ -6,12 +6,13 @@ import { useVisibility } from "../visibility";
 import { unitsSeenByCameraRing } from "../../security/coverage-link";
 
 /**
- * Display-mode sidebar — the read-only operator console. Three states:
- *  - a click-to-camera probe is live → the InspectPanel (feed + covering cameras),
- *  - a single camera is selected (via the directory or its marker) → its feed +
+ * Display-mode sidebar — the read-only operator console. Two states:
+ *  - a camera is selected via the directory (and no probe is live) → its feed +
  *    read-only details, its coverage cone highlighted on the map,
- *  - nothing picked → operator controls: quick layers, patrol-route highlight,
- *    per-kind amenity filter, and a camera directory.
+ *  - everything else, including a live probe → operator controls: quick layers,
+ *    patrol-route highlight, per-kind amenity filter, and a camera directory.
+ * The click-to-camera probe surface is the floating camera window over the map
+ * (rendered by MapView), not this sidebar — a probe never swaps this panel.
  * No authoring controls exist here — this is what the security team runs on.
  */
 
