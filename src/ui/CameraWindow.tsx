@@ -30,6 +30,21 @@ function clampPos(p: Px, width: number, map: maplibregl.Map): Px {
   };
 }
 
+/** Point on the window rect's border along the ray centre→target (leader
+ *  start). If the target is inside the rect, returns the target itself so the
+ *  leader collapses instead of overshooting. */
+function edgePoint(rect: { x: number; y: number; w: number; h: number }, target: Px): Px {
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  const dx = target.x - cx;
+  const dy = target.y - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  const sx = dx !== 0 ? rect.w / 2 / Math.abs(dx) : Infinity;
+  const sy = dy !== 0 ? rect.h / 2 / Math.abs(dy) : Infinity;
+  const s = Math.min(sx, sy, 1);
+  return { x: cx + dx * s, y: cy + dy * s };
+}
+
 /**
  * Floating camera window (display-mode probe). Screen-space overlay in
  * .map-wrap — spawns near the click, stays put while the map pans beneath it.
@@ -70,6 +85,22 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
   const anchorId =
     selectedCameraId && ids.includes(selectedCameraId) ? selectedCameraId : (ids[0] ?? null);
   const anchor = building.cameras.find((c) => c.id === anchorId) ?? null;
+
+  // Aim the FOV-highlight layers (Task 2, always-visible) at the anchor camera.
+  // Reset to __none__ on unmount so no cone lingers after the window closes.
+  useEffect(() => {
+    const setF = (f: maplibregl.FilterSpecification) => {
+      if (map.getLayer("camera-fov-highlight-fill")) map.setFilter("camera-fov-highlight-fill", f);
+      if (map.getLayer("camera-fov-highlight-line")) map.setFilter("camera-fov-highlight-line", f);
+    };
+    const none: maplibregl.FilterSpecification = ["==", ["get", "cameraId"], "__none__"];
+    if (anchorId) {
+      setF(["all", ["==", ["get", "ordinal"], ordinal], ["==", ["get", "cameraId"], anchorId]]);
+    } else {
+      setF(none);
+    }
+    return () => setF(none);
+  }, [map, anchorId, ordinal]);
 
   // Spawn near the click; keyed to the probe ONLY (drag must not re-trigger).
   useEffect(() => {
@@ -191,50 +222,60 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
   const others = ids.filter((id) => id !== anchorId);
   const camById = new Map(building.cameras.map((c) => [c.id, c]));
 
+  const camScreen = map.project(m2ll(building.origin, anchor.at[0], anchor.at[1]));
+  const winH = winRef.current?.offsetHeight ?? 240;
+  const leaderFrom = edgePoint({ x: pos.x, y: pos.y, w: width, h: winH }, camScreen);
+
   return (
-    <div ref={winRef} className="camwin" style={{ left: pos.x, top: pos.y, width }}>
-      <div className="camwin-head" onPointerDown={startDrag}>
-        <span className="camwin-title">{anchor.name}</span>
-        <span className="camwin-badge">
-          {isBest ? "BEST VIEW · " : ""}
-          {pct(anchor.id)}
-        </span>
-        <button className="del" title="Close (Esc)" onClick={close}>
-          ✕
-        </button>
+    <>
+      <svg className="camwin-leader" aria-hidden>
+        <line x1={leaderFrom.x} y1={leaderFrom.y} x2={camScreen.x} y2={camScreen.y} />
+        <circle cx={camScreen.x} cy={camScreen.y} r={3} />
+      </svg>
+      <div ref={winRef} className="camwin" style={{ left: pos.x, top: pos.y, width }}>
+        <div className="camwin-head" onPointerDown={startDrag}>
+          <span className="camwin-title">{anchor.name}</span>
+          <span className="camwin-badge">
+            {isBest ? "BEST VIEW · " : ""}
+            {pct(anchor.id)}
+          </span>
+          <button className="del" title="Close (Esc)" onClick={close}>
+            ✕
+          </button>
+        </div>
+
+        <div className="camwin-body">
+          <FeedPlaceholder camera={anchor} />
+
+          {others.length > 0 && (
+            <div className="roomlist camwin-switch">
+              {others.map((id) => {
+                const c = camById.get(id);
+                if (!c) return null;
+                return (
+                  <div className="roomrow" key={id}>
+                    <button
+                      className="camrow-select"
+                      onClick={() => setSelectedCamera(id)}
+                      title="Switch to this camera"
+                    >
+                      <span className="vlabel">{c.name}</span>
+                      <span className="camrow-kind">{pct(id)}</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="camwin-foot">
+          <div className="camwin-foot-line">{anchor.streamRef ? anchor.streamRef : "no stream set"}</div>
+          <div className="camwin-foot-line">point {coordText}</div>
+        </div>
+
+        <div className="camwin-resize" onPointerDown={startResize} title="Resize" />
       </div>
-
-      <div className="camwin-body">
-        <FeedPlaceholder camera={anchor} />
-
-        {others.length > 0 && (
-          <div className="roomlist camwin-switch">
-            {others.map((id) => {
-              const c = camById.get(id);
-              if (!c) return null;
-              return (
-                <div className="roomrow" key={id}>
-                  <button
-                    className="camrow-select"
-                    onClick={() => setSelectedCamera(id)}
-                    title="Switch to this camera"
-                  >
-                    <span className="vlabel">{c.name}</span>
-                    <span className="camrow-kind">{pct(id)}</span>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="camwin-foot">
-        <div className="camwin-foot-line">{anchor.streamRef ? anchor.streamRef : "no stream set"}</div>
-        <div className="camwin-foot-line">point {coordText}</div>
-      </div>
-
-      <div className="camwin-resize" onPointerDown={startResize} title="Resize" />
-    </div>
+    </>
   );
 }
