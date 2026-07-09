@@ -5,6 +5,7 @@ import { m2ll } from "../geo";
 import { rankCamerasForPoint } from "../coverage";
 import { useVisibility } from "./visibility";
 import FeedPlaceholder from "./panels/FeedPlaceholder";
+import { panStep, zoomStep } from "../security/ptz";
 
 /** Session-remembered window width (px) — survives re-spawns, never persisted. */
 let lastWidth = 360;
@@ -43,6 +44,34 @@ function edgePoint(rect: { x: number; y: number; w: number; h: number }, target:
   const sy = dy !== 0 ? rect.h / 2 / Math.abs(dy) : Infinity;
   const s = Math.min(sx, sy, 1);
   return { x: cx + dx * s, y: cy + dy * s };
+}
+
+/** Fires on press, then repeats every 150ms while held. */
+function HoldButton({ label, title, onFire }: { label: string; title: string; onFire: () => void }) {
+  const timer = useRef<number | null>(null);
+  const stop = () => {
+    if (timer.current !== null) {
+      window.clearInterval(timer.current);
+      timer.current = null;
+    }
+  };
+  useEffect(() => stop, []);
+  return (
+    <button
+      className="ptz-btn"
+      title={title}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        onFire();
+        stop();
+        timer.current = window.setInterval(onFire, 150);
+      }}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+    >
+      {label}
+    </button>
+  );
 }
 
 /**
@@ -101,6 +130,19 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
     }
     return () => setF(none);
   }, [map, anchorId, ordinal]);
+
+  // PTZ fires read latest state per tick (getState, not the render closure):
+  // hold-to-repeat must step from the CURRENT heading/fov each 150ms.
+  const ptzPan = (dir: 1 | -1) => () => {
+    const s = useStore.getState();
+    const cam = s.building.cameras.find((c) => c.id === anchorId);
+    if (cam) s.rotateCamera(cam.id, panStep(cam.heading, dir));
+  };
+  const ptzZoom = (dir: 1 | -1) => () => {
+    const s = useStore.getState();
+    const cam = s.building.cameras.find((c) => c.id === anchorId);
+    if (cam) s.updateCamera(cam.id, zoomStep(cam.fovDeg, cam.rangeM, dir));
+  };
 
   // Spawn near the click; keyed to the probe ONLY (drag must not re-trigger).
   useEffect(() => {
@@ -246,6 +288,17 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
 
         <div className="camwin-body">
           <FeedPlaceholder camera={anchor} />
+
+          {anchor.kind === "ptz" && (
+            <div className="ptz-pad">
+              <span className="ptz-label">Pan</span>
+              <HoldButton label="◀" title="Pan left (hold to sweep)" onFire={ptzPan(1)} />
+              <HoldButton label="▶" title="Pan right (hold to sweep)" onFire={ptzPan(-1)} />
+              <span className="ptz-label">Zoom</span>
+              <HoldButton label="−" title="Zoom out (wider FOV)" onFire={ptzZoom(-1)} />
+              <HoldButton label="+" title="Zoom in (narrower FOV, longer reach)" onFire={ptzZoom(1)} />
+            </div>
+          )}
 
           {others.length > 0 && (
             <div className="roomlist camwin-switch">

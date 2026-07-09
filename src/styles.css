@@ -1449,3 +1449,34 @@ button.wide.ghost {
   fill: #7fd9d4;
   opacity: 0.8;
 }
+
+.ptz-pad {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+.ptz-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-right: 2px;
+}
+.ptz-label + .ptz-label,
+.ptz-btn + .ptz-label {
+  margin-left: 8px;
+}
+.ptz-btn {
+  width: 34px;
+  height: 28px;
+  background: #10161e;
+  color: var(--text);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  cursor: pointer;
+}
+.ptz-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
