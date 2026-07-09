@@ -3,7 +3,8 @@ import { useStore } from "../../store";
 import { bbox, polygonArea, polygonPerimeter } from "../../geo";
 import { formatArea, formatLength } from "../../format";
 import { CATEGORY_ORDER, CATEGORY_LABELS } from "../../categories";
-import { rankCamerasForUnit } from "../../security/coverage-link";
+import { rankCamerasForUnitWithRings } from "../../security/coverage-link";
+import { useVisibility } from "../visibility";
 import { SECURITY_LEVELS, SECURITY_LABELS, SECURITY_COLORS, securityOf } from "../security";
 import type { Category, SecurityLevel } from "../../types";
 
@@ -18,12 +19,18 @@ export default function PropertiesPanel() {
   const setSecurity = useStore((s) => s.setSecurity);
   const setSelectedCamera = useStore((s) => s.setSelectedCamera);
   const deleteUnit = useStore((s) => s.deleteUnit);
-  // Inverse of CameraPanel's Covers list — cameras that see this unit, ranked by
-  // view quality (best first). Recomputed on any building change → never stale.
-  const seenBy = useMemo(
-    () => (selectedId ? rankCamerasForUnit(building, selectedId) : []),
-    [building, selectedId],
-  );
+  const { polys } = useVisibility();
+  // Cameras that see this unit, ranked by view quality (best first). Built from
+  // the SHARED active-floor visibility (useVisibility's per-camera cache) so it
+  // never re-runs the full-floor ray-cast on a rename keystroke, and it recomputes
+  // whenever coverage changes. Skipped for circulation / exterior.
+  const seenBy = useMemo(() => {
+    const u = building.units.find((x) => x.id === selectedId);
+    if (!u || u.category === "outside" || u.category === "corridor") return [];
+    const ringById = new Map(polys.map((p) => [p.cameraId, p.ring]));
+    const cams = building.cameras.filter((c) => c.ordinal === u.ordinal);
+    return rankCamerasForUnitWithRings(u, cams, ringById);
+  }, [polys, selectedId, building.units, building.cameras]);
   const u = building.units.find((x) => x.id === selectedId);
   if (!u)
     return (

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useStore, ALL_AMENITY_KINDS } from "../../store";
 import type { AmenityKind, LayerVisibility } from "../../types";
 import InspectPanel from "./InspectPanel";
@@ -28,8 +29,11 @@ function CameraView({ id }: { id: string }) {
   const setSelectedCamera = useStore((s) => s.setSelectedCamera);
   const { polys } = useVisibility();
   const cam = building.cameras.find((c) => c.id === id);
-  const ring = polys.find((p) => p.cameraId === id)?.ring;
-  const covers = cam && ring ? unitsSeenByCameraRing(cam, ring, building.units) : [];
+  const covers = useMemo(() => {
+    const c = building.cameras.find((x) => x.id === id);
+    const r = polys.find((p) => p.cameraId === id)?.ring;
+    return c && r ? unitsSeenByCameraRing(c, r, building.units) : [];
+  }, [id, polys, building.cameras, building.units]);
   if (!cam) return null;
   const kindLabel = cam.kind === "dome" ? "Dome · 360°" : `${cam.kind} · ${cam.fovDeg}° FOV`;
   return (

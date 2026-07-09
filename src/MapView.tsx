@@ -1350,9 +1350,9 @@ export default function MapView() {
           // View-quality ranking (aim + proximity + depth-in-view), NOT raw
           // distance — the camera that actually sees this point best comes first.
           const ranked = rankCamerasForPoint(pt, cams, ringById);
-          const scores: Record<string, number> = {};
-          for (const r of ranked) scores[r.cameraId] = r.score;
-          live.current.onSetProbe({ point: pt, cameraIds: ranked.map((r) => r.cameraId), scores });
+          // Store only the point; InspectPanel re-derives the ranking live from
+          // current coverage. Anchor the preview to the best-view camera.
+          live.current.onSetProbe({ point: pt });
           live.current.onSelectCamera(ranked[0]?.cameraId ?? null);
           return;
         }

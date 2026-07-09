@@ -11,7 +11,7 @@
 
 import type { Building, Unit, Camera, MetreXY } from "../types";
 import { collectWalls, computeVisibility, rankCamerasForPoint, scoreCameraForPoint } from "../coverage";
-import { bbox } from "../geo";
+import { bbox, polygonCentroid } from "../geo";
 import polygonClipping from "polygon-clipping";
 import type { Ring } from "polygon-clipping";
 
@@ -108,19 +108,41 @@ export interface UnitCoverage {
 
 const indexable = (u: Unit) => u.category !== "corridor" && u.category !== "outside";
 
-/** Interior sample points for a unit: centroid + a coarse interior grid, so a
- *  camera seeing only part of a large room still registers. */
+/** A point GUARANTEED inside `poly` (the area-weighted centroid escapes reentrant
+ *  L/U/T rooms into the notch, so fall back to a scanline interior point). */
+export function interiorPoint(poly: MetreXY[]): MetreXY {
+  const c = polygonCentroid(poly);
+  if (pointInRing(c, poly)) return c;
+  const [x0, , x1] = bbox(poly);
+  const y = c[1];
+  const step = Math.max((x1 - x0) / 128, 0.25);
+  let spanStart: number | null = null;
+  for (let x = x0; x <= x1; x += step) {
+    const inside = pointInRing([x, y], poly);
+    if (inside && spanStart === null) spanStart = x;
+    else if (!inside && spanStart !== null) return [(spanStart + x - step) / 2, y];
+  }
+  return spanStart !== null ? [(spanStart + x1) / 2, y] : c;
+}
+
+/** Interior sample points for a unit: a guaranteed-interior anchor + a coarse
+ *  interior grid (budget-capped so no polygon — e.g. a huge lot — can explode).
+ *  Every returned point is inside the polygon. */
 export function samplePoints(poly: MetreXY[], step = 8): MetreXY[] {
-  const pts: MetreXY[] = [];
-  const c = centroid(poly);
-  if (pointInRing(c, poly)) pts.push(c);
   const [x0, y0, x1, y1] = bbox(poly);
-  for (let x = x0 + step / 2; x < x1; x += step)
-    for (let y = y0 + step / 2; y < y1; y += step) {
+  // Cap the grid: for a very large polygon, widen the step so the point count
+  // stays ~bounded (protects the interactive path from a giant selection).
+  const budget = 80;
+  const cells = ((x1 - x0) / step) * ((y1 - y0) / step);
+  const s = cells > budget ? step * Math.sqrt(cells / budget) : step;
+  const pts: MetreXY[] = [];
+  for (let x = x0 + s / 2; x < x1; x += s)
+    for (let y = y0 + s / 2; y < y1; y += s) {
       const p: MetreXY = [x, y];
       if (pointInRing(p, poly)) pts.push(p);
     }
-  return pts.length ? pts : [c];
+  if (!pts.length) pts.push(interiorPoint(poly));
+  return pts;
 }
 
 /** Rank cameras seeing `unit`, given this floor's cameras + precomputed rings. */
@@ -142,16 +164,19 @@ export function rankCamerasForUnitWithRings(
     .sort((a, b) => b.score - a.score);
 }
 
-/** Ranked "seen by" for one unit (recomputes this floor's rings). */
+/** Ranked "seen by" for one unit (recomputes this floor's rings once). */
 export function rankCamerasForUnit(b: Building, unitId: string): RankedCamera[] {
   const unit = b.units.find((u) => u.id === unitId);
-  if (!unit) return [];
+  if (!unit || !indexable(unit)) return []; // no per-camera index for corridors / exterior
   const cams = b.cameras.filter((c) => c.ordinal === unit.ordinal);
-  const ringById = new Map(cams.map((c) => [c.id, visibilityRing(b, c)]));
+  const walls = collectWalls(b, unit.ordinal); // hoisted out of the per-camera loop
+  const ringById = new Map(cams.map((c) => [c.id, computeVisibility(c, walls)]));
   return rankCamerasForUnitWithRings(unit, cams, ringById);
 }
 
-/** The spaces one camera covers, best-view first — given its precomputed ring. */
+/** The spaces one camera covers, best-view first — given its precomputed ring.
+ *  Scored MAX over the unit's in-ring sample points (same metric as the index /
+ *  "Seen by"), so a camera→room pair reads identically everywhere. */
 export function unitsSeenByCameraRing(
   cam: Camera,
   ring: MetreXY[],
@@ -160,8 +185,10 @@ export function unitsSeenByCameraRing(
   const out: { unitId: string; name: string; score: number }[] = [];
   for (const u of units) {
     if (u.ordinal !== cam.ordinal || !indexable(u)) continue;
-    if (!samplePoints(u.polygon).some((p) => pointInRing(p, ring))) continue;
-    out.push({ unitId: u.id, name: u.name, score: scoreCameraForPoint(cam, ring, centroid(u.polygon)).score });
+    let best = -1;
+    for (const p of samplePoints(u.polygon))
+      if (pointInRing(p, ring)) best = Math.max(best, scoreCameraForPoint(cam, ring, p).score);
+    if (best >= 0) out.push({ unitId: u.id, name: u.name, score: best });
   }
   return out.sort((a, b) => b.score - a.score);
 }

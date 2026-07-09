@@ -1,22 +1,35 @@
+import { useMemo } from "react";
 import { useStore } from "../../store";
 import { distM } from "../../geo";
 import { formatLength } from "../../format";
+import { rankCamerasForPoint } from "../../coverage";
+import { useVisibility } from "../visibility";
 import FeedPlaceholder from "./FeedPlaceholder";
 
 /**
- * Click-to-camera preview panel (inspect tool). Reads the transient `probe`
- * resolved in MapView from the occlusion-clipped visibility rings:
- *  - no probe yet → hint to click,
- *  - probe with cameras → a live-preview surface for the selected camera plus
- *    an "also visible from" list of the other covering cameras (nearest-first),
- *  - probe with no cameras → an explicit blind-failure state.
+ * Click-to-camera preview (inspect / display). The covering-camera ranking is
+ * DERIVED LIVE here from the active floor's current visibility polygons — the
+ * probe stores only the clicked point, so the ranking (and its view-quality %)
+ * always reflects current coverage and can never show a stale snapshot after a
+ * camera is moved/aimed/added/deleted or an edit is undone.
  */
 export default function InspectPanel() {
   const building = useStore((s) => s.building);
+  const ordinal = useStore((s) => s.ordinal);
   const unit = useStore((s) => s.unit);
   const probe = useStore((s) => s.probe);
   const selectedCameraId = useStore((s) => s.selectedCameraId);
   const setSelectedCamera = useStore((s) => s.setSelectedCamera);
+  const { polys } = useVisibility();
+
+  // Best-view-first ranking (aim + proximity + depth-in-view), recomputed on any
+  // coverage change via `polys`.
+  const ranked = useMemo(() => {
+    if (!probe) return [];
+    const ringById = new Map(polys.map((p) => [p.cameraId, p.ring]));
+    const cams = building.cameras.filter((c) => c.ordinal === ordinal);
+    return rankCamerasForPoint(probe.point, cams, ringById);
+  }, [probe, polys, building.cameras, ordinal]);
 
   if (!probe) {
     return (
@@ -31,7 +44,7 @@ export default function InspectPanel() {
   const coordText = `${px.toFixed(1)}, ${py.toFixed(1)} m`;
 
   // Blind failure — nothing on this floor sees the clicked point.
-  if (probe.cameraIds.length === 0) {
+  if (ranked.length === 0) {
     return (
       <div className="panel">
         <div className="panel-title">Inspect / live preview</div>
@@ -44,15 +57,14 @@ export default function InspectPanel() {
   }
 
   const camById = new Map(building.cameras.map((c) => [c.id, c]));
-  // Anchor the preview to the selected camera when it's part of this probe;
-  // otherwise fall back to the BEST-VIEW (first) covering camera.
-  const anchorId =
-    selectedCameraId && probe.cameraIds.includes(selectedCameraId)
-      ? selectedCameraId
-      : probe.cameraIds[0];
+  const scoreById = new Map(ranked.map((r) => [r.cameraId, r.score]));
+  const ids = ranked.map((r) => r.cameraId);
+  // Anchor the preview to the selected camera when it covers this point;
+  // otherwise the BEST-VIEW (first) camera.
+  const anchorId = selectedCameraId && ids.includes(selectedCameraId) ? selectedCameraId : ids[0];
   const selected = camById.get(anchorId);
-  const others = probe.cameraIds.filter((id) => id !== anchorId);
-  const pct = (id: string) => `${Math.round((probe.scores?.[id] ?? 0) * 100)}%`;
+  const others = ids.filter((id) => id !== anchorId);
+  const pct = (id: string) => `${Math.round((scoreById.get(id) ?? 0) * 100)}%`;
 
   return (
     <div className="panel">

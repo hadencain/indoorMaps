@@ -157,12 +157,10 @@ let patSeq = 0;
  *  `commit`/undo — pure session UI state. `cameraIds` are the cameras whose
  *  occlusion-clipped view contains `point`, ranked nearest-camera-first. */
 export interface Probe {
+  /** The clicked point (metres). The covering-camera ranking is DERIVED LIVE in
+   *  InspectPanel from the current occlusion coverage — never stored, so it can
+   *  never go stale after a camera/wall edit or undo. */
   point: MetreXY;
-  /** Cameras whose occlusion-clipped view contains `point`, ranked BEST-VIEW
-   *  first (view quality, not raw distance — see rankCamerasForPoint). */
-  cameraIds: string[];
-  /** cameraId → view-quality score (0..1) for the same probe. */
-  scores?: Record<string, number>;
 }
 
 interface State {
@@ -367,7 +365,10 @@ export const useStore = create<State>((set, get) => {
     setAllAmenityKinds: (on) => set({ amenityFilter: allAmenities(on) }),
     setHighlightedPatrol: (id) => set((s) => ({ highlightedPatrolId: s.highlightedPatrolId === id ? null : id })),
     setDraftCategory: (c) => set({ draftCategory: c }),
-    setOrdinal: (o) => set({ ordinal: o }),
+    // Floor change clears floor-scoped transient state: a probe/selected camera
+    // resolved on the old floor is meaningless on the new one (stale ranking /
+    // false-empty "Covers" otherwise).
+    setOrdinal: (o) => set({ ordinal: o, probe: null, selectedCameraId: null, selectedIncidentId: null }),
     setSelected: (id) =>
       set({
         selectedId: id,
