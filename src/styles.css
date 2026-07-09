@@ -1024,6 +1024,17 @@ button.wide.ghost {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
   pointer-events: none;
 }
+/* Zoom declutter, compact mode (set by updateZoomDeclutter at plan-wide
+   zooms): amenity glyphs collapse to colored dots so they stop colliding with
+   room labels. EXIT stays as text — safety signage earns its pixels. */
+.amenities-compact .amenity:not(.amenity-exit) {
+  min-width: 9px;
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0;
+}
 .amenity-exit {
   background: #43d675;
 }

@@ -1297,6 +1297,10 @@ export default function MapView() {
       (40075016.686 * Math.cos((lat * Math.PI) / 180));
     const s = Math.max(0.45, Math.min(1, ppm / 6));
     container.style.setProperty("--cam-scale", s.toFixed(3));
+    // Amenity glyphs (WC / F / $ …) collapse to colored dots at plan-wide zooms
+    // — as text badges they collide with room labels in dense wings. EXIT is
+    // exempt in the CSS (safety signage).
+    container.classList.toggle("amenities-compact", ppm < 4.5);
     for (const el of Array.from(container.querySelectorAll<HTMLElement>(".label[data-wm]"))) {
       // Cache the label's natural width on first visible measure — offsetWidth
       // reads 0 once the label is display:none'd.
