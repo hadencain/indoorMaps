@@ -3,6 +3,7 @@ import { casinoBuilding } from "./casino";
 import { airportBuilding } from "./airport";
 import { mallBuilding } from "./mall";
 import { museumBuilding } from "./museum";
+import { stadiumBuilding } from "./stadium";
 import { venueSmallBuilding } from "./venue-small";
 
 /** A shipped demo property. All demos are statically imported — bundle grows
@@ -19,6 +20,7 @@ export const DEMOS: DemoProperty[] = [
   { id: "airport", name: "Meridian International Airport", building: airportBuilding },
   { id: "mall", name: "Northgate Galleria", building: mallBuilding },
   { id: "museum", name: "Metropolitan Museum of Art", building: museumBuilding },
+  { id: "stadium", name: "Riverside Stadium", building: stadiumBuilding },
   { id: "venue-small", name: "The Basement", building: venueSmallBuilding },
 ];
 
