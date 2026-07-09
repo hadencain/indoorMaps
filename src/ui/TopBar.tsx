@@ -19,6 +19,7 @@ export default function TopBar() {
   const exportGeoJSON = useStore((s) => s.exportGeoJSON);
   const exportIMDFArchive = useStore((s) => s.exportIMDFArchive);
   const exportSecurityReport = useStore((s) => s.exportSecurityReport);
+  const exportCameraIndex = useStore((s) => s.exportCameraIndex);
   const loadGeoJSONText = useStore((s) => s.loadGeoJSONText);
   const resetBuilding = useStore((s) => s.resetBuilding);
   const importMsg = useStore((s) => s.importMsg);
@@ -111,6 +112,9 @@ export default function TopBar() {
             </button>
             <button className="dm-item" onClick={exportSecurityReport}>
               Export security report…
+            </button>
+            <button className="dm-item" onClick={exportCameraIndex}>
+              Export camera index (JSON)…
             </button>
             {mode === "edit" && (
               <>

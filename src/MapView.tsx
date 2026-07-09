@@ -15,7 +15,7 @@ import {
   nearestPointOnPolygon,
 } from "./geo";
 import { rectFromDrag } from "./building";
-import { pointInRing } from "./coverage";
+import { rankCamerasForPoint } from "./coverage";
 import type { VisibilityPolygon } from "./coverage";
 import { gridToGeoJSON } from "./render";
 import { formatLength, formatArea } from "./format";
@@ -1345,18 +1345,15 @@ export default function MapView() {
           const origin = live.current.building.origin;
           const pt = ll2m(origin, e.lngLat.lng, e.lngLat.lat);
           const ord = live.current.ordinal;
-          const ringById = new Map(
-            live.current.visPolys.map((v) => [v.cameraId, v.ring]),
-          );
-          const hits = live.current.building.cameras.filter((c) => {
-            if (c.ordinal !== ord) return false;
-            const ring = ringById.get(c.id);
-            return !!ring && ring.length >= 3 && pointInRing(pt, ring);
-          });
-          hits.sort((a, b) => distM(a.at, pt) - distM(b.at, pt));
-          const rankedIds = hits.map((c) => c.id);
-          live.current.onSetProbe({ point: pt, cameraIds: rankedIds });
-          live.current.onSelectCamera(rankedIds[0] ?? null);
+          const ringById = new Map(live.current.visPolys.map((v) => [v.cameraId, v.ring]));
+          const cams = live.current.building.cameras.filter((c) => c.ordinal === ord);
+          // View-quality ranking (aim + proximity + depth-in-view), NOT raw
+          // distance — the camera that actually sees this point best comes first.
+          const ranked = rankCamerasForPoint(pt, cams, ringById);
+          const scores: Record<string, number> = {};
+          for (const r of ranked) scores[r.cameraId] = r.score;
+          live.current.onSetProbe({ point: pt, cameraIds: ranked.map((r) => r.cameraId), scores });
+          live.current.onSelectCamera(ranked[0]?.cameraId ?? null);
           return;
         }
         // Patrol mode: click adds a waypoint (the draft is auto-armed on entering

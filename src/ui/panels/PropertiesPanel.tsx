@@ -3,7 +3,7 @@ import { useStore } from "../../store";
 import { bbox, polygonArea, polygonPerimeter } from "../../geo";
 import { formatArea, formatLength } from "../../format";
 import { CATEGORY_ORDER, CATEGORY_LABELS } from "../../categories";
-import { camerasSeeingUnit } from "../../security/coverage-link";
+import { rankCamerasForUnit } from "../../security/coverage-link";
 import { SECURITY_LEVELS, SECURITY_LABELS, SECURITY_COLORS, securityOf } from "../security";
 import type { Category, SecurityLevel } from "../../types";
 
@@ -18,9 +18,10 @@ export default function PropertiesPanel() {
   const setSecurity = useStore((s) => s.setSecurity);
   const setSelectedCamera = useStore((s) => s.setSelectedCamera);
   const deleteUnit = useStore((s) => s.deleteUnit);
-  // Inverse of CameraPanel's Covers list — cameras whose coverage sees this unit.
+  // Inverse of CameraPanel's Covers list — cameras that see this unit, ranked by
+  // view quality (best first). Recomputed on any building change → never stale.
   const seenBy = useMemo(
-    () => (selectedId ? camerasSeeingUnit(building, selectedId) : []),
+    () => (selectedId ? rankCamerasForUnit(building, selectedId) : []),
     [building, selectedId],
   );
   const u = building.units.find((x) => x.id === selectedId);
@@ -78,14 +79,14 @@ export default function PropertiesPanel() {
       ) : (
         <div className="roomlist">
           {seenBy.map((c) => (
-            <div className="roomrow" key={c.id}>
+            <div className="roomrow" key={c.cameraId}>
               <button
                 className="camrow-select"
-                onClick={() => setSelectedCamera(c.id)}
-                title="Select camera"
+                onClick={() => setSelectedCamera(c.cameraId)}
+                title={`Select camera · view quality ${Math.round(c.score * 100)}%`}
               >
                 <span className="vlabel">{c.name}</span>
-                <span className="camrow-kind">{c.kind}</span>
+                <span className="camrow-kind">{Math.round(c.score * 100)}%</span>
               </button>
             </div>
           ))}

@@ -133,6 +133,15 @@ export function collectWalls(building: Building, ordinal: number): Segment[] {
       segs.push({ a: p[i], b: p[(i + 1) % p.length] });
     }
   }
+  // The exterior wall is an occluder too: a perimeter camera must NOT see through
+  // it into the parking lot, and a lot camera must not see into the building. This
+  // makes click-to-camera physically honest — a click outside a room can't resolve
+  // to an interior camera whose raw range arc spilled through the envelope.
+  const fp = building.footprints?.find((f) => f.ordinal === ordinal && f.polygon.length >= 3);
+  if (fp) {
+    const p = fp.polygon;
+    for (let i = 0; i < p.length; i++) segs.push({ a: p[i], b: p[(i + 1) % p.length] });
+  }
   return segs;
 }
 
@@ -226,6 +235,83 @@ export function computeVisibility(cam: Camera, walls: Segment[]): MetreXY[] {
   }
 
   return full ? hits : [at, ...hits];
+}
+
+// ---------------------------------------------------------------------------
+// Best-camera view-quality scoring (the VMS resolver: "which camera actually
+// sees this point best"). A raw nearest-camera sort is wrong — it can pick a
+// ceiling dome grazing a point edge-on over a fixed camera aimed straight at it.
+// A camera sees a point WELL when it is aimed at it, close (within range), and
+// the point sits deep inside its view (not grazing an occluder/FOV edge).
+// ---------------------------------------------------------------------------
+
+/** View-quality weights — CONFIGURABLE. Tune the relative importance of aim vs
+ *  proximity vs how deep inside the field of view the point sits. */
+export const VIEW_WEIGHTS = { heading: 0.45, distance: 0.35, depth: 0.2 };
+/** A dome sees every direction but is never "aimed" — a neutral heading score so
+ *  a fixed camera pointed at the point outranks a dome, but a close, deep dome
+ *  still beats a far, edge-on fixed camera. */
+const DOME_HEADING_SCORE = 0.62;
+/** Metres-inside-the-view at which the depth score saturates to 1. */
+const DEPTH_NORM_M = 6;
+
+/** Distance from `p` to segment `a→b`. */
+function segDistPt(p: MetreXY, a: MetreXY, b: MetreXY): number {
+  const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+  let t = l2 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+}
+/** Shortest distance from a point to a ring's edges (how deep inside it sits). */
+function ringMinEdgeDist(pt: MetreXY, ring: MetreXY[]): number {
+  let m = Infinity;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) m = Math.min(m, segDistPt(pt, ring[j], ring[i]));
+  return m;
+}
+
+/** A camera's view quality on a specific point (which it already SEES). */
+export interface CameraScore {
+  cameraId: string;
+  score: number; // 0..1, higher = better view
+  distanceM: number;
+  headingAlign: number; // 1 = dead-centre of FOV, 0 = at the FOV edge
+  depthM: number; // metres from the nearest edge of the visibility polygon
+}
+
+/** Score how well `cam` (with occlusion ring `ring`) sees `point`. Assumes the
+ *  point is inside the ring (verify with pointInRing before calling). */
+export function scoreCameraForPoint(cam: Camera, ring: MetreXY[], point: MetreXY): CameraScore {
+  const dx = point[0] - cam.at[0], dy = point[1] - cam.at[1];
+  const distanceM = Math.hypot(dx, dy);
+  const distScore = 1 - Math.min(distanceM / Math.max(cam.rangeM, 1e-6), 1);
+  const full = cam.kind === "dome" || cam.fovDeg >= 360;
+  let headingAlign: number;
+  if (full) headingAlign = DOME_HEADING_SCORE;
+  else {
+    const off = Math.abs(wrapPi(Math.atan2(dy, dx) - (cam.heading * Math.PI) / 180));
+    const half = Math.max((cam.fovDeg * Math.PI) / 180 / 2, 1e-6);
+    headingAlign = 1 - Math.min(off / half, 1);
+  }
+  const depthM = ringMinEdgeDist(point, ring);
+  const depthScore = Math.min(depthM / DEPTH_NORM_M, 1);
+  const score =
+    VIEW_WEIGHTS.heading * headingAlign + VIEW_WEIGHTS.distance * distScore + VIEW_WEIGHTS.depth * depthScore;
+  return { cameraId: cam.id, score, distanceM, headingAlign, depthM };
+}
+
+/** Rank every camera whose occlusion ring CONTAINS `point`, best view first. */
+export function rankCamerasForPoint(
+  point: MetreXY,
+  cams: Camera[],
+  ringById: Map<string, MetreXY[]>,
+): CameraScore[] {
+  const out: CameraScore[] = [];
+  for (const c of cams) {
+    const ring = ringById.get(c.id);
+    if (ring && ring.length >= 3 && pointInRing(point, ring)) out.push(scoreCameraForPoint(c, ring, point));
+  }
+  out.sort((a, b) => b.score - a.score);
+  return out;
 }
 
 // ---------------------------------------------------------------------------

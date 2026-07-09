@@ -1335,3 +1335,15 @@ button.wide.ghost {
   font-size: 10px;
   padding: 0 5px;
 }
+
+/* "Best view" tag on the top-ranked camera in the click-to-camera preview. */
+.best-view {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: #0b0d10;
+  background: var(--accent);
+  padding: 1px 5px;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin-left: 4px;
+}

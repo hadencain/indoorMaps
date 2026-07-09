@@ -47,8 +47,10 @@ export function useVisibility(): VisibilityInfo {
 
   const walls = useMemo(
     () => collectWalls(building, ordinal),
+    // footprints joins units as an occluder input (see collectWalls); include it
+    // so editing the envelope invalidates the wall cache.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [building.units, ordinal],
+    [building.units, building.footprints, ordinal],
   );
 
   const cacheRef = useRef<Map<string, CacheEntry>>(new Map());

@@ -21,6 +21,7 @@ import { buildingToGeoJSON, geoJSONToBuilding } from "./imdf";
 import { buildingToIMDFArchive } from "./imdfArchive";
 import { zipStore } from "./zip";
 import { buildSecurityReport } from "./report";
+import { buildCameraIndex, indexStats } from "./security/coverage-link";
 import { buildGraph } from "./graph";
 import { findRoute } from "./astar";
 
@@ -157,7 +158,11 @@ let patSeq = 0;
  *  occlusion-clipped view contains `point`, ranked nearest-camera-first. */
 export interface Probe {
   point: MetreXY;
+  /** Cameras whose occlusion-clipped view contains `point`, ranked BEST-VIEW
+   *  first (view quality, not raw distance — see rankCamerasForPoint). */
   cameraIds: string[];
+  /** cameraId → view-quality score (0..1) for the same probe. */
+  scores?: Record<string, number>;
 }
 
 interface State {
@@ -250,6 +255,7 @@ interface State {
   deletePatrol: (id: string) => void;
   exportIMDFArchive: () => void;
   exportSecurityReport: () => void;
+  exportCameraIndex: () => void;
   setLayer: (key: keyof LayerVisibility, on: boolean) => void;
   toggleLayer: (key: keyof LayerVisibility) => void;
   importSvgText: (text: string) => void;
@@ -719,6 +725,31 @@ export const useStore = create<State>((set, get) => {
       a.click();
       URL.revokeObjectURL(url);
       set({ importMsg: "Exported security report (security-report.md)." });
+    },
+
+    // Space→camera index for the live VMS. Computed FRESH from the current
+    // building (never a stored copy), so it always matches current coverage —
+    // move/aim/add/delete a camera, re-export, and the index reflects it.
+    exportCameraIndex: () => {
+      const b = get().building;
+      const index = buildCameraIndex(b);
+      const stats = indexStats(index);
+      const payload = {
+        generatedFrom: "indoorMaps authoring tool",
+        note: "Derived from occlusion-clipped camera coverage; regenerate on any coverage change.",
+        stats,
+        index,
+      };
+      const text = JSON.stringify(payload, null, 2);
+      const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "camera-index.json";
+      a.click();
+      URL.revokeObjectURL(url);
+      set({
+        importMsg: `Exported camera index — ${stats.spaces} spaces, ${stats.gaps.length} gap(s)${stats.secureUnderCovered.length ? `, ${stats.secureUnderCovered.length} secure room(s) under 2 cams` : ""}.`,
+      });
     },
 
     setLayer: (key, on) => set((s) => ({ layers: { ...s.layers, [key]: on } })),

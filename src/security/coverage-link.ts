@@ -10,7 +10,8 @@
 // pass is used as a cheap fallback for degenerate rings.
 
 import type { Building, Unit, Camera, MetreXY } from "../types";
-import { collectWalls, computeVisibility } from "../coverage";
+import { collectWalls, computeVisibility, rankCamerasForPoint, scoreCameraForPoint } from "../coverage";
+import { bbox } from "../geo";
 import polygonClipping from "polygon-clipping";
 import type { Ring } from "polygon-clipping";
 
@@ -80,4 +81,125 @@ export function camerasSeeingUnit(b: Building, unitId: string): Camera[] {
   return b.cameras.filter(
     (c) => c.ordinal === unit.ordinal && ringsOverlap(visibilityRing(b, c), unit.polygon),
   );
+}
+
+// ---------------------------------------------------------------------------
+// RANKED index — the VMS handoff. Same derived-not-stored discipline, now scored
+// by view quality (aim + proximity + depth-in-view; see coverage.ts) so a click /
+// a "seen by" list leads with the camera that actually sees the space best, and
+// the exported index encodes that ranking for a downstream live console.
+// ---------------------------------------------------------------------------
+
+export interface RankedCamera {
+  cameraId: string;
+  name: string;
+  kind: Camera["kind"];
+  score: number; // 0..1, best view first
+  streamRef?: string;
+}
+export interface UnitCoverage {
+  unitId: string;
+  ordinal: number;
+  name: string;
+  category: string;
+  security: string;
+  cameras: RankedCamera[]; // [] = a coverage gap
+}
+
+const indexable = (u: Unit) => u.category !== "corridor" && u.category !== "outside";
+
+/** Interior sample points for a unit: centroid + a coarse interior grid, so a
+ *  camera seeing only part of a large room still registers. */
+export function samplePoints(poly: MetreXY[], step = 8): MetreXY[] {
+  const pts: MetreXY[] = [];
+  const c = centroid(poly);
+  if (pointInRing(c, poly)) pts.push(c);
+  const [x0, y0, x1, y1] = bbox(poly);
+  for (let x = x0 + step / 2; x < x1; x += step)
+    for (let y = y0 + step / 2; y < y1; y += step) {
+      const p: MetreXY = [x, y];
+      if (pointInRing(p, poly)) pts.push(p);
+    }
+  return pts.length ? pts : [c];
+}
+
+/** Rank cameras seeing `unit`, given this floor's cameras + precomputed rings. */
+export function rankCamerasForUnitWithRings(
+  unit: Unit,
+  cams: Camera[],
+  ringById: Map<string, MetreXY[]>,
+): RankedCamera[] {
+  const camById = new Map(cams.map((c) => [c.id, c]));
+  const best = new Map<string, number>();
+  for (const pt of samplePoints(unit.polygon))
+    for (const cs of rankCamerasForPoint(pt, cams, ringById))
+      best.set(cs.cameraId, Math.max(best.get(cs.cameraId) ?? 0, cs.score));
+  return [...best.entries()]
+    .map(([cameraId, score]) => {
+      const c = camById.get(cameraId)!;
+      return { cameraId, name: c.name, kind: c.kind, score, streamRef: c.streamRef };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+/** Ranked "seen by" for one unit (recomputes this floor's rings). */
+export function rankCamerasForUnit(b: Building, unitId: string): RankedCamera[] {
+  const unit = b.units.find((u) => u.id === unitId);
+  if (!unit) return [];
+  const cams = b.cameras.filter((c) => c.ordinal === unit.ordinal);
+  const ringById = new Map(cams.map((c) => [c.id, visibilityRing(b, c)]));
+  return rankCamerasForUnitWithRings(unit, cams, ringById);
+}
+
+/** The spaces one camera covers, best-view first — given its precomputed ring. */
+export function unitsSeenByCameraRing(
+  cam: Camera,
+  ring: MetreXY[],
+  units: Unit[],
+): { unitId: string; name: string; score: number }[] {
+  const out: { unitId: string; name: string; score: number }[] = [];
+  for (const u of units) {
+    if (u.ordinal !== cam.ordinal || !indexable(u)) continue;
+    if (!samplePoints(u.polygon).some((p) => pointInRing(p, ring))) continue;
+    out.push({ unitId: u.id, name: u.name, score: scoreCameraForPoint(cam, ring, centroid(u.polygon)).score });
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+
+/** Full multi-floor space→camera index. Pure; recompute on any building change so
+ *  it always matches current coverage. Call on demand (export), not per keystroke. */
+export function buildCameraIndex(b: Building): UnitCoverage[] {
+  const out: UnitCoverage[] = [];
+  const ordinals = [...new Set(b.units.map((u) => u.ordinal))].sort((x, y) => x - y);
+  for (const o of ordinals) {
+    const walls = collectWalls(b, o);
+    const cams = b.cameras.filter((c) => c.ordinal === o);
+    const ringById = new Map(cams.map((c) => [c.id, computeVisibility(c, walls)]));
+    for (const u of b.units) {
+      if (u.ordinal !== o || !indexable(u)) continue;
+      out.push({
+        unitId: u.id,
+        ordinal: o,
+        name: u.name,
+        category: u.category,
+        security: u.security ?? "public",
+        cameras: rankCamerasForUnitWithRings(u, cams, ringById),
+      });
+    }
+  }
+  return out;
+}
+
+/** Summary stats for the export header + coverage-gap flags. */
+export function indexStats(idx: UnitCoverage[]) {
+  const gaps = idx.filter((u) => u.cameras.length === 0);
+  const secureUnderCovered = idx.filter(
+    (u) => (u.security === "secure" || u.security === "restricted") && u.cameras.length < 2,
+  );
+  return {
+    spaces: idx.length,
+    gaps: gaps.map((u) => u.name),
+    redundantCount: idx.filter((u) => u.cameras.length >= 2).length,
+    secureUnderCovered: secureUnderCovered.map((u) => u.name),
+  };
 }

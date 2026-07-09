@@ -2,6 +2,8 @@ import { useStore, ALL_AMENITY_KINDS } from "../../store";
 import type { AmenityKind, LayerVisibility } from "../../types";
 import InspectPanel from "./InspectPanel";
 import FeedPlaceholder from "./FeedPlaceholder";
+import { useVisibility } from "../visibility";
+import { unitsSeenByCameraRing } from "../../security/coverage-link";
 
 /**
  * Display-mode sidebar — the read-only operator console. Three states:
@@ -24,11 +26,14 @@ const LAYER_LABEL: Partial<Record<keyof LayerVisibility, string>> = {
 function CameraView({ id }: { id: string }) {
   const building = useStore((s) => s.building);
   const setSelectedCamera = useStore((s) => s.setSelectedCamera);
+  const { polys } = useVisibility();
   const cam = building.cameras.find((c) => c.id === id);
+  const ring = polys.find((p) => p.cameraId === id)?.ring;
+  const covers = cam && ring ? unitsSeenByCameraRing(cam, ring, building.units) : [];
   if (!cam) return null;
   const kindLabel = cam.kind === "dome" ? "Dome · 360°" : `${cam.kind} · ${cam.fovDeg}° FOV`;
   return (
-    <div className="panel">
+    <div className="panel op-panel">
       <button className="op-back" onClick={() => setSelectedCamera(null)}>
         ← All cameras
       </button>
@@ -37,6 +42,23 @@ function CameraView({ id }: { id: string }) {
       <div className="readout mono" style={{ marginTop: 10 }}>
         <div>{kindLabel} · {cam.rangeM} m range</div>
         <div className="probe-stream">{cam.streamRef ? cam.streamRef : "no stream set"}</div>
+      </div>
+      <div className="op-section">
+        <div className="op-head"><span>Covers</span><span className="op-count">{covers.length}</span></div>
+        {covers.length === 0 ? (
+          <p className="hint">No mapped space in view.</p>
+        ) : (
+          <div className="roomlist scroll">
+            {covers.map((u) => (
+              <div className="roomrow" key={u.unitId}>
+                <span className="camrow-select" style={{ cursor: "default" }}>
+                  <span className="vlabel">{u.name}</span>
+                  <span className="camrow-kind">{Math.round(u.score * 100)}%</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <p className="hint" style={{ marginTop: 10 }}>
         Its coverage cone is highlighted on the map. Click any point on the floor to find every

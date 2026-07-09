@@ -45,13 +45,14 @@ export default function InspectPanel() {
 
   const camById = new Map(building.cameras.map((c) => [c.id, c]));
   // Anchor the preview to the selected camera when it's part of this probe;
-  // otherwise fall back to the nearest (first) covering camera.
+  // otherwise fall back to the BEST-VIEW (first) covering camera.
   const anchorId =
     selectedCameraId && probe.cameraIds.includes(selectedCameraId)
       ? selectedCameraId
       : probe.cameraIds[0];
   const selected = camById.get(anchorId);
   const others = probe.cameraIds.filter((id) => id !== anchorId);
+  const pct = (id: string) => `${Math.round((probe.scores?.[id] ?? 0) * 100)}%`;
 
   return (
     <div className="panel">
@@ -61,7 +62,9 @@ export default function InspectPanel() {
         <>
           <FeedPlaceholder camera={selected} />
           <div className="readout mono" style={{ marginTop: 10 }}>
-            <div>{selected.name}</div>
+            <div>
+              {selected.name} <span className="best-view">BEST VIEW · {pct(anchorId)}</span>
+            </div>
             <div className="probe-stream">
               {selected.streamRef ? selected.streamRef : "no stream set"}
             </div>
@@ -85,12 +88,10 @@ export default function InspectPanel() {
                 <button
                   className="camrow-select"
                   onClick={() => setSelectedCamera(id)}
-                  title="Preview this camera"
+                  title={`View quality ${pct(id)} · ${formatLength(distM(c.at, probe.point), unit)} away`}
                 >
                   <span className="vlabel">{c.name}</span>
-                  <span className="camrow-kind">
-                    {formatLength(distM(c.at, probe.point), unit)}
-                  </span>
+                  <span className="camrow-kind">{pct(id)}</span>
                 </button>
               </div>
             );
