@@ -14,7 +14,7 @@ import type {
   Unit,
   AmenityKind,
 } from "./types";
-import { initialBuilding, doorForRoom } from "./building";
+import { doorForRoom, selectableUnits } from "./building";
 import { defaultNameFor, isSpace } from "./categories";
 import { parseSvgShapes } from "./svgImport";
 import { buildingToGeoJSON, geoJSONToBuilding } from "./imdf";
@@ -155,6 +155,18 @@ function loadBuilding(propertyId: string): Building {
     /* fall through */
   }
   return demoById(propertyId).building;
+}
+
+/** Default route endpoints for a building: first/last selectable unit (the
+ *  same choice AppShell's self-heal effect makes). "" when the building has
+ *  none — findRoute treats an unknown node id as "no route" (returns null),
+ *  so an empty id renders as no route rather than crashing. */
+function routeEndpointsFor(b: Building): { startId: string; goalId: string } {
+  const rooms = selectableUnits(b);
+  return {
+    startId: rooms[0]?.id ?? "",
+    goalId: rooms[rooms.length - 1]?.id ?? "",
+  };
 }
 
 const CAM_DEFAULTS = { heading: 0, fovDeg: 90, rangeM: 8, kind: "fixed" as CameraKind };
@@ -382,16 +394,18 @@ export const useStore = create<State>((set, get) => {
     // OLD property's key first (so the last edit actually lands), then load the
     // new property's building and reset every piece of session UI state that
     // could otherwise reference ids from the old building (selection, undo
-    // history, in-progress drafts, the floor index). Route start/goal are NOT
-    // reset here — AppShell already self-heals them whenever `building` changes
-    // and the current id isn't among the new building's selectable units.
+    // history, in-progress drafts, the floor index, route endpoints). Endpoints
+    // are derived from the NEW building in the SAME set() — never left stale
+    // for a render waiting on AppShell's self-heal effect.
     setProperty: (id) => {
       const s = get();
       if (id === s.propertyId) return;
       flushPendingPersist();
+      const building = loadBuilding(id);
       set({
         propertyId: id,
-        building: loadBuilding(id),
+        building,
+        ...routeEndpointsFor(building),
         ordinal: 0,
         probe: null,
         selectedCameraId: null,
@@ -964,11 +978,14 @@ export const useStore = create<State>((set, get) => {
       });
     },
 
+    // Reset the ACTIVE property to its pristine demo (not always the casino —
+    // each registered demo resets to its own data). Route endpoints re-derive
+    // from that demo building in the same update, never left stale.
     resetBuilding: () => {
-      commit(() => initialBuilding);
+      const demo = demoById(get().propertyId).building;
+      commit(() => demo);
       set({
-        startId: "lobby",
-        goalId: "lab",
+        ...routeEndpointsFor(demo),
         selectedId: null,
         selectedIds: [],
         selectedCameraId: null,
