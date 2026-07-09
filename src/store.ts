@@ -24,7 +24,7 @@ import { buildSecurityReport } from "./report";
 import { buildCameraIndex, indexStats } from "./security/coverage-link";
 import { buildGraph } from "./graph";
 import { findRoute } from "./astar";
-import { buildingKey, migrateLegacyBuilding } from "./persistence";
+import { buildingKey, isValidBuildingShape, migrateLegacyBuilding } from "./persistence";
 import { DEMOS, DEFAULT_PROPERTY_ID, demoById } from "./demos";
 
 // One-time migration: pre-gallery saves lived at the un-suffixed key and were
@@ -136,18 +136,21 @@ function loadBuilding(propertyId: string): Building {
     const raw = localStorage.getItem(buildingKey(propertyId));
     if (raw) {
       const b = JSON.parse(raw) as Building;
-      const ok =
-        Array.isArray(b.units) &&
-        Array.isArray(b.levels) &&
-        Array.isArray(b.openings) &&
-        b.units.every((u) => Array.isArray(u.polygon)) &&
-        b.openings.every((o) => typeof o.id === "string");
-      if (ok) {
+      // Validation is a pure predicate (isValidBuildingShape, persistence.ts) so
+      // it's node-testable without jsdom. localStorage is user-controlled startup
+      // input (hand-edited, quota-truncated, or from an older/incompatible build)
+      // — a structurally-plausible but truncated blob must degrade to the
+      // pristine demo, never brick startup.
+      if (isValidBuildingShape(b)) {
         // Additive migration: legacy payloads predate these collections — default
         // them in place (persistence stays v3; same pattern as cameras/underlays).
         if (!Array.isArray(b.cameras)) b.cameras = [];
         if (!Array.isArray(b.incidents)) b.incidents = [];
         if (!Array.isArray(b.patrols)) b.patrols = [];
+        if (!Array.isArray(b.amenities)) b.amenities = [];
+        if (!Array.isArray(b.fixtures)) b.fixtures = [];
+        if (!Array.isArray(b.footprints)) b.footprints = [];
+        if (!Array.isArray(b.underlays)) b.underlays = [];
         return b;
       }
     }
@@ -728,7 +731,16 @@ export const useStore = create<State>((set, get) => {
         (u) => u.ordinal === ordinal && isSpace(u.category) && u.category !== "outside",
       );
       if (rooms.length < 2) return;
-      const graph = buildGraph(s.building);
+      // Same door-without-corridor hazard as useRoute (see src/ui/route.ts):
+      // buildGraph throws if any floor has a door but no corridor. autoPatrol is
+      // reachable straight from the UI (patrol tool), so guard it the same way —
+      // no-op rather than crashing (and never persisting a broken commit).
+      let graph;
+      try {
+        graph = buildGraph(s.building);
+      } catch {
+        return;
+      }
       const ids = rooms.map((u) => u.id).filter((id) => graph.nodes.has(id));
       if (ids.length < 2) return;
 
@@ -1128,6 +1140,15 @@ function flushPendingPersist() {
 
 useStore.subscribe((s, prev) => {
   if (s.building === prev.building) return;
+  // setProperty's set() call changes BOTH `propertyId` and `building` (to the
+  // just-loaded, unedited demo) in the same update — this subscription would
+  // otherwise schedule a write of that pristine demo back under the NEW
+  // property's key 400ms later, merely for having viewed it (pinning every demo
+  // in the gallery and shadowing future demo-data commits). Detect that case by
+  // comparing propertyId across (state, prevState) and skip scheduling; a real
+  // edit made AFTER the switch changes only `building` (propertyId stays equal
+  // to prev), so it falls through and persists normally.
+  if (s.propertyId !== prev.propertyId) return;
   if (persistTimer !== null) window.clearTimeout(persistTimer);
   pendingPersistKey = buildingKey(s.propertyId);
   persistTimer = window.setTimeout(() => {

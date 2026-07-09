@@ -18,27 +18,35 @@ export function useRoute(): RouteInfo {
   const routeMode = useStore((s) => s.routeMode);
 
   return useMemo<RouteInfo>(() => {
-    const graph = buildGraph(building);
+    try {
+      const graph = buildGraph(building);
 
-    if (routeMode === "egress") {
-      const exitNodes = [...graph.nodes.values()].filter((n) => n.kind === "entrance");
-      const route = findNearestRoute(
-        graph,
-        startId,
-        exitNodes.map((n) => n.id),
-      );
-      if (!route) return { geom: null, exit: null };
-      // Node id is `entrance:<openingId>`; name the exit by its owning unit.
-      const openingId = route.goalId.slice("entrance:".length);
-      const op = building.openings.find((o) => o.id === openingId);
-      const owner = op && building.units.find((u) => u.id === op.unit);
-      return {
-        geom: routeToGeometry(graph, route.path),
-        exit: { nodeId: route.goalId, name: owner?.name ?? "Exit" },
-      };
+      if (routeMode === "egress") {
+        const exitNodes = [...graph.nodes.values()].filter((n) => n.kind === "entrance");
+        const route = findNearestRoute(
+          graph,
+          startId,
+          exitNodes.map((n) => n.id),
+        );
+        if (!route) return { geom: null, exit: null };
+        // Node id is `entrance:<openingId>`; name the exit by its owning unit.
+        const openingId = route.goalId.slice("entrance:".length);
+        const op = building.openings.find((o) => o.id === openingId);
+        const owner = op && building.units.find((u) => u.id === op.unit);
+        return {
+          geom: routeToGeometry(graph, route.path),
+          exit: { nodeId: route.goalId, name: owner?.name ?? "Exit" },
+        };
+      }
+
+      const route = findRoute(graph, startId, goalId);
+      return { geom: route ? routeToGeometry(graph, route.path) : null, exit: null };
+    } catch {
+      // Authoring can transiently leave a floor with a door but no corridor
+      // (mid-edit, or a corridor deleted while other rooms still have doors) —
+      // buildGraph throws in that case. Degrade to "no route" instead of
+      // white-screening the whole app.
+      return { geom: null, exit: null };
     }
-
-    const route = findRoute(graph, startId, goalId);
-    return { geom: route ? routeToGeometry(graph, route.path) : null, exit: null };
   }, [building, startId, goalId, routeMode]);
 }
