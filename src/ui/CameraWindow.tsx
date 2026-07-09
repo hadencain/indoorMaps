@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type maplibregl from "maplibre-gl";
 import { useStore } from "../store";
 import { m2ll } from "../geo";
@@ -133,7 +133,8 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
     return rankCamerasForPoint(probe.point, cams, ringById);
   }, [probe, polys, building.cameras, ordinal]);
 
-  const ids = ranked.map((r) => r.cameraId);
+  // Memoized so the highlight-filter effect keys on ranking changes, not renders.
+  const ids = useMemo(() => ranked.map((r) => r.cameraId), [ranked]);
   // Anchor = the selected camera while it still covers the point, else best view.
   const anchorId =
     selectedCameraId && ids.includes(selectedCameraId) ? selectedCameraId : (ids[0] ?? null);
@@ -150,21 +151,22 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
     }
   }, [probe, anchorId, selectedCameraId, setSelectedCamera]);
 
-  // Aim the FOV-highlight layers (Task 2, always-visible) at the anchor camera.
-  // Reset to __none__ on unmount so no cone lingers after the window closes.
+  // Aim the FOV-highlight layers (always-visible) at EVERY camera covering the
+  // probed point, all at equal weight — the map answers "who covers this spot"
+  // at a glance. Reset to __none__ on unmount so no cones linger after close.
   useEffect(() => {
     const setF = (f: maplibregl.FilterSpecification) => {
       if (map.getLayer("camera-fov-highlight-fill")) map.setFilter("camera-fov-highlight-fill", f);
       if (map.getLayer("camera-fov-highlight-line")) map.setFilter("camera-fov-highlight-line", f);
     };
     const none: maplibregl.FilterSpecification = ["==", ["get", "cameraId"], "__none__"];
-    if (anchorId) {
-      setF(["all", ["==", ["get", "ordinal"], ordinal], ["==", ["get", "cameraId"], anchorId]]);
+    if (ids.length > 0) {
+      setF(["all", ["==", ["get", "ordinal"], ordinal], ["in", ["get", "cameraId"], ["literal", ids]]]);
     } else {
       setF(none);
     }
     return () => setF(none);
-  }, [map, anchorId, ordinal]);
+  }, [map, ids, ordinal]);
 
   // PTZ fires read latest state per tick (getState, not the render closure):
   // hold-to-repeat must step from the CURRENT heading/fov each 150ms. Ticks go
@@ -191,6 +193,17 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
     setPos(clampPos({ x: p.x + SPAWN_OFFSET, y: p.y + SPAWN_OFFSET }, widthRef.current, h, map));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [probe]);
+
+  // Post-commit overflow correction: spawn clamps against an ESTIMATED height
+  // (winRef isn't mounted yet), and the tile grid can make the real window far
+  // taller — pull it back inside the container once measurable. Idempotent
+  // (clamp of a clamped pos is itself), so this converges in one extra render.
+  useLayoutEffect(() => {
+    const real = winRef.current?.offsetHeight;
+    if (!real || !pos) return;
+    const c = clampPos(pos, widthRef.current, real, map);
+    if (c.x !== pos.x || c.y !== pos.y) setPos(c);
+  });
 
   // Re-render on map move/resize so projected positions track the map.
   useEffect(() => {
@@ -365,24 +378,34 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
           )}
 
           {others.length > 0 && (
-            <div className="roomlist camwin-switch">
-              {others.map((id) => {
-                const c = camById.get(id);
-                if (!c) return null;
-                return (
-                  <div className="roomrow" key={id}>
-                    <button
-                      className="camrow-select"
+            <>
+              <div className="camwin-subhead">Also covering ({others.length})</div>
+              <div className="camwin-tiles">
+                {others.map((id) => {
+                  const c = camById.get(id);
+                  if (!c) return null;
+                  return (
+                    <div
+                      className="camtile"
+                      key={id}
+                      role="button"
+                      tabIndex={0}
+                      title="Promote to main view"
                       onClick={() => setSelectedCamera(id)}
-                      title="Switch to this camera"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") setSelectedCamera(id);
+                      }}
                     >
-                      <span className="vlabel">{c.name}</span>
-                      <span className="camrow-kind">{pct(id)}</span>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+                      <FeedPlaceholder camera={c} />
+                      <div className="camtile-cap">
+                        <span className="vlabel">{c.name}</span>
+                        <span className="camrow-kind">{pct(id)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
         </div>
 

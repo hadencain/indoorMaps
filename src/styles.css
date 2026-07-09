@@ -1398,10 +1398,52 @@ button.wide.ghost {
 .camwin-body {
   padding: 10px;
 }
-.camwin-switch {
-  margin-top: 8px;
-  max-height: 140px;
+.camwin-subhead {
+  margin-top: 10px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+/* Thumbnail feed tiles: one per additional covering camera; click promotes. */
+.camwin-tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 6px;
+  max-height: 240px;
   overflow-y: auto;
+}
+.camtile {
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.camtile:hover {
+  border-color: var(--accent);
+}
+/* Clicks land on the tile, not the inert feed; kill its own hover affordance. */
+.camtile .camera-feed {
+  pointer-events: none;
+}
+.camtile .camera-feed-label {
+  font-size: 8px;
+  letter-spacing: 0.1em;
+}
+.camtile .camera-feed-corner {
+  display: none;
+}
+.camtile-cap {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 2px 0;
+}
+.camtile-cap .vlabel {
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .camwin-foot {
   padding: 8px 10px;
