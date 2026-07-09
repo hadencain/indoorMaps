@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { useStore, ALL_AMENITY_KINDS } from "../../store";
 import type { AmenityKind, LayerVisibility } from "../../types";
-import InspectPanel from "./InspectPanel";
 import FeedPlaceholder from "./FeedPlaceholder";
 import { useVisibility } from "../visibility";
 import { unitsSeenByCameraRing } from "../../security/coverage-link";
@@ -182,9 +181,11 @@ function OperatorControls() {
 export default function OperatorPanel() {
   const probe = useStore((s) => s.probe);
   const selectedCameraId = useStore((s) => s.selectedCameraId);
+  // A live probe anchors a camera (selectedCameraId) for the floating window —
+  // that must NOT swap the sidebar to CameraView. Directory selection only.
   return (
     <aside className="inspector">
-      {probe ? <InspectPanel /> : selectedCameraId ? <CameraView id={selectedCameraId} /> : <OperatorControls />}
+      {selectedCameraId && !probe ? <CameraView id={selectedCameraId} /> : <OperatorControls />}
     </aside>
   );
 }
