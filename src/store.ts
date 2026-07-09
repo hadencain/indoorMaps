@@ -235,6 +235,10 @@ interface State {
   moveCamera: (id: string, at: MetreXY) => void;
   rotateCamera: (id: string, heading: number) => void;
   updateCamera: (id: string, patch: Partial<Omit<Camera, "id">>) => void;
+  // PTZ hold-to-repeat: one snapshot for the whole gesture (beginCameraGesture),
+  // then per-tick mutations that skip history/undo entirely (updateCameraLive).
+  beginCameraGesture: () => void;
+  updateCameraLive: (id: string, patch: Partial<Omit<Camera, "id">>) => void;
   deleteCamera: (id: string) => void;
   setSelectedCamera: (id: string | null) => void;
   setProbe: (p: Probe | null) => void;
@@ -554,6 +558,33 @@ export const useStore = create<State>((set, get) => {
       commit((b) => ({
         ...b,
         cameras: b.cameras.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      })),
+
+    // Exists so a held PTZ sweep is one undo step: called once on gesture start
+    // (pointerdown), it takes exactly the snapshot `commit` would take, without
+    // touching `building` — the ticks that follow use updateCameraLive instead.
+    beginCameraGesture: () =>
+      set((s) => ({ past: [...s.past, s.building].slice(-HISTORY_LIMIT), future: [] })),
+
+    // Exists so a held PTZ sweep is one undo step: per-tick mutation during a
+    // gesture (after beginCameraGesture already snapshotted). Same normalization
+    // as rotateCamera/updateCamera, but a plain `set` — no history push.
+    updateCameraLive: (id, patch) =>
+      set((s) => ({
+        building: {
+          ...s.building,
+          cameras: s.building.cameras.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  ...patch,
+                  ...(patch.heading !== undefined
+                    ? { heading: ((patch.heading % 360) + 360) % 360 }
+                    : {}),
+                }
+              : c,
+          ),
+        },
       })),
 
     deleteCamera: (id) => {
@@ -1017,8 +1048,17 @@ function persistBuilding(building: Building) {
   }
 }
 
+// Debounced (trailing, ~400ms): a held PTZ sweep mutates `building` every
+// 150ms via updateCameraLive — without this, that's a full-building
+// JSON.stringify + localStorage write ~7x/sec. Write once per burst instead.
+let persistTimer: number | null = null;
 useStore.subscribe((s, prev) => {
-  if (s.building !== prev.building) persistBuilding(s.building);
+  if (s.building === prev.building) return;
+  if (persistTimer !== null) window.clearTimeout(persistTimer);
+  persistTimer = window.setTimeout(() => {
+    persistTimer = null;
+    persistBuilding(useStore.getState().building);
+  }, 400);
 });
 
 // Layer-visibility prefs persist under their own key, separate from the building.

@@ -20,11 +20,13 @@ interface Px {
   y: number;
 }
 
-/** Clamp a window origin so the window stays inside the map container. */
-function clampPos(p: Px, width: number, map: maplibregl.Map): Px {
+/** Clamp a window origin so the window stays inside the map container.
+ *  `height` should be the window's actual measured height where available —
+ *  callers fall back to an estimate before winRef is attached (spawn only). */
+function clampPos(p: Px, width: number, height: number, map: maplibregl.Map): Px {
   const box = map.getContainer();
   const maxX = Math.max(EDGE_PAD, box.clientWidth - width - EDGE_PAD);
-  const maxY = Math.max(EDGE_PAD, box.clientHeight - 160);
+  const maxY = Math.max(EDGE_PAD, box.clientHeight - height);
   return {
     x: Math.min(Math.max(p.x, EDGE_PAD), maxX),
     y: Math.min(Math.max(p.y, EDGE_PAD), maxY),
@@ -46,14 +48,28 @@ function edgePoint(rect: { x: number; y: number; w: number; h: number }, target:
   return { x: cx + dx * s, y: cy + dy * s };
 }
 
-/** Fires on press, then repeats every 150ms while held. */
-function HoldButton({ label, title, onFire }: { label: string; title: string; onFire: () => void }) {
+/** Fires on press, then repeats every 150ms while held. `onBegin` (if given)
+ *  fires once on pointerdown, before the first `onFire` — used to snapshot
+ *  undo state before a gesture starts mutating live. */
+function HoldButton({
+  label,
+  title,
+  onFire,
+  onBegin,
+}: {
+  label: string;
+  title: string;
+  onFire: () => void;
+  onBegin?: () => void;
+}) {
   const timer = useRef<number | null>(null);
   const stop = () => {
     if (timer.current !== null) {
       window.clearInterval(timer.current);
       timer.current = null;
     }
+    // Only relevant while a timer is armed, but harmless to call unconditionally.
+    window.removeEventListener("blur", stop);
   };
   useEffect(() => stop, []);
   return (
@@ -62,12 +78,17 @@ function HoldButton({ label, title, onFire }: { label: string; title: string; on
       title={title}
       onPointerDown={(e) => {
         e.preventDefault();
+        onBegin?.();
         onFire();
         stop();
         timer.current = window.setInterval(onFire, 150);
+        // Alt-tab / window switch mid-hold must stop the repeat same as
+        // pointerup — otherwise the camera keeps rotating unattended.
+        window.addEventListener("blur", stop);
       }}
       onPointerUp={stop}
       onPointerLeave={stop}
+      onPointerCancel={stop}
     >
       {label}
     </button>
@@ -115,6 +136,17 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
     selectedCameraId && ids.includes(selectedCameraId) ? selectedCameraId : (ids[0] ?? null);
   const anchor = building.cameras.find((c) => c.id === anchorId) ?? null;
 
+  // Invariant: while a probe is live, selection tracks a camera that actually
+  // covers the point — MapView keys the sightline + camera-fov-selected filter
+  // off selectedCameraId, so if PTZ pans the selected camera off the probed
+  // point and anchorId falls back to another camera, selection must follow or
+  // the map shows two disagreeing highlights (old selected cone + new anchor).
+  useEffect(() => {
+    if (probe && anchorId && selectedCameraId && anchorId !== selectedCameraId) {
+      setSelectedCamera(anchorId);
+    }
+  }, [probe, anchorId, selectedCameraId, setSelectedCamera]);
+
   // Aim the FOV-highlight layers (Task 2, always-visible) at the anchor camera.
   // Reset to __none__ on unmount so no cone lingers after the window closes.
   useEffect(() => {
@@ -132,23 +164,28 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
   }, [map, anchorId, ordinal]);
 
   // PTZ fires read latest state per tick (getState, not the render closure):
-  // hold-to-repeat must step from the CURRENT heading/fov each 150ms.
+  // hold-to-repeat must step from the CURRENT heading/fov each 150ms. Ticks go
+  // through updateCameraLive (no history push) — HoldButton's onBegin takes
+  // the one undo snapshot for the whole hold via beginCameraGesture.
   const ptzPan = (dir: 1 | -1) => () => {
     const s = useStore.getState();
     const cam = s.building.cameras.find((c) => c.id === anchorId);
-    if (cam) s.rotateCamera(cam.id, panStep(cam.heading, dir));
+    if (cam) s.updateCameraLive(cam.id, { heading: panStep(cam.heading, dir) });
   };
   const ptzZoom = (dir: 1 | -1) => () => {
     const s = useStore.getState();
     const cam = s.building.cameras.find((c) => c.id === anchorId);
-    if (cam) s.updateCamera(cam.id, zoomStep(cam.fovDeg, cam.rangeM, dir));
+    if (cam) s.updateCameraLive(cam.id, zoomStep(cam.fovDeg, cam.rangeM, dir));
   };
 
   // Spawn near the click; keyed to the probe ONLY (drag must not re-trigger).
+  // winRef isn't attached yet at spawn — fall back to the same 240px estimate
+  // the leader uses before its own first measurement.
   useEffect(() => {
     if (!probe) return;
     const p = map.project(m2ll(building.origin, probe.point[0], probe.point[1]));
-    setPos(clampPos({ x: p.x + SPAWN_OFFSET, y: p.y + SPAWN_OFFSET }, widthRef.current, map));
+    const h = winRef.current?.offsetHeight ?? 240;
+    setPos(clampPos({ x: p.x + SPAWN_OFFSET, y: p.y + SPAWN_OFFSET }, widthRef.current, h, map));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [probe]);
 
@@ -179,11 +216,13 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
     // Blind state renders at a fixed 260px, not widthRef's remembered width —
     // clamp against what's actually on screen.
     const w = winRef.current?.offsetWidth ?? widthRef.current;
+    const h = winRef.current?.offsetHeight ?? 240;
     const onMove = (ev: PointerEvent) => {
       setPos(
         clampPos(
           { x: start.x + (ev.clientX - sx), y: start.y + (ev.clientY - sy) },
           w,
+          h,
           map,
         ),
       );
@@ -208,13 +247,15 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
     gestureCleanup.current?.();
     const sw = widthRef.current;
     const sx = e.clientX;
+    // Resize only changes width, so the height estimate is captured once.
+    const h = winRef.current?.offsetHeight ?? 240;
     const onMove = (ev: PointerEvent) => {
       const w = Math.min(MAX_W, Math.max(MIN_W, sw + (ev.clientX - sx)));
       setWidth(w);
       lastWidth = w;
       // Widening near the container's right edge can push the window past
       // the map bounds — re-clamp position against the new width too.
-      setPos((p) => (p ? clampPos(p, w, map) : p));
+      setPos((p) => (p ? clampPos(p, w, h, map) : p));
     };
     const end = () => {
       window.removeEventListener("pointermove", onMove);
@@ -292,11 +333,31 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
           {anchor.kind === "ptz" && (
             <div className="ptz-pad">
               <span className="ptz-label">Pan</span>
-              <HoldButton label="◀" title="Pan left (hold to sweep)" onFire={ptzPan(1)} />
-              <HoldButton label="▶" title="Pan right (hold to sweep)" onFire={ptzPan(-1)} />
+              <HoldButton
+                label="◀"
+                title="Pan left (hold to sweep)"
+                onFire={ptzPan(1)}
+                onBegin={() => useStore.getState().beginCameraGesture()}
+              />
+              <HoldButton
+                label="▶"
+                title="Pan right (hold to sweep)"
+                onFire={ptzPan(-1)}
+                onBegin={() => useStore.getState().beginCameraGesture()}
+              />
               <span className="ptz-label">Zoom</span>
-              <HoldButton label="−" title="Zoom out (wider FOV)" onFire={ptzZoom(-1)} />
-              <HoldButton label="+" title="Zoom in (narrower FOV, longer reach)" onFire={ptzZoom(1)} />
+              <HoldButton
+                label="−"
+                title="Zoom out (wider FOV)"
+                onFire={ptzZoom(-1)}
+                onBegin={() => useStore.getState().beginCameraGesture()}
+              />
+              <HoldButton
+                label="+"
+                title="Zoom in (narrower FOV, longer reach)"
+                onFire={ptzZoom(1)}
+                onBegin={() => useStore.getState().beginCameraGesture()}
+              />
             </div>
           )}
 
