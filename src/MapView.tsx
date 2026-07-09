@@ -341,6 +341,25 @@ export default function MapView() {
         paint: { "line-color": "#5cf6ee", "line-width": 2 },
         filter: ["==", ["get", "cameraId"], "__none__"],
       });
+      // Probe-anchor FOV highlight (floating camera window): a brighter cone
+      // for the camera the window is anchored to. Filter is driven by
+      // CameraWindow; __none__ when idle. Always "visible" — unlike the
+      // camera-fov-* trio this is NOT gated by layers.coverage, so a probe
+      // shows its camera's cone even with the Coverage layer off.
+      map.addLayer({
+        id: "camera-fov-highlight-fill",
+        type: "fill",
+        source: "camera-fov",
+        paint: { "fill-color": "#5cf6ee", "fill-opacity": 0.2 },
+        filter: ["==", ["get", "cameraId"], "__none__"],
+      });
+      map.addLayer({
+        id: "camera-fov-highlight-line",
+        type: "line",
+        source: "camera-fov",
+        paint: { "line-color": "#5cf6ee", "line-width": 2, "line-opacity": 0.9 },
+        filter: ["==", ["get", "cameraId"], "__none__"],
+      });
       // Coverage (green) + blind (red) sit BELOW the camera-fov layers and above
       // unit-fill/outline: inserting each before "camera-fov-fill" yields the
       // order unit-* → coverage-fill → blind-fill → camera-fov-*. Translucent so
