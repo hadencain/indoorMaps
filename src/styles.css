@@ -1387,6 +1387,12 @@ button.wide.ghost {
   white-space: nowrap;
 }
 .camwin-head .del {
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  cursor: pointer;
   margin-left: auto;
 }
 .camwin-body {

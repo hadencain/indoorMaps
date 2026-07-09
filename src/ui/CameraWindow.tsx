@@ -52,6 +52,9 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
   const winRef = useRef<HTMLDivElement>(null);
   const widthRef = useRef(width);
   widthRef.current = width;
+  // Holds the teardown for whichever gesture (drag/resize) is currently live,
+  // so unmount or a new gesture can force-remove stale window listeners.
+  const gestureCleanup = useRef<(() => void) | null>(null);
 
   // Best-view-first ranking, derived live (same derivation InspectPanel used) —
   // never a stored snapshot, so PTZ / edits / undo can't leave it stale.
@@ -87,47 +90,69 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
     };
   }, [map]);
 
+  // Tear down an in-flight drag/resize if the window unmounts mid-gesture
+  // (e.g. Esc clears the probe while dragging).
+  useEffect(() => () => gestureCleanup.current?.(), []);
+
   function startDrag(e: React.PointerEvent) {
     if (!pos) return;
     // Header buttons handle their own clicks.
     if ((e.target as HTMLElement).closest("button")) return;
     e.preventDefault();
+    gestureCleanup.current?.();
     const start = { ...pos };
     const sx = e.clientX;
     const sy = e.clientY;
+    // Blind state renders at a fixed 260px, not widthRef's remembered width —
+    // clamp against what's actually on screen.
+    const w = winRef.current?.offsetWidth ?? widthRef.current;
     const onMove = (ev: PointerEvent) => {
       setPos(
         clampPos(
           { x: start.x + (ev.clientX - sx), y: start.y + (ev.clientY - sy) },
-          widthRef.current,
+          w,
           map,
         ),
       );
     };
-    const onUp = () => {
+    const end = () => {
       window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      gestureCleanup.current = null;
     };
+    gestureCleanup.current = end;
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointerup", end);
+    // pointercancel fires on alt-tab / native dialogs — must tear down the
+    // same as pointerup or the listeners leak.
+    window.addEventListener("pointercancel", end);
   }
 
   function startResize(e: React.PointerEvent) {
     e.preventDefault();
     e.stopPropagation();
+    gestureCleanup.current?.();
     const sw = widthRef.current;
     const sx = e.clientX;
     const onMove = (ev: PointerEvent) => {
       const w = Math.min(MAX_W, Math.max(MIN_W, sw + (ev.clientX - sx)));
       setWidth(w);
       lastWidth = w;
+      // Widening near the container's right edge can push the window past
+      // the map bounds — re-clamp position against the new width too.
+      setPos((p) => (p ? clampPos(p, w, map) : p));
     };
-    const onUp = () => {
+    const end = () => {
       window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      gestureCleanup.current = null;
     };
+    gestureCleanup.current = end;
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
   }
 
   function close() {
