@@ -213,6 +213,16 @@ export interface SiteInfo {
   hours: string;
 }
 
+/** An operator preset: a hand-picked set of cameras viewed together as a
+ *  feed wall — e.g. every camera along a delivery route, even when the
+ *  mounts are nowhere near each other. `cameraIds` keeps insertion order
+ *  (the order the operator built the route in). Additive + optional. */
+export interface CameraView {
+  id: string;
+  name: string;
+  cameraIds: string[];
+}
+
 export interface Building {
   /** SW origin of the local metre grid, as [lng, lat]. */
   origin: LngLat;
@@ -236,6 +246,8 @@ export interface Building {
   amenities?: Amenity[];
   /** Site metadata for the operator console (photos, hours). Additive. */
   siteInfo?: SiteInfo;
+  /** Operator camera presets (feed walls). Additive. */
+  cameraViews?: CameraView[];
 }
 
 /** Per-overlay visibility toggles (UI state; persisted separately from the

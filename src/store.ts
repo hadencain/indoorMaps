@@ -209,6 +209,7 @@ let camSeq = 0;
 let roomSeq = 0;
 let incSeq = 0;
 let patSeq = 0;
+let viewSeq = 0;
 
 /** Transient click-to-camera probe result. NOT persisted, NOT routed through
  *  `commit`/undo — pure session UI state. `cameraIds` are the cameras whose
@@ -339,6 +340,10 @@ interface State {
   togglePatrolPause: () => void;
   cyclePatrolSpeed: () => void;
   updateSiteInfo: (patch: Partial<SiteInfo>) => void;
+  addCameraView: (name: string) => string;
+  deleteCameraView: (id: string) => void;
+  addCameraToView: (viewId: string, camId: string) => void;
+  removeCameraFromView: (viewId: string, camId: string) => void;
   exportIMDFArchive: () => void;
   exportSecurityReport: () => void;
   exportCameraIndex: () => void;
@@ -1028,6 +1033,48 @@ export const useStore = create<State>((set, get) => {
       commit((b) => ({
         ...b,
         siteInfo: { photos: [], hours: "", ...b.siteInfo, ...patch },
+      })),
+
+    // ---- Operator camera presets (feed walls) ----
+    // Part of the building blob like siteInfo: undoable, persisted, exported.
+    addCameraView: (name) => {
+      const id = `view-${Date.now()}-${viewSeq++}`;
+      const trimmed = name.trim() || `View ${((get().building.cameraViews ?? []).length + 1)}`;
+      commit((b) => ({
+        ...b,
+        cameraViews: [...(b.cameraViews ?? []), { id, name: trimmed, cameraIds: [] }],
+      }));
+      return id;
+    },
+
+    deleteCameraView: (id) =>
+      commit((b) => ({
+        ...b,
+        cameraViews: (b.cameraViews ?? []).filter((v) => v.id !== id),
+      })),
+
+    // Appends — cameraIds keeps the operator's insertion order (route order).
+    // Adding a camera already in the view is a no-op (same reference ⇒ commit
+    // takes no undo snapshot).
+    addCameraToView: (viewId, camId) =>
+      commit((b) => {
+        const views = b.cameraViews ?? [];
+        const v = views.find((x) => x.id === viewId);
+        if (!v || v.cameraIds.includes(camId) || !b.cameras.some((c) => c.id === camId)) return b;
+        return {
+          ...b,
+          cameraViews: views.map((x) =>
+            x.id === viewId ? { ...x, cameraIds: [...x.cameraIds, camId] } : x,
+          ),
+        };
+      }),
+
+    removeCameraFromView: (viewId, camId) =>
+      commit((b) => ({
+        ...b,
+        cameraViews: (b.cameraViews ?? []).map((x) =>
+          x.id === viewId ? { ...x, cameraIds: x.cameraIds.filter((c) => c !== camId) } : x,
+        ),
       })),
 
     // ---- P11 exports ----

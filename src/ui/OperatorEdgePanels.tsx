@@ -1,8 +1,11 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import { ChevronLeft, ChevronRight, Crosshair, ImagePlus, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Crosshair, ImagePlus, LayoutGrid, Pencil, Plus, X } from "lucide-react";
+import FeedPlaceholder from "./panels/FeedPlaceholder";
 import { useStore, ALL_AMENITY_KINDS } from "../store";
 import { m2ll } from "../geo";
+import { panStep, zoomStep, tiltStep } from "../security/ptz";
+import { HoldButton } from "./CameraWindow";
 import type { AmenityKind, Camera, CameraKind } from "../types";
 
 /**
@@ -53,7 +56,7 @@ async function fileToSmallDataUrl(file: File): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.82);
 }
 
-function CameraFinder({ map }: { map: maplibregl.Map }) {
+function CameraFinder({ map, onOpenWall }: { map: maplibregl.Map; onOpenWall: (viewId: string) => void }) {
   const building = useStore((s) => s.building);
   const ordinal = useStore((s) => s.ordinal);
   const setOrdinal = useStore((s) => s.setOrdinal);
@@ -62,6 +65,17 @@ function CameraFinder({ map }: { map: maplibregl.Map }) {
   const [q, setQ] = useState("");
   const [kind, setKind] = useState<CameraKind | "all">("all");
   const [allFloors, setAllFloors] = useState(false);
+  // Preset-view authoring state (which view is being edited, new-view name).
+  const views = building.cameraViews ?? [];
+  const addCameraView = useStore((s) => s.addCameraView);
+  const deleteCameraView = useStore((s) => s.deleteCameraView);
+  const addCameraToView = useStore((s) => s.addCameraToView);
+  const removeCameraFromView = useStore((s) => s.removeCameraFromView);
+  const [editingViewId, setEditingViewId] = useState<string | null>(null);
+  const [naming, setNaming] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [dropHot, setDropHot] = useState(false);
+  const editingView = views.find((v) => v.id === editingViewId) ?? null;
 
   const { cams, matchTotal } = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -83,9 +97,17 @@ function CameraFinder({ map }: { map: maplibregl.Map }) {
     map.easeTo({ center: m2ll(building.origin, cam.at[0], cam.at[1]), duration: 450 });
   };
 
+  // PTZ-only live controls for the selected camera (operators aim and zoom —
+  // they don't re-spec hardware, so there is no FOV/range configuration here).
+  // Same mechanics as the camera window's pad: getState per tick, one undo
+  // snapshot per hold via beginCameraGesture.
   const selected = building.cameras.find((c) => c.id === selectedCameraId) ?? null;
-  const beginGesture = useStore((s) => s.beginCameraGesture);
-  const updateLive = useStore((s) => s.updateCameraLive);
+  const ptzFire = (patch: (c: Camera) => Partial<Camera>) => () => {
+    const s = useStore.getState();
+    const cam = s.building.cameras.find((c) => c.id === s.selectedCameraId);
+    if (cam) s.updateCameraLive(cam.id, patch(cam));
+  };
+  const beginGesture = () => useStore.getState().beginCameraGesture();
 
   return (
     <>
@@ -121,53 +143,194 @@ function CameraFinder({ map }: { map: maplibregl.Map }) {
       </div>
       <div className="edge-list">
         {cams.map((c) => (
-          <button
+          <div
             key={c.id}
             className={`edge-row ${c.id === selectedCameraId ? "on" : ""}`}
+            role="button"
+            tabIndex={0}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("text/camera-id", c.id);
+              e.dataTransfer.effectAllowed = "copy";
+            }}
             onClick={() => open(c)}
-            title="Open feed + fly to camera"
+            onKeyDown={(e) => e.key === "Enter" && open(c)}
+            title="Open feed + fly to camera · drag onto a view to add it"
           >
             <span className="vlabel">{c.name}</span>
             <span className="edge-row-meta">
               {allFloors && <span>{levelName(c.ordinal)} · </span>}
               {c.kind === "dome" ? "360°" : `${Math.round(c.fovDeg)}°`}
+              {editingView && (
+                <button
+                  className="edge-mini-add"
+                  title={`Add to "${editingView.name}"`}
+                  disabled={editingView.cameraIds.includes(c.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    addCameraToView(editingView.id, c.id);
+                  }}
+                >
+                  <Plus size={11} />
+                </button>
+              )}
             </span>
-          </button>
+          </div>
         ))}
         {cams.length === 0 && <p className="hint">No cameras match.</p>}
       </div>
 
-      {selected && (
-        <div className="edge-camset">
-          <div className="edge-subtitle">{selected.name}</div>
-          {selected.kind !== "dome" ? (
-            <>
-              <label className="edge-label">
-                FOV <span className="mono">{Math.round(selected.fovDeg)}°</span>
-              </label>
-              <input
-                type="range"
-                min={20}
-                max={160}
-                value={Math.round(selected.fovDeg)}
-                onPointerDown={beginGesture}
-                onChange={(e) => updateLive(selected.id, { fovDeg: Number(e.target.value) })}
-              />
-            </>
-          ) : (
-            <label className="edge-label">Dome · 360° view</label>
+      <div className="edge-views">
+        <div className="edge-subtitle views-head">
+          Preset views
+          {!naming && (
+            <button className="edge-mini-add" title="New preset view" onClick={() => setNaming(true)}>
+              <Plus size={11} />
+            </button>
           )}
-          <label className="edge-label">
-            Range <span className="mono">{Math.round(selected.rangeM)} m</span>
-          </label>
-          <input
-            type="range"
-            min={4}
-            max={60}
-            value={Math.round(selected.rangeM)}
-            onPointerDown={beginGesture}
-            onChange={(e) => updateLive(selected.id, { rangeM: Number(e.target.value) })}
-          />
+        </div>
+        {naming && (
+          <div className="edge-newview">
+            <input
+              className="edge-search"
+              autoFocus
+              placeholder="View name… e.g. Loading-dock route"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  setEditingViewId(addCameraView(newName));
+                  setNewName("");
+                  setNaming(false);
+                } else if (e.key === "Escape") {
+                  setNaming(false);
+                  setNewName("");
+                }
+              }}
+            />
+            <button
+              className="edge-chip on"
+              onClick={() => {
+                setEditingViewId(addCameraView(newName));
+                setNewName("");
+                setNaming(false);
+              }}
+            >
+              Create
+            </button>
+          </div>
+        )}
+        {views.length === 0 && !naming && (
+          <p className="hint">Group cameras that belong together — a route, a shift, a handoff chain — and open them as one wall.</p>
+        )}
+        {views.map((v) => (
+          <div className="edge-viewrow" key={v.id}>
+            <button
+              className="edge-row grow"
+              title="Open this view as a feed wall"
+              onClick={() => onOpenWall(v.id)}
+            >
+              <span className="edge-row-meta"><LayoutGrid size={11} /></span>
+              <span className="vlabel">{v.name}</span>
+              <span className="edge-row-meta">{v.cameraIds.length}</span>
+            </button>
+            <button
+              className={`edge-mini-add ${editingViewId === v.id ? "on" : ""}`}
+              title={editingViewId === v.id ? "Done editing" : "Edit — drag or + cameras into it"}
+              onClick={() => setEditingViewId(editingViewId === v.id ? null : v.id)}
+            >
+              <Pencil size={11} />
+            </button>
+            <button className="edge-mini-add danger" title="Delete view" onClick={() => deleteCameraView(v.id)}>
+              <X size={11} />
+            </button>
+          </div>
+        ))}
+        {editingView && (
+          <div
+            className={`edge-dropzone ${dropHot ? "hot" : ""}`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+              setDropHot(true);
+            }}
+            onDragLeave={() => setDropHot(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDropHot(false);
+              const id = e.dataTransfer.getData("text/camera-id");
+              if (id) addCameraToView(editingView.id, id);
+            }}
+          >
+            <div className="edge-dropzone-hint">
+              Drag cameras here (or use +) — <strong>{editingView.name}</strong>
+            </div>
+            {editingView.cameraIds.map((cid) => {
+              const c = building.cameras.find((x) => x.id === cid);
+              return (
+                <div className="edge-viewcam" key={cid}>
+                  <span className="vlabel">{c?.name ?? cid}</span>
+                  <button
+                    className="edge-mini-add danger"
+                    title="Remove from view"
+                    onClick={() => removeCameraFromView(editingView.id, cid)}
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              );
+            })}
+            <button className="edge-chip on done" onClick={() => setEditingViewId(null)}>
+              Done
+            </button>
+          </div>
+        )}
+      </div>
+
+      {selected && selected.kind === "ptz" && (
+        <div className="edge-camset">
+          <div className="edge-subtitle">{selected.name} · PTZ</div>
+          <div className="ptz-pad">
+            <span className="ptz-label">Pan</span>
+            <HoldButton
+              label="◀"
+              title="Pan left (hold to sweep)"
+              onFire={ptzFire((c) => ({ heading: panStep(c.heading, 1) }))}
+              onBegin={beginGesture}
+            />
+            <HoldButton
+              label="▶"
+              title="Pan right (hold to sweep)"
+              onFire={ptzFire((c) => ({ heading: panStep(c.heading, -1) }))}
+              onBegin={beginGesture}
+            />
+            <span className="ptz-label">Tilt</span>
+            <HoldButton
+              label="▲"
+              title="Tilt up (see farther)"
+              onFire={ptzFire((c) => ({ tiltDeg: tiltStep(c.tiltDeg, -1) }))}
+              onBegin={beginGesture}
+            />
+            <HoldButton
+              label="▼"
+              title="Tilt down (pull the view in close)"
+              onFire={ptzFire((c) => ({ tiltDeg: tiltStep(c.tiltDeg, 1) }))}
+              onBegin={beginGesture}
+            />
+            <span className="ptz-label">Zoom</span>
+            <HoldButton
+              label="−"
+              title="Zoom out (wider view)"
+              onFire={ptzFire((c) => zoomStep(c.fovDeg, c.rangeM, -1))}
+              onBegin={beginGesture}
+            />
+            <HoldButton
+              label="+"
+              title="Zoom in (narrower, longer reach)"
+              onFire={ptzFire((c) => zoomStep(c.fovDeg, c.rangeM, 1))}
+              onBegin={beginGesture}
+            />
+          </div>
         </div>
       )}
     </>
@@ -331,15 +494,91 @@ function SiteInfo({ map }: { map: maplibregl.Map }) {
   );
 }
 
+/** Feed wall: every camera of a preset view as one tile grid — the route's
+ *  cameras side by side even when their mounts are floors apart. Tile click
+ *  selects the camera and flies the map to its mount. */
+function ViewWall({ map, viewId, onClose }: { map: maplibregl.Map; viewId: string; onClose: () => void }) {
+  const building = useStore((s) => s.building);
+  const ordinal = useStore((s) => s.ordinal);
+  const setOrdinal = useStore((s) => s.setOrdinal);
+  const setSelectedCamera = useStore((s) => s.setSelectedCamera);
+  const view = (building.cameraViews ?? []).find((v) => v.id === viewId) ?? null;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // View deleted (or undone away) while the wall is open.
+  useEffect(() => {
+    if (!view) onClose();
+  }, [view, onClose]);
+  if (!view) return null;
+
+  const cams = view.cameraIds
+    .map((id) => building.cameras.find((c) => c.id === id))
+    .filter((c): c is Camera => !!c);
+  const levelName = (o: number) =>
+    building.levels.find((l) => l.ordinal === o)?.name ?? `L${o}`;
+
+  const jump = (cam: Camera) => {
+    if (cam.ordinal !== ordinal) setOrdinal(cam.ordinal);
+    setSelectedCamera(cam.id);
+    map.easeTo({ center: m2ll(building.origin, cam.at[0], cam.at[1]), duration: 450 });
+  };
+
+  return (
+    <div className="viewwall">
+      <div className="viewwall-head">
+        <LayoutGrid size={14} />
+        <span className="viewwall-title">{view.name}</span>
+        <span className="viewwall-count mono">{cams.length} camera{cams.length === 1 ? "" : "s"}</span>
+        <button className="wiz-x" title="Close (Esc)" onClick={onClose}>
+          <X size={15} />
+        </button>
+      </div>
+      {cams.length === 0 ? (
+        <p className="hint" style={{ padding: "0 12px 12px" }}>
+          This view is empty — edit it (✎) and drag cameras in from the finder list.
+        </p>
+      ) : (
+        <div className="viewwall-grid">
+          {cams.map((c) => (
+            <div
+              key={c.id}
+              className="viewwall-tile"
+              role="button"
+              tabIndex={0}
+              title="Select + fly to this camera"
+              onClick={() => jump(c)}
+              onKeyDown={(e) => e.key === "Enter" && jump(c)}
+            >
+              <FeedPlaceholder camera={c} />
+              <div className="viewwall-cap">
+                <span className="vlabel">{c.name}</span>
+                <span className="edge-row-meta">{levelName(c.ordinal)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function OperatorEdgePanels({ map }: { map: maplibregl.Map }) {
   const [openLeft, setOpenLeft] = useState(false);
   const [openRight, setOpenRight] = useState(false);
+  const [wallViewId, setWallViewId] = useState<string | null>(null);
 
   return (
     <>
       <div className={`edge-slide left ${openLeft ? "open" : ""}`}>
         <div className="edge-panel">
-          <CameraFinder map={map} />
+          <CameraFinder map={map} onOpenWall={setWallViewId} />
         </div>
         <button
           className="edge-arrow"
@@ -361,6 +600,7 @@ export default function OperatorEdgePanels({ map }: { map: maplibregl.Map }) {
           <SiteInfo map={map} />
         </div>
       </div>
+      {wallViewId && <ViewWall map={map} viewId={wallViewId} onClose={() => setWallViewId(null)} />}
     </>
   );
 }

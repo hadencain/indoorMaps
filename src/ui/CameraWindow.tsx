@@ -50,8 +50,9 @@ function edgePoint(rect: { x: number; y: number; w: number; h: number }, target:
 
 /** Fires on press, then repeats every 150ms while held. `onBegin` (if given)
  *  fires once on pointerdown, before the first `onFire` — used to snapshot
- *  undo state before a gesture starts mutating live. */
-function HoldButton({
+ *  undo state before a gesture starts mutating live. Exported for reuse by the
+ *  operator edge panel's PTZ pad. */
+export function HoldButton({
   label,
   title,
   onFire,
