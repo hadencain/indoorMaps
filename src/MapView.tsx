@@ -25,6 +25,7 @@ import { useStore } from "./store";
 import { useRoute } from "./ui/route";
 import { useVisibility } from "./ui/visibility";
 import CameraWindow from "./ui/CameraWindow";
+import PatrolPlayback from "./ui/PatrolPlayback";
 
 const EMPTY: FC = { type: "FeatureCollection", features: [] };
 /** 1×1 transparent pixel — placeholder image for the underlay source until a real one loads. */
@@ -101,6 +102,7 @@ export default function MapView() {
   const onCancelPatrol = useStore((s) => s.cancelPatrol);
   const onSetProbe = useStore((s) => s.setProbe);
   const suggestions = useStore((s) => s.suggestions);
+  const patrolPlayback = useStore((s) => s.patrolPlayback);
   const onAcceptSuggestion = useStore((s) => s.acceptSuggestion);
   const onRejectSuggestion = useStore((s) => s.rejectSuggestion);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1259,6 +1261,9 @@ export default function MapView() {
 
       {ready && mode === "display" && probe && mapRef.current && (
         <CameraWindow map={mapRef.current} />
+      )}
+      {ready && mode === "display" && patrolPlayback && mapRef.current && (
+        <PatrolPlayback map={mapRef.current} />
       )}
     </div>
   );

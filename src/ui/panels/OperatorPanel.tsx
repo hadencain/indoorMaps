@@ -84,6 +84,11 @@ function OperatorControls() {
   const toggleAmenities = () => toggleLayer("amenities");
   const highlightedPatrolId = useStore((s) => s.highlightedPatrolId);
   const setHighlightedPatrol = useStore((s) => s.setHighlightedPatrol);
+  const patrolPlayback = useStore((s) => s.patrolPlayback);
+  const startPatrolPlayback = useStore((s) => s.startPatrolPlayback);
+  const stopPatrolPlayback = useStore((s) => s.stopPatrolPlayback);
+  const togglePatrolPause = useStore((s) => s.togglePatrolPause);
+  const cyclePatrolSpeed = useStore((s) => s.cyclePatrolSpeed);
 
   const cams = building.cameras.filter((c) => c.ordinal === ordinal);
   const patrols = (building.patrols ?? []).filter((p) => p.ordinal === ordinal);
@@ -114,19 +119,53 @@ function OperatorControls() {
           <p className="hint">None on this floor.</p>
         ) : (
           <div className="roomlist">
-            {patrols.map((p) => (
-              <div className="roomrow" key={p.id}>
-                <button
-                  className={`camrow-select ${highlightedPatrolId === p.id ? "on" : ""}`}
-                  onClick={() => setHighlightedPatrol(p.id)}
-                  title="Highlight this route on the map"
-                >
-                  <span className="vlabel">{p.name}</span>
-                  <span className="camrow-kind">{p.points.length} pts</span>
-                </button>
-              </div>
-            ))}
+            {patrols.map((p) => {
+              const playing = patrolPlayback?.patrolId === p.id;
+              return (
+                <div className="roomrow" key={p.id}>
+                  <button
+                    className={`camrow-select ${highlightedPatrolId === p.id ? "on" : ""}`}
+                    onClick={() => setHighlightedPatrol(p.id)}
+                    title="Highlight this route on the map"
+                  >
+                    <span className="vlabel">{p.name}</span>
+                    {!playing && <span className="camrow-kind">{p.points.length} pts</span>}
+                  </button>
+                  {playing ? (
+                    <span className="patrol-ctl">
+                      <button
+                        className="op-play on"
+                        title={patrolPlayback.playing ? "Pause" : "Resume"}
+                        onClick={togglePatrolPause}
+                      >
+                        {patrolPlayback.playing ? "❚❚" : "▶"}
+                      </button>
+                      <button className="op-play" title="Walking speed" onClick={cyclePatrolSpeed}>
+                        {patrolPlayback.speed}×
+                      </button>
+                      <button className="op-play stop" title="End tour" onClick={stopPatrolPlayback}>
+                        ■
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      className="op-play"
+                      title="Walk this route — the camera window follows the guard"
+                      onClick={() => startPatrolPlayback(p.id)}
+                    >
+                      ▶
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
+        )}
+        {patrolPlayback && (
+          <p className="hint patrol-live">
+            Guard tour running — the camera window hands off between cameras as
+            the dot walks. ■ or Esc ends it.
+          </p>
         )}
       </div>
 

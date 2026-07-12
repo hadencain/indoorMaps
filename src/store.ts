@@ -249,6 +249,11 @@ interface State {
   // camera. Cleared on any context change (tool/floor/property/mode).
   suggestions: Suggestion[] | null;
   suggestStats: SuggestStats | null;
+  // Patrol playback (display mode): a guard dot walks the route while the
+  // floating camera window follows via probe updates. Session-only. The
+  // ANIMATED position lives in the PatrolPlayback component (rAF + marker),
+  // not here — only identity/paused/speed are state.
+  patrolPlayback: { patrolId: string; playing: boolean; speed: number } | null;
   layers: LayerVisibility;
   ordinal: number;
   unit: "m" | "ft";
@@ -328,6 +333,10 @@ interface State {
   autoPatrol: (ordinal: number) => void;
   renamePatrol: (id: string, name: string) => void;
   deletePatrol: (id: string) => void;
+  startPatrolPlayback: (id: string) => void;
+  stopPatrolPlayback: () => void;
+  togglePatrolPause: () => void;
+  cyclePatrolSpeed: () => void;
   exportIMDFArchive: () => void;
   exportSecurityReport: () => void;
   exportCameraIndex: () => void;
@@ -391,6 +400,7 @@ export const useStore = create<State>((set, get) => {
     probe: null,
     suggestions: null,
     suggestStats: null,
+    patrolPlayback: null,
     layers: loadLayers(),
     ordinal: 0,
     unit: "m",
@@ -440,6 +450,7 @@ export const useStore = create<State>((set, get) => {
               probe: null,
               suggestions: null,
               suggestStats: null,
+              patrolPlayback: null,
             }
           : {
               mode: m,
@@ -469,6 +480,7 @@ export const useStore = create<State>((set, get) => {
         probe: null,
         suggestions: null,
         suggestStats: null,
+        patrolPlayback: null,
         selectedCameraId: null,
         selectedId: null,
         selectedIds: [],
@@ -510,6 +522,7 @@ export const useStore = create<State>((set, get) => {
         probe: null,
         suggestions: null,
         suggestStats: null,
+        patrolPlayback: null,
         selectedCameraId: null,
         selectedId: null,
         selectedIds: [],
@@ -558,6 +571,7 @@ export const useStore = create<State>((set, get) => {
         // Suggestions are floor-scoped ghosts; a floor change orphans them.
         suggestions: null,
         suggestStats: null,
+        patrolPlayback: null,
       }),
     setSelected: (id) =>
       set({
@@ -963,11 +977,48 @@ export const useStore = create<State>((set, get) => {
         patrols: (b.patrols ?? []).map((p) => (p.id === id ? { ...p, name } : p)),
       })),
 
-    deletePatrol: (id) =>
+    deletePatrol: (id) => {
       commit((b) => ({
         ...b,
         patrols: (b.patrols ?? []).filter((p) => p.id !== id),
-      })),
+      }));
+      set((s) => (s.patrolPlayback?.patrolId === id ? { patrolPlayback: null, probe: null } : {}));
+    },
+
+    // ---- Patrol playback (guard-tour verification) ----
+    // Starting also highlights the route so the walked path is emphasized.
+    // The probe (and with it the floating camera window) is driven by the
+    // PatrolPlayback component as the dot moves.
+    startPatrolPlayback: (id) =>
+      set({
+        patrolPlayback: { patrolId: id, playing: true, speed: 1 },
+        highlightedPatrolId: id,
+        selectedCameraId: null,
+        probe: null,
+      }),
+
+    stopPatrolPlayback: () =>
+      set({ patrolPlayback: null, probe: null, selectedCameraId: null }),
+
+    togglePatrolPause: () =>
+      set((s) =>
+        s.patrolPlayback
+          ? { patrolPlayback: { ...s.patrolPlayback, playing: !s.patrolPlayback.playing } }
+          : {},
+      ),
+
+    // Guard walking speed multiplier: 1× → 2× → 4× → 1×.
+    cyclePatrolSpeed: () =>
+      set((s) =>
+        s.patrolPlayback
+          ? {
+              patrolPlayback: {
+                ...s.patrolPlayback,
+                speed: s.patrolPlayback.speed >= 4 ? 1 : s.patrolPlayback.speed * 2,
+              },
+            }
+          : {},
+      ),
 
     // ---- P11 exports ----
     exportIMDFArchive: () => {
@@ -1200,6 +1251,7 @@ export const useStore = create<State>((set, get) => {
         probe: null,
         suggestions: null,
         suggestStats: null,
+        patrolPlayback: null,
         importMsg: `Loaded building file — ${building.units.length} units, ${building.cameras.length} cameras.`,
       });
     },
@@ -1219,6 +1271,7 @@ export const useStore = create<State>((set, get) => {
         patrolDraft: null,
         suggestions: null,
         suggestStats: null,
+        patrolPlayback: null,
         importMsg: null,
       });
     },

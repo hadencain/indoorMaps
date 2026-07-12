@@ -1990,3 +1990,50 @@ button.wide.ghost {
   gap: var(--s2);
   margin-top: var(--s2);
 }
+
+/* ---- Patrol playback: guard dot + operator controls ---- */
+.guard-dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #8b7bff;
+  border: 2px solid #0b0d10;
+  box-shadow: 0 0 0 3px rgba(139, 123, 255, 0.28);
+  animation: guard-pulse 1.6s ease-out infinite;
+}
+@keyframes guard-pulse {
+  0%   { box-shadow: 0 0 0 3px rgba(139, 123, 255, 0.28); }
+  60%  { box-shadow: 0 0 0 9px rgba(139, 123, 255, 0.06); }
+  100% { box-shadow: 0 0 0 3px rgba(139, 123, 255, 0.28); }
+}
+.patrol-ctl {
+  display: flex;
+  gap: 2px;
+}
+.op-play {
+  flex: none;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 1;
+  background: var(--panel-2);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+.op-play:hover {
+  color: #b6acff;
+  border-color: #8b7bff;
+}
+.op-play.on {
+  color: #b6acff;
+  border-color: #8b7bff;
+}
+.op-play.stop:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.patrol-live {
+  color: #b6acff;
+}
