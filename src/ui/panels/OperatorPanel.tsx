@@ -4,6 +4,7 @@ import type { AmenityKind, LayerVisibility } from "../../types";
 import FeedPlaceholder from "./FeedPlaceholder";
 import { useVisibility } from "../visibility";
 import { unitsSeenByCameraRing } from "../../security/coverage-link";
+import { AmenityIcon } from "../amenity-icons";
 
 /**
  * Display-mode sidebar — the read-only operator console. Two states:
@@ -192,6 +193,7 @@ function OperatorControls() {
                 disabled={!layers.amenities}
                 onChange={() => toggleAmenityKind(k)}
               />
+              <AmenityIcon kind={k} size={10} />
               <span>{AMENITY_LABEL[k]}</span>
             </label>
           ))

@@ -1007,46 +1007,43 @@ button.wide.ghost {
   text-align: center;
 }
 
-/* Amenity POI badges (restrooms / ATMs / exits / info / …) */
+/* Amenity POI badges — colored chips with per-kind pictograms. Fill + stroke
+   colors come inline from amenityBadgeStyle (amenity-icons.tsx), the single
+   source of truth shared by map markers and panel badges. */
 .amenity {
   display: grid;
   place-items: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 3px;
+  width: 18px;
+  height: 18px;
   border-radius: 3px;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
   color: #05070a;
   background: #b9c2cc;
   border: 1px solid #05070a;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
   pointer-events: none;
 }
+.amenity svg {
+  display: block;
+}
 /* Zoom declutter, compact mode (set by updateZoomDeclutter at plan-wide
-   zooms): amenity glyphs collapse to colored dots so they stop colliding with
-   room labels. EXIT stays as text — safety signage earns its pixels. */
+   zooms): amenity badges collapse to their identity-colored dots so they stop
+   colliding with room labels. EXIT keeps its pictogram — safety signage earns
+   its pixels. */
 .amenities-compact .amenity:not(.amenity-exit) {
-  min-width: 9px;
   width: 9px;
   height: 9px;
-  padding: 0;
   border-radius: 50%;
-  font-size: 0;
 }
-.amenity-exit {
-  background: #43d675;
+.amenities-compact .amenity:not(.amenity-exit) svg {
+  display: none;
 }
-.amenity-firstaid {
-  background: #ff5c5c;
-  color: #fff;
-}
-.amenity-atm {
-  background: #f2c14e;
-}
-.amenity-info {
-  background: #00d7cd;
+/* Inline variant for panels (filter rows, finder results). */
+.amenity.inline {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  pointer-events: none;
+  box-shadow: none;
 }
 
 .label-sub {
@@ -2485,4 +2482,20 @@ button.wide.ghost {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Amenity icons in panel rows/chips */
+.edge-row .vlabel.grow {
+  flex: 1;
+  text-align: left;
+}
+.edge-chip.icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.layers-row .amenity.inline {
+  width: 15px;
+  height: 15px;
+  margin-right: 2px;
 }

@@ -27,10 +27,7 @@ const KIND_CHIPS: { id: CameraKind | "all"; label: string }[] = [
   { id: "ptz", label: "PTZ" },
 ];
 
-const AMENITY_LABEL: Record<AmenityKind, string> = {
-  restroom: "Restroom", atm: "ATM", exit: "Exit", info: "Info", firstaid: "First aid",
-  ticketing: "Ticketing", dining: "Dining", bar: "Bar", coatcheck: "Coat check", smoking: "Smoking",
-};
+import { AmenityIcon, AMENITY_LABELS as AMENITY_LABEL } from "./amenity-icons";
 
 /** Downscale an image file to a small data URL (longest side <= 640px) so a
  *  handful of site photos can't blow the localStorage quota. */
@@ -460,10 +457,10 @@ function SiteInfo({ map }: { map: maplibregl.Map }) {
           {kindsPresent.map((k) => (
             <button
               key={k}
-              className={`edge-chip ${akind === k ? "on" : ""}`}
+              className={`edge-chip icon ${akind === k ? "on" : ""}`}
               onClick={() => setAkind(k)}
             >
-              {AMENITY_LABEL[k]}
+              <AmenityIcon kind={k} size={10} /> {AMENITY_LABEL[k]}
             </button>
           ))}
         </div>
@@ -476,7 +473,8 @@ function SiteInfo({ map }: { map: maplibregl.Map }) {
             onClick={() => locate(a)}
             title="Fly to this amenity"
           >
-            <span className="vlabel">{a.name || AMENITY_LABEL[a.kind]}</span>
+            <AmenityIcon kind={a.kind} size={11} />
+            <span className="vlabel grow">{a.name || AMENITY_LABEL[a.kind]}</span>
             <span className="edge-row-meta">
               {levelName(a.ordinal)} <Crosshair size={11} />
             </span>

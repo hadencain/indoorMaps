@@ -26,6 +26,7 @@ import { useRoute } from "./ui/route";
 import { useVisibility } from "./ui/visibility";
 import CameraWindow from "./ui/CameraWindow";
 import PatrolPlayback from "./ui/PatrolPlayback";
+import { amenityIconSvg, amenityBadgeStyle } from "./ui/amenity-icons";
 import OperatorEdgePanels from "./ui/OperatorEdgePanels";
 
 const EMPTY: FC = { type: "FeatureCollection", features: [] };
@@ -1088,16 +1089,18 @@ export default function MapView() {
       }
     }
 
-    // Amenity POI markers (restrooms / ATMs / exits / info / …), gated by layers.
+    // Amenity POI markers — custom pictogram badges (see amenity-icons.tsx),
+    // color-coded per kind, gated by layers.
     if (layers.amenities) {
-      const glyph: Record<string, string> = {
-        restroom: "WC", atm: "$", exit: "EXIT", info: "i", firstaid: "+",
-        ticketing: "TIX", dining: "F", bar: "B", coatcheck: "C", smoking: "S",
-      };
       for (const am of building.amenities ?? []) {
         if (am.ordinal !== ordinal) continue;
         if (amenityFilter[am.kind] === false) continue; // per-kind display filter
-        const el = labelEl(glyph[am.kind] ?? "?", `amenity amenity-${am.kind}`);
+        const el = document.createElement("div");
+        el.className = `amenity amenity-${am.kind}`;
+        el.innerHTML = amenityIconSvg(am.kind, 12);
+        const badge = amenityBadgeStyle(am.kind);
+        el.style.background = badge.background;
+        el.style.color = badge.color;
         el.title = am.name || am.kind;
         markersRef.current.push(
           new maplibregl.Marker({ element: el }).setLngLat(m2ll(building.origin, am.at[0], am.at[1])).addTo(map),
