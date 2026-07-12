@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Sparkles } from "lucide-react";
 import { useStore } from "../../store";
 import { useVisibility } from "../visibility";
 import { polygonArea } from "../../geo";
@@ -29,6 +30,13 @@ export default function CameraPanel() {
   const rotateCamera = useStore((s) => s.rotateCamera);
   const deleteCamera = useStore((s) => s.deleteCamera);
   const toggleLayer = useStore((s) => s.toggleLayer);
+  const suggestions = useStore((s) => s.suggestions);
+  const suggestStats = useStore((s) => s.suggestStats);
+  const runSuggestCameras = useStore((s) => s.runSuggestCameras);
+  const acceptAllSuggestions = useStore((s) => s.acceptAllSuggestions);
+  const clearSuggestions = useStore((s) => s.clearSuggestions);
+  const [targetPct, setTargetPct] = useState(90);
+  const [maxNew, setMaxNew] = useState(40);
   const { polys: visPolys, coverage } = useVisibility();
 
   // Derived spaces this camera sees (same-ordinal, from occlusion geometry).
@@ -66,6 +74,69 @@ export default function CameraPanel() {
               {formatArea(coverage.coveredAreaM2, unit)} · blind{" "}
               {formatArea(Math.max(0, coverage.floorAreaM2 - coverage.coveredAreaM2), unit)}
             </p>
+          )}
+        </div>
+
+        <div className="suggest-sec">
+          <div className="panel-subtitle">Suggest cameras</div>
+          {suggestions === null ? (
+            <>
+              <p className="hint">
+                Auto-plan this floor: corner mounts in uncovered rooms, then
+                gap-fill to the coverage target. Placements appear as ghosts —
+                nothing is added until you accept.
+              </p>
+              <div className="suggest-opts">
+                <label>
+                  Target
+                  <input
+                    type="number"
+                    min={10}
+                    max={99}
+                    value={targetPct}
+                    onChange={(e) => setTargetPct(Math.min(99, Math.max(10, Number(e.target.value) || 90)))}
+                  />
+                  %
+                </label>
+                <label>
+                  Max new
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={maxNew}
+                    onChange={(e) => setMaxNew(Math.min(200, Math.max(1, Number(e.target.value) || 40)))}
+                  />
+                </label>
+              </div>
+              <button className="wide suggest-run" onClick={() => runSuggestCameras(targetPct, maxNew)}>
+                <Sparkles size={13} /> Suggest placements
+              </button>
+            </>
+          ) : (
+            <>
+              {suggestStats && (
+                <p className="mono suggest-readout">
+                  {suggestions.length} ghost{suggestions.length === 1 ? "" : "s"} ·{" "}
+                  {suggestStats.cornerCount} corner + {suggestStats.fillCount} gap-fill
+                  <br />
+                  coverage {(suggestStats.beforePct * 100).toFixed(0)}% →{" "}
+                  {(suggestStats.afterPct * 100).toFixed(0)}% projected
+                </p>
+              )}
+              {suggestions.length === 0 && (
+                <p className="hint">Nothing to add — this floor already meets the target.</p>
+              )}
+              <p className="hint">✓ / ✕ each ghost on the map, or take the whole plan:</p>
+              <div className="suggest-actions">
+                <button className="wide active" onClick={acceptAllSuggestions} disabled={suggestions.length === 0}>
+                  Accept all ({suggestions.length})
+                </button>
+                <button className="wide" onClick={clearSuggestions}>
+                  Discard
+                </button>
+              </div>
+            </>
           )}
         </div>
 

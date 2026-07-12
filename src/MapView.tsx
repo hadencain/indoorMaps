@@ -100,6 +100,9 @@ export default function MapView() {
   const onCommitPatrol = useStore((s) => s.commitPatrol);
   const onCancelPatrol = useStore((s) => s.cancelPatrol);
   const onSetProbe = useStore((s) => s.setProbe);
+  const suggestions = useStore((s) => s.suggestions);
+  const onAcceptSuggestion = useStore((s) => s.acceptSuggestion);
+  const onRejectSuggestion = useStore((s) => s.rejectSuggestion);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
@@ -357,6 +360,23 @@ export default function MapView() {
         paint: { "fill-color": "#5cf6ee", "fill-opacity": 0.2 },
         filter: ["==", ["get", "cameraId"], "__none__"],
       });
+      // Ghost coverage previews for "Suggest cameras" (dashed gold, above the
+      // real coverage). Source fed by the suggestions effect; NOT gated by
+      // layers.coverage — a plan you're reviewing should never be invisible.
+      map.addSource("suggest-fov", { type: "geojson", data: EMPTY });
+      map.addLayer({
+        id: "suggest-fov-fill",
+        type: "fill",
+        source: "suggest-fov",
+        paint: { "fill-color": "#f2c14e", "fill-opacity": 0.08 },
+      });
+      map.addLayer({
+        id: "suggest-fov-line",
+        type: "line",
+        source: "suggest-fov",
+        paint: { "line-color": "#f2c14e", "line-width": 1.2, "line-dasharray": [2, 2], "line-opacity": 0.85 },
+      });
+
       map.addLayer({
         id: "camera-fov-highlight-line",
         type: "line",
@@ -588,6 +608,19 @@ export default function MapView() {
     );
   }, [ready, visPolys, building.origin]);
 
+  // Ghost coverage previews for suggested cameras (dashed gold sectors).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const src = map.getSource("suggest-fov") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    src.setData(
+      suggestions
+        ? ringsToFC(building.origin, suggestions.map((s) => s.ring), suggestions[0]?.cam.ordinal ?? 0)
+        : EMPTY,
+    );
+  }, [ready, suggestions, building.origin]);
+
   // Coverage/blind overlays (P6) — occlusion-clipped, never cones. Source data
   // is populated whenever the analysis exists (coverage != null, i.e. the
   // coverage or blind-spots layer is on); per-overlay *visibility* is toggled
@@ -752,6 +785,8 @@ export default function MapView() {
     map.setFilter("unit-secure-outline", secureOnFloor);
     map.setFilter("camera-fov-fill", floorFilter);
     map.setFilter("camera-fov-line", floorFilter);
+    map.setFilter("suggest-fov-fill", floorFilter);
+    map.setFilter("suggest-fov-line", floorFilter);
     map.setFilter("camera-fov-selected", [
       "all",
       floorFilter,
@@ -975,6 +1010,52 @@ export default function MapView() {
       }
     }
 
+    // Ghost markers for suggested cameras: gold dashed body + per-ghost ✓/✕
+    // accept/reject. Session-only — accepting commits a real camera (the ghost
+    // then re-renders as a normal marker via the store update).
+    if (suggestions) {
+      for (const sugg of suggestions) {
+        const cam = sugg.cam;
+        if (cam.ordinal !== ordinal) continue;
+        const el = document.createElement("div");
+        el.className = "camera ghost";
+        el.title = cam.name;
+        const scaler = document.createElement("div");
+        scaler.className = "camera-scaler";
+        const bodyEl = document.createElement("div");
+        bodyEl.className = "camera-body";
+        bodyEl.style.transform = `rotate(${-cam.heading}deg)`;
+        scaler.appendChild(bodyEl);
+        const actions = document.createElement("div");
+        actions.className = "ghost-actions";
+        const accept = document.createElement("button");
+        accept.className = "ghost-accept";
+        accept.textContent = "✓";
+        accept.title = "Accept this camera";
+        accept.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          onAcceptSuggestion(cam.id);
+        });
+        const reject = document.createElement("button");
+        reject.className = "ghost-reject";
+        reject.textContent = "✕";
+        reject.title = "Reject this suggestion";
+        reject.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          onRejectSuggestion(cam.id);
+        });
+        actions.append(accept, reject);
+        scaler.appendChild(actions);
+        el.appendChild(scaler);
+        el.addEventListener("click", (ev) => ev.stopPropagation());
+        markersRef.current.push(
+          new maplibregl.Marker({ element: el })
+            .setLngLat(m2ll(building.origin, cam.at[0], cam.at[1]))
+            .addTo(map),
+        );
+      }
+    }
+
     // Incident pins (P10): HTML markers colored by kind, floor-filtered, gated by
     // layers.incidents. Draggable + selectable only under the incident tool (like
     // camera markers): drag commits on dragend, click selects for note entry.
@@ -1024,7 +1105,7 @@ export default function MapView() {
     // Freshly-rebuilt markers need their zoom-dependent state applied now —
     // the zoom listener alone only covers zoom changes, not rebuilds.
     updateZoomDeclutter();
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter]);
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter, suggestions, onAcceptSuggestion, onRejectSuggestion]);
 
   // Patrol highlight (display mode): emphasize the selected route, dim the rest.
   // Data-driven paint keyed on the feature `id` (patrolsToGeoJSON tags each line).

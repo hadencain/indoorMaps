@@ -1903,3 +1903,90 @@ button.wide.ghost {
   opacity: 0.4;
   cursor: default;
 }
+
+/* ---- Suggest cameras: ghost markers + panel controls ---- */
+.camera.ghost {
+  cursor: default;
+}
+.camera.ghost .camera-body {
+  background: rgba(242, 193, 78, 0.28);
+  border: 1.5px dashed var(--select);
+  box-shadow: none;
+}
+.camera.ghost .camera-body::after {
+  border-left-color: var(--select);
+  opacity: 0.8;
+}
+.ghost-actions {
+  position: absolute;
+  left: 50%;
+  top: -24px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  z-index: 3;
+}
+.ghost-actions button {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  border: 1px solid var(--line-2);
+  background: var(--panel);
+  cursor: pointer;
+}
+.ghost-accept {
+  color: var(--accent);
+}
+.ghost-accept:hover {
+  border-color: var(--accent);
+  background: rgba(0, 215, 205, 0.15);
+}
+.ghost-reject {
+  color: var(--dim);
+}
+.ghost-reject:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.suggest-sec {
+  margin-top: var(--s4);
+  border-top: 1px solid var(--line);
+  padding-top: var(--s3);
+}
+.suggest-opts {
+  display: flex;
+  gap: var(--s3);
+  margin: var(--s2) 0;
+}
+.suggest-opts label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.suggest-opts input {
+  width: 52px;
+}
+.suggest-run {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.suggest-readout {
+  margin: 6px 0;
+  line-height: 1.6;
+  font-size: 11px;
+  color: var(--select);
+}
+.suggest-actions {
+  display: flex;
+  gap: var(--s2);
+  margin-top: var(--s2);
+}

@@ -22,6 +22,7 @@ import { buildingToIMDFArchive } from "./imdfArchive";
 import { zipStore } from "./zip";
 import { buildSecurityReport } from "./report";
 import { buildCameraIndex, indexStats } from "./security/coverage-link";
+import { suggestCameras, type Suggestion, type SuggestStats } from "./security/suggest";
 import { buildGraph } from "./graph";
 import { findRoute } from "./astar";
 import {
@@ -243,6 +244,11 @@ interface State {
   patrolDraft: MetreXY[] | null;
   // Transient click-to-camera probe (inspect tool). Session-only; never persisted.
   probe: Probe | null;
+  // Ghost camera placements from "Suggest cameras" (camera tool). Session-only,
+  // never persisted, never in undo history — only ACCEPTING one commits a
+  // camera. Cleared on any context change (tool/floor/property/mode).
+  suggestions: Suggestion[] | null;
+  suggestStats: SuggestStats | null;
   layers: LayerVisibility;
   ordinal: number;
   unit: "m" | "ft";
@@ -303,6 +309,11 @@ interface State {
   updateCameraLive: (id: string, patch: Partial<Omit<Camera, "id">>) => void;
   deleteCamera: (id: string) => void;
   setSelectedCamera: (id: string | null) => void;
+  runSuggestCameras: (targetPct: number, maxNew: number) => void;
+  acceptSuggestion: (id: string) => void;
+  rejectSuggestion: (id: string) => void;
+  acceptAllSuggestions: () => void;
+  clearSuggestions: () => void;
   setProbe: (p: Probe | null) => void;
   addIncident: (at: MetreXY, ordinal: number) => void;
   moveIncident: (id: string, at: MetreXY) => void;
@@ -378,6 +389,8 @@ export const useStore = create<State>((set, get) => {
     incidentKind: "trespass",
     patrolDraft: null,
     probe: null,
+    suggestions: null,
+    suggestStats: null,
     layers: loadLayers(),
     ordinal: 0,
     unit: "m",
@@ -395,7 +408,7 @@ export const useStore = create<State>((set, get) => {
     searchQuery: "",
 
     setTool: (t) =>
-      set({
+      set((s) => ({
         activeTool: t,
         pendingLink: null,
         selectedCameraId: null,
@@ -406,7 +419,10 @@ export const useStore = create<State>((set, get) => {
         patrolDraft: t === "patrol" ? [] : null,
         // Any tool switch clears a transient probe (including leaving inspect).
         probe: null,
-      }),
+        // Ghost suggestions live only under the camera tool.
+        suggestions: t === "camera" ? s.suggestions : null,
+        suggestStats: t === "camera" ? s.suggestStats : null,
+      })),
     // Switching surface. Entering display forces the inspect interaction
     // (click-to-camera) and drops any authoring selection/draft; returning to
     // edit resets to the select tool and clears display-only transient state.
@@ -422,6 +438,8 @@ export const useStore = create<State>((set, get) => {
               patrolDraft: null,
               pendingLink: null,
               probe: null,
+              suggestions: null,
+              suggestStats: null,
             }
           : {
               mode: m,
@@ -449,6 +467,8 @@ export const useStore = create<State>((set, get) => {
         ...routeEndpointsFor(building),
         ordinal: 0,
         probe: null,
+        suggestions: null,
+        suggestStats: null,
         selectedCameraId: null,
         selectedId: null,
         selectedIds: [],
@@ -488,6 +508,8 @@ export const useStore = create<State>((set, get) => {
         planWidth: underlay ? Math.max(1, Math.round(underlay.widthM)) : s.planWidth,
         ordinal: 0,
         probe: null,
+        suggestions: null,
+        suggestStats: null,
         selectedCameraId: null,
         selectedId: null,
         selectedIds: [],
@@ -527,7 +549,16 @@ export const useStore = create<State>((set, get) => {
     // Floor change clears floor-scoped transient state: a probe/selected camera
     // resolved on the old floor is meaningless on the new one (stale ranking /
     // false-empty "Covers" otherwise).
-    setOrdinal: (o) => set({ ordinal: o, probe: null, selectedCameraId: null, selectedIncidentId: null }),
+    setOrdinal: (o) =>
+      set({
+        ordinal: o,
+        probe: null,
+        selectedCameraId: null,
+        selectedIncidentId: null,
+        // Suggestions are floor-scoped ghosts; a floor change orphans them.
+        suggestions: null,
+        suggestStats: null,
+      }),
     setSelected: (id) =>
       set({
         selectedId: id,
@@ -756,6 +787,46 @@ export const useStore = create<State>((set, get) => {
 
     // Transient — never routed through commit/undo, never persisted.
     setProbe: (p) => set({ probe: p }),
+
+    // ---- Suggest cameras (ghost placements) ----
+    // Plans against the CURRENT building + floor, seeded with the existing
+    // plant. Synchronous — the planner is grid-bounded and runs in well under
+    // a second on every demo floor.
+    runSuggestCameras: (targetPct, maxNew) => {
+      const s = get();
+      const result = suggestCameras(s.building, s.ordinal, targetPct, maxNew);
+      set({
+        suggestions: result.suggestions,
+        suggestStats: result.stats,
+        selectedCameraId: null,
+      });
+    },
+
+    // Accept ONE ghost: commits that camera (undoable), keeps the rest ghosted.
+    acceptSuggestion: (id) => {
+      const s = get();
+      const sugg = s.suggestions?.find((x) => x.cam.id === id);
+      if (!sugg) return;
+      commit((b) => ({ ...b, cameras: [...b.cameras, sugg.cam] }));
+      const rest = (get().suggestions ?? []).filter((x) => x.cam.id !== id);
+      set({ suggestions: rest.length > 0 ? rest : null, suggestStats: rest.length > 0 ? get().suggestStats : null });
+    },
+
+    rejectSuggestion: (id) => {
+      const rest = (get().suggestions ?? []).filter((x) => x.cam.id !== id);
+      set({ suggestions: rest.length > 0 ? rest : null, suggestStats: rest.length > 0 ? get().suggestStats : null });
+    },
+
+    // Accept the whole plan as ONE undo step.
+    acceptAllSuggestions: () => {
+      const suggs = get().suggestions;
+      if (!suggs || suggs.length === 0) return;
+      const cams = suggs.map((x) => x.cam);
+      commit((b) => ({ ...b, cameras: [...b.cameras, ...cams] }));
+      set({ suggestions: null, suggestStats: null });
+    },
+
+    clearSuggestions: () => set({ suggestions: null, suggestStats: null }),
 
     // ---- P10 incidents ----
     addIncident: (at, ordinal) => {
@@ -1127,6 +1198,8 @@ export const useStore = create<State>((set, get) => {
         pendingLink: null,
         highlightedPatrolId: null,
         probe: null,
+        suggestions: null,
+        suggestStats: null,
         importMsg: `Loaded building file — ${building.units.length} units, ${building.cameras.length} cameras.`,
       });
     },
@@ -1144,6 +1217,8 @@ export const useStore = create<State>((set, get) => {
         selectedCameraId: null,
         selectedIncidentId: null,
         patrolDraft: null,
+        suggestions: null,
+        suggestStats: null,
         importMsg: null,
       });
     },
