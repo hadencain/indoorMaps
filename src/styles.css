@@ -2216,13 +2216,22 @@ button.wide.ghost {
   padding-top: var(--s2);
   margin-top: var(--s2);
 }
+/* Narrow panel: one control group per row (PAN / TILT / ZOOM), label column
+   fixed so the buttons align — no flex wrap that can orphan a label from its
+   buttons. */
 .edge-camset .ptz-pad {
-  flex-wrap: wrap;
-  margin-top: 6px;
+  display: grid;
+  grid-template-columns: 44px 32px 32px;
+  gap: 5px 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+.edge-camset .ptz-label {
+  margin: 0 !important;
 }
 .edge-camset .ptz-btn {
-  width: 28px;
-  height: 26px;
+  width: 32px;
+  height: 27px;
 }
 .edge-photos {
   display: grid;
