@@ -1,13 +1,20 @@
 import { useState } from "react";
-import { ChevronDown, Undo2, Redo2, Pencil, MonitorPlay } from "lucide-react";
+import { ChevronDown, Undo2, Redo2, Pencil, MonitorPlay, Plus, Trash2 } from "lucide-react";
 import { useStore } from "../store";
-import { DEMOS, demoById } from "../demos";
+import { DEMOS } from "../demos";
+import { propertyNameFor } from "../properties";
+import NewPropertyWizard from "./NewPropertyWizard";
 
 export default function TopBar() {
   const levels = useStore((s) => s.building.levels);
   const propertyId = useStore((s) => s.propertyId);
   const setProperty = useStore((s) => s.setProperty);
+  const userProperties = useStore((s) => s.userProperties);
+  const deleteProperty = useStore((s) => s.deleteProperty);
   const [propOpen, setPropOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  // Two-step delete: first click arms, second click deletes (no blocking confirm()).
+  const [armedDelete, setArmedDelete] = useState<string | null>(null);
   const mode = useStore((s) => s.mode);
   const setMode = useStore((s) => s.setMode);
   const undo = useStore((s) => s.undo);
@@ -36,10 +43,16 @@ export default function TopBar() {
       <div className="wordmark">indoorMaps</div>
       <div className="prop-picker">
         <button className="datamenu-trigger" onClick={() => setPropOpen((v) => !v)}>
-          {demoById(propertyId).name} <ChevronDown size={14} />
+          {propertyNameFor(propertyId, userProperties)} <ChevronDown size={14} />
         </button>
         {propOpen && (
-          <div className="datamenu-pop" onMouseLeave={() => setPropOpen(false)}>
+          <div
+            className="datamenu-pop"
+            onMouseLeave={() => {
+              setPropOpen(false);
+              setArmedDelete(null);
+            }}
+          >
             {DEMOS.map((d) => (
               <button
                 key={d.id}
@@ -52,9 +65,48 @@ export default function TopBar() {
                 {d.name}
               </button>
             ))}
+            {userProperties.length > 0 && <div className="dm-sep" />}
+            {userProperties.map((p) => (
+              <div key={p.id} className="dm-item-row">
+                <button
+                  className={`dm-item grow ${p.id === propertyId ? "on" : ""}`}
+                  onClick={() => {
+                    setProperty(p.id);
+                    setPropOpen(false);
+                  }}
+                >
+                  {p.name}
+                </button>
+                <button
+                  className={`dm-del ${armedDelete === p.id ? "armed" : ""}`}
+                  title={armedDelete === p.id ? "Click again to delete permanently" : `Delete ${p.name}`}
+                  onClick={() => {
+                    if (armedDelete === p.id) {
+                      deleteProperty(p.id);
+                      setArmedDelete(null);
+                    } else {
+                      setArmedDelete(p.id);
+                    }
+                  }}
+                >
+                  {armedDelete === p.id ? "sure?" : <Trash2 size={12} />}
+                </button>
+              </div>
+            ))}
+            <div className="dm-sep" />
+            <button
+              className="dm-item"
+              onClick={() => {
+                setPropOpen(false);
+                setWizardOpen(true);
+              }}
+            >
+              <Plus size={12} /> New property from image…
+            </button>
           </div>
         )}
       </div>
+      {wizardOpen && <NewPropertyWizard onClose={() => setWizardOpen(false)} />}
       <div className="modetoggle" role="group" aria-label="Mode">
         <button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")} title="Authoring — draw & edit the map">
           <Pencil size={13} /> Edit

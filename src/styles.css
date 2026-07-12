@@ -1626,3 +1626,280 @@ button.wide.ghost {
   border-color: var(--danger);
   color: var(--danger);
 }
+
+/* ---- property picker extras (user properties + delete) ---- */
+.dm-sep {
+  border-top: 1px solid var(--line);
+  margin: 4px 0;
+}
+.dm-item-row {
+  display: flex;
+  align-items: stretch;
+}
+.dm-item.grow {
+  flex: 1;
+  min-width: 0;
+}
+.dm-del {
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  padding: 0 8px;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+}
+.dm-del:hover {
+  color: var(--danger);
+}
+.dm-del.armed {
+  color: var(--danger);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ---- New property from image wizard ---- */
+.wiz-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(4, 6, 9, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s5);
+}
+.wiz {
+  width: min(640px, 100%);
+  max-height: calc(100vh - 2 * var(--s5));
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+}
+.wiz-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+.wiz-title {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.wiz-step {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-left: auto;
+}
+.wiz-x {
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+}
+.wiz-x:hover {
+  color: var(--text);
+}
+.wiz-body {
+  padding: var(--s4);
+  overflow-y: auto;
+}
+.wiz-label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: var(--s3) 0 4px;
+}
+.wiz-body > .wiz-label:first-child {
+  margin-top: 0;
+}
+.wiz-input {
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 7px 8px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+}
+.wiz-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.wiz-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 140px;
+  max-height: 300px;
+  border: 1px dashed var(--line-2);
+  background: var(--panel-2);
+  cursor: pointer;
+  overflow: hidden;
+}
+.wiz-drop:hover {
+  border-color: var(--accent);
+}
+.wiz-drop.has-img {
+  border-style: solid;
+}
+.wiz-drop-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.wiz-preview {
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  display: block;
+}
+.wiz-err {
+  font-size: 11px;
+  color: var(--danger);
+  margin-top: 6px;
+}
+.wiz-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dim);
+  margin: 0 0 var(--s3);
+}
+.wiz-hint svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+.wiz-imgbox {
+  position: relative;
+  max-height: 380px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  cursor: crosshair;
+  user-select: none;
+  line-height: 0;
+}
+.wiz-calimg {
+  width: 100%;
+  max-height: 380px;
+  object-fit: contain;
+  display: block;
+  background: #05070a;
+}
+.wiz-calsvg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.wiz-calsvg line {
+  stroke: var(--accent);
+  stroke-width: 2px;
+  stroke-dasharray: 6 4;
+}
+.wiz-caldot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background: var(--accent);
+  border: 2px solid #05070a;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.wiz-cal-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+.wiz-cal-row .wiz-label {
+  margin: 0;
+}
+.wiz-input.len {
+  width: 88px;
+}
+.wiz-unit {
+  display: flex;
+}
+.wiz-unit button {
+  background: var(--panel-2);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  padding: 6px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.wiz-unit button + button {
+  border-left: none;
+}
+.wiz-unit button.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.wiz-unit button.active + button {
+  border-left: none;
+}
+.wiz-derived {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+  margin-left: auto;
+}
+.wiz-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s4);
+}
+.wiz-spacer {
+  flex: 1;
+}
+.wiz-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.wiz-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.wiz-btn.primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.wiz-btn.primary:hover:not(:disabled) {
+  background: rgba(0, 215, 205, 0.08);
+}
+.wiz-btn.ghost {
+  border-color: var(--line);
+  color: var(--dim);
+}
+.wiz-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

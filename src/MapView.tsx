@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import type { MetreXY, Category, LngLat, RasterUnderlay } from "./types";
+import type { Building, MetreXY, Category, LngLat, RasterUnderlay } from "./types";
 import type { FC } from "./render";
 import { unitsToGeoJSON, patrolsToGeoJSON, fixturesToGeoJSON, footprintsToGeoJSON } from "./render";
 import { INCIDENT_COLORS } from "./ui/panels/IncidentPanel";
@@ -506,13 +506,7 @@ export default function MapView() {
         "coverage-fill",
       );
 
-      const b = new maplibregl.LngLatBounds();
-      for (const f of unitsToGeoJSON(building).features) {
-        for (const c of (f.geometry as GeoJSON.Polygon).coordinates[0]) {
-          b.extend(c as [number, number]);
-        }
-      }
-      map.fitBounds(b, { padding: 60, duration: 0 });
+      frameBuilding(map, building);
 
       bindDrawing(map);
       map.on("zoom", updateZoomDeclutter);
@@ -544,10 +538,7 @@ export default function MapView() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    const b = new maplibregl.LngLatBounds();
-    for (const f of unitsToGeoJSON(building).features)
-      for (const c of (f.geometry as GeoJSON.Polygon).coordinates[0]) b.extend(c as [number, number]);
-    if (!b.isEmpty()) map.fitBounds(b, { padding: 60, duration: 0 });
+    frameBuilding(map, building);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, propertyId]);
 
@@ -1492,6 +1483,21 @@ export default function MapView() {
       setDraft(poly, null);
     });
   }
+}
+
+/** Frame the viewport on a building. Bounds come from the units; a building
+ *  with no geometry yet (fresh "New property from image") falls back to its
+ *  underlay extent, and a fully blank one centres on the local-metre origin —
+ *  never fitBounds on empty bounds (throws) or a viewport of open ocean. */
+function frameBuilding(map: maplibregl.Map, building: Building): void {
+  const b = new maplibregl.LngLatBounds();
+  for (const f of unitsToGeoJSON(building).features)
+    for (const c of (f.geometry as GeoJSON.Polygon).coordinates[0]) b.extend(c as [number, number]);
+  if (b.isEmpty())
+    for (const u of building.underlays ?? [])
+      if (u.dataUrl) for (const c of underlayCoordinates(u, building.origin)) b.extend(c);
+  if (!b.isEmpty()) map.fitBounds(b, { padding: 60, duration: 0 });
+  else map.jumpTo({ center: m2ll(building.origin, 20, 15), zoom: 16 });
 }
 
 /** The four lng/lat corners of a raster underlay, in MapLibre image-source order

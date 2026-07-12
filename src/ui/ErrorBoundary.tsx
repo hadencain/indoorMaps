@@ -2,7 +2,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RotateCcw, RefreshCw } from "lucide-react";
 import { useStore } from "../store";
 import { buildingKey } from "../persistence";
-import { demoById } from "../demos";
+import { propertyNameFor } from "../properties";
 
 interface Props {
   children: ReactNode;
@@ -61,7 +61,8 @@ export default class ErrorBoundary extends Component<Props, ErrState> {
 
   render() {
     if (!this.state.error) return this.props.children;
-    const propertyName = demoById(useStore.getState().propertyId).name;
+    const { propertyId, userProperties } = useStore.getState();
+    const propertyName = propertyNameFor(propertyId, userProperties);
     return (
       <div className="crash-overlay">
         <div className="crash-card">

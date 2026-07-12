@@ -33,6 +33,14 @@ import {
   withBuildingDefaults,
 } from "./persistence";
 import { DEMOS, DEFAULT_PROPERTY_ID, demoById } from "./demos";
+import {
+  loadUserProperties,
+  newPropertyId,
+  pristineBuildingKey,
+  saveUserProperties,
+  starterBuilding,
+  type UserProperty,
+} from "./properties";
 
 // One-time migration: pre-gallery saves lived at the un-suffixed key and were
 // always the casino. Must run before loadBuilding() reads the casino key.
@@ -93,7 +101,11 @@ function loadDisplay(): { mode: Mode; amenityFilter: AmenityFilter; propertyId: 
       if (p.amenityFilter && typeof p.amenityFilter === "object")
         for (const k of ALL_AMENITY_KINDS)
           if (typeof p.amenityFilter[k] === "boolean") base.amenityFilter[k] = p.amenityFilter[k] as boolean;
-      if (typeof p.propertyId === "string" && DEMOS.some((d) => d.id === p.propertyId))
+      if (
+        typeof p.propertyId === "string" &&
+        (DEMOS.some((d) => d.id === p.propertyId) ||
+          loadUserProperties(localStorage).some((u) => u.id === p.propertyId))
+      )
         base.propertyId = p.propertyId;
     }
   } catch {
@@ -138,6 +150,24 @@ function loadLayers(): LayerVisibility {
   return { ...DEFAULT_LAYERS };
 }
 
+/** The pristine building a property resets/falls back to: a demo's shipped
+ *  data, or a user property's creation-time snapshot (pristineBuildingKey).
+ *  A user property whose snapshot is missing/corrupt degrades to a blank
+ *  starter — never another property's data. */
+function pristineFor(propertyId: string): Building {
+  if (DEMOS.some((d) => d.id === propertyId)) return demoById(propertyId).building;
+  try {
+    const raw = localStorage.getItem(pristineBuildingKey(propertyId));
+    if (raw) {
+      const b = JSON.parse(raw) as Building;
+      if (isValidBuildingShape(b)) return withBuildingDefaults(b);
+    }
+  } catch {
+    /* fall through */
+  }
+  return starterBuilding(null);
+}
+
 function loadBuilding(propertyId: string): Building {
   try {
     const raw = localStorage.getItem(buildingKey(propertyId));
@@ -157,7 +187,7 @@ function loadBuilding(propertyId: string): Building {
   } catch {
     /* fall through */
   }
-  return demoById(propertyId).building;
+  return pristineFor(propertyId);
 }
 
 /** Default route endpoints for a building: first/last selectable unit (the
@@ -190,6 +220,9 @@ export interface Probe {
 
 interface State {
   propertyId: string;
+  /** User-created properties ("New property from image"). Registry only —
+   *  buildings live under the normal per-property keys. */
+  userProperties: UserProperty[];
   building: Building;
   // Undo/redo — bounded in-memory snapshot stacks of the `building` slice only.
   // NEVER persisted (session-only; reset on reload).
@@ -229,6 +262,8 @@ interface State {
   setTool: (t: Tool) => void;
   setMode: (m: Mode) => void;
   setProperty: (id: string) => void;
+  createProperty: (name: string, underlay: RasterUnderlay | null) => void;
+  deleteProperty: (id: string) => void;
   toggleAmenityKind: (k: AmenityKind) => void;
   setAllAmenityKinds: (on: boolean) => void;
   setHighlightedPatrol: (id: string | null) => void;
@@ -328,6 +363,7 @@ export const useStore = create<State>((set, get) => {
 
   return {
     propertyId: DISPLAY0.propertyId,
+    userProperties: loadUserProperties(localStorage),
     building: loadBuilding(DISPLAY0.propertyId),
     past: [],
     future: [],
@@ -425,6 +461,65 @@ export const useStore = create<State>((set, get) => {
         future: [],
       });
     },
+    // Create a user property (New property from image). The calibrated
+    // underlay — if any — is baked into BOTH the live building and the pristine
+    // snapshot, so "Reset this property" restores the traced-over floorplan,
+    // not a blank page. Switches to the new property in the same update.
+    createProperty: (name, underlay) => {
+      const s = get();
+      flushPendingPersist();
+      const trimmed = name.trim() || "Untitled property";
+      const id = newPropertyId(trimmed, [
+        ...DEMOS.map((d) => d.id),
+        ...s.userProperties.map((u) => u.id),
+      ]);
+      const building = starterBuilding(underlay);
+      const userProperties = [...s.userProperties, { id, name: trimmed }];
+      saveUserProperties(localStorage, userProperties);
+      persistBuilding(building, pristineBuildingKey(id));
+      persistBuilding(building, buildingKey(id));
+      set({
+        userProperties,
+        propertyId: id,
+        building,
+        ...routeEndpointsFor(building),
+        // Calibration also sets the working plan width, so a follow-up SVG or
+        // raster import on another floor lands at the same scale.
+        planWidth: underlay ? Math.max(1, Math.round(underlay.widthM)) : s.planWidth,
+        ordinal: 0,
+        probe: null,
+        selectedCameraId: null,
+        selectedId: null,
+        selectedIds: [],
+        selectedIncidentId: null,
+        patrolDraft: null,
+        pendingLink: null,
+        highlightedPatrolId: null,
+        searchQuery: "",
+        past: [],
+        future: [],
+        importMsg: null,
+      });
+    },
+
+    // Delete a USER property (demos are not deletable). Switch away first if
+    // it's active — setProperty flushes any pending debounced persist under the
+    // old key, so removal below can't be resurrected by a late write.
+    deleteProperty: (id) => {
+      const s = get();
+      if (!s.userProperties.some((u) => u.id === id)) return;
+      if (s.propertyId === id) get().setProperty(DEFAULT_PROPERTY_ID);
+      try {
+        localStorage.removeItem(buildingKey(id));
+        localStorage.removeItem(pristineBuildingKey(id));
+      } catch {
+        /* storage unavailable — registry removal below still hides it */
+      }
+      const userProperties = get().userProperties.filter((u) => u.id !== id);
+      saveUserProperties(localStorage, userProperties);
+      set({ userProperties });
+    },
+
     toggleAmenityKind: (k) => set((s) => ({ amenityFilter: { ...s.amenityFilter, [k]: !s.amenityFilter[k] } })),
     setAllAmenityKinds: (on) => set({ amenityFilter: allAmenities(on) }),
     setHighlightedPatrol: (id) => set((s) => ({ highlightedPatrolId: s.highlightedPatrolId === id ? null : id })),
@@ -1036,11 +1131,11 @@ export const useStore = create<State>((set, get) => {
       });
     },
 
-    // Reset the ACTIVE property to its pristine demo (not always the casino —
-    // each registered demo resets to its own data). Route endpoints re-derive
-    // from that demo building in the same update, never left stale.
+    // Reset the ACTIVE property to its pristine state (a demo's shipped data,
+    // or a user property's creation-time snapshot). Route endpoints re-derive
+    // from that building in the same update, never left stale.
     resetBuilding: () => {
-      const demo = demoById(get().propertyId).building;
+      const demo = pristineFor(get().propertyId);
       commit(() => demo);
       set({
         ...routeEndpointsFor(demo),
