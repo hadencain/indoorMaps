@@ -1551,3 +1551,78 @@ button.wide.ghost {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* ---- app-shell error boundary (crash fallback) ---- */
+.crash-overlay {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: var(--s5);
+}
+.crash-card {
+  width: min(460px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  padding: var(--s5);
+}
+.crash-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--danger);
+}
+.crash-sub {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--dim);
+  margin: var(--s3) 0;
+}
+.crash-sub strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.crash-msg {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: var(--s2) var(--s3);
+  margin: 0 0 var(--s4);
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.crash-actions {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+.crash-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.crash-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.crash-btn.danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}

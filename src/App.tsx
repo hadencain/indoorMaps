@@ -1,5 +1,10 @@
 import AppShell from "./ui/AppShell";
+import ErrorBoundary from "./ui/ErrorBoundary";
 
 export default function App() {
-  return <AppShell />;
+  return (
+    <ErrorBoundary>
+      <AppShell />
+    </ErrorBoundary>
+  );
 }
