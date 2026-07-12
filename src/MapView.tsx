@@ -26,6 +26,7 @@ import { useRoute } from "./ui/route";
 import { useVisibility } from "./ui/visibility";
 import CameraWindow from "./ui/CameraWindow";
 import PatrolPlayback from "./ui/PatrolPlayback";
+import OperatorEdgePanels from "./ui/OperatorEdgePanels";
 
 const EMPTY: FC = { type: "FeatureCollection", features: [] };
 /** 1×1 transparent pixel — placeholder image for the underlay source until a real one loads. */
@@ -1264,6 +1265,9 @@ export default function MapView() {
       )}
       {ready && mode === "display" && patrolPlayback && mapRef.current && (
         <PatrolPlayback map={mapRef.current} />
+      )}
+      {ready && mode === "display" && mapRef.current && (
+        <OperatorEdgePanels map={mapRef.current} />
       )}
     </div>
   );

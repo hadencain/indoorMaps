@@ -204,6 +204,15 @@ export interface Footprint {
   polygon: MetreXY[];
 }
 
+/** Operator-facing site metadata (right edge panel in display mode): location
+ *  photos + opening hours. Additive + optional — persistence stays v3, and it
+ *  rides along in the building-file export like everything else. Photos are
+ *  data: URIs, downscaled at import time to keep the persisted blob small. */
+export interface SiteInfo {
+  photos: string[];
+  hours: string;
+}
+
 export interface Building {
   /** SW origin of the local metre grid, as [lng, lat]. */
   origin: LngLat;
@@ -225,6 +234,8 @@ export interface Building {
   footprints?: Footprint[];
   /** Point-of-interest markers (restrooms, ATMs, exits…). Additive; visual. */
   amenities?: Amenity[];
+  /** Site metadata for the operator console (photos, hours). Additive. */
+  siteInfo?: SiteInfo;
 }
 
 /** Per-overlay visibility toggles (UI state; persisted separately from the

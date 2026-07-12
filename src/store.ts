@@ -13,6 +13,7 @@ import type {
   PatrolPath,
   Unit,
   AmenityKind,
+  SiteInfo,
 } from "./types";
 import { doorForRoom, selectableUnits } from "./building";
 import { defaultNameFor, isSpace } from "./categories";
@@ -337,6 +338,7 @@ interface State {
   stopPatrolPlayback: () => void;
   togglePatrolPause: () => void;
   cyclePatrolSpeed: () => void;
+  updateSiteInfo: (patch: Partial<SiteInfo>) => void;
   exportIMDFArchive: () => void;
   exportSecurityReport: () => void;
   exportCameraIndex: () => void;
@@ -1019,6 +1021,14 @@ export const useStore = create<State>((set, get) => {
             }
           : {},
       ),
+
+    // Site metadata (operator edge panel): photos + hours. Undoable and part of
+    // the building blob, so it persists and exports with everything else.
+    updateSiteInfo: (patch) =>
+      commit((b) => ({
+        ...b,
+        siteInfo: { photos: [], hours: "", ...b.siteInfo, ...patch },
+      })),
 
     // ---- P11 exports ----
     exportIMDFArchive: () => {
