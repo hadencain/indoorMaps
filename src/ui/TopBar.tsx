@@ -25,6 +25,8 @@ export default function TopBar() {
   const exportSecurityReport = useStore((s) => s.exportSecurityReport);
   const exportCameraIndex = useStore((s) => s.exportCameraIndex);
   const loadGeoJSONText = useStore((s) => s.loadGeoJSONText);
+  const exportBuildingFile = useStore((s) => s.exportBuildingFile);
+  const importBuildingFileText = useStore((s) => s.importBuildingFileText);
   const resetBuilding = useStore((s) => s.resetBuilding);
   const importMsg = useStore((s) => s.importMsg);
   const [open, setOpen] = useState(false);
@@ -129,6 +131,9 @@ export default function TopBar() {
                 </label>
               </>
             )}
+            <button className="dm-item" onClick={exportBuildingFile}>
+              Save building file (JSON)…
+            </button>
             <button className="dm-item" onClick={exportGeoJSON}>
               Export GeoJSON
             </button>
@@ -143,6 +148,19 @@ export default function TopBar() {
             </button>
             {mode === "edit" && (
               <>
+                <label className="dm-item">
+                  Load building file…
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    hidden
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (f) importBuildingFileText(await f.text());
+                    }}
+                  />
+                </label>
                 <label className="dm-item">
                   Load GeoJSON…
                   <input

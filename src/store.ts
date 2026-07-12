@@ -24,7 +24,14 @@ import { buildSecurityReport } from "./report";
 import { buildCameraIndex, indexStats } from "./security/coverage-link";
 import { buildGraph } from "./graph";
 import { findRoute } from "./astar";
-import { buildingKey, isValidBuildingShape, migrateLegacyBuilding } from "./persistence";
+import {
+  buildingFileText,
+  buildingKey,
+  isValidBuildingShape,
+  migrateLegacyBuilding,
+  parseBuildingFileText,
+  withBuildingDefaults,
+} from "./persistence";
 import { DEMOS, DEFAULT_PROPERTY_ID, demoById } from "./demos";
 
 // One-time migration: pre-gallery saves lived at the un-suffixed key and were
@@ -142,16 +149,9 @@ function loadBuilding(propertyId: string): Building {
       // — a structurally-plausible but truncated blob must degrade to the
       // pristine demo, never brick startup.
       if (isValidBuildingShape(b)) {
-        // Additive migration: legacy payloads predate these collections — default
-        // them in place (persistence stays v3; same pattern as cameras/underlays).
-        if (!Array.isArray(b.cameras)) b.cameras = [];
-        if (!Array.isArray(b.incidents)) b.incidents = [];
-        if (!Array.isArray(b.patrols)) b.patrols = [];
-        if (!Array.isArray(b.amenities)) b.amenities = [];
-        if (!Array.isArray(b.fixtures)) b.fixtures = [];
-        if (!Array.isArray(b.footprints)) b.footprints = [];
-        if (!Array.isArray(b.underlays)) b.underlays = [];
-        return b;
+        // Additive migration: legacy payloads predate some collections — default
+        // them in place (persistence stays v3; shared with file import).
+        return withBuildingDefaults(b);
       }
     }
   } catch {
@@ -295,6 +295,8 @@ interface State {
   removeUnderlay: (ordinal: number) => void;
   exportGeoJSON: () => void;
   loadGeoJSONText: (text: string) => void;
+  exportBuildingFile: () => void;
+  importBuildingFileText: (text: string) => void;
   resetBuilding: () => void;
 
   // P12 undo/redo
@@ -987,6 +989,50 @@ export const useStore = create<State>((set, get) => {
         selectedIncidentId: null,
         patrolDraft: null,
         importMsg: `Loaded ${loaded.units.length} units.`,
+      });
+    },
+
+    // Full-fidelity save: the EXACT persisted building shape in a file envelope
+    // (persistence.ts). Unlike the GeoJSON/IMDF exports, nothing is projected or
+    // dropped — incidents, patrols, fixtures, amenities, security levels and
+    // underlays all round-trip. "Hand someone the file and say: here it is."
+    exportBuildingFile: () => {
+      const s = get();
+      const text = buildingFileText(s.building, s.propertyId);
+      const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${s.propertyId}.building.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      set({ importMsg: `Saved building file (${s.propertyId}.building.json).` });
+    },
+
+    // Counterpart to exportBuildingFile: replaces the ACTIVE property's building
+    // (undoable — routed through commit, and the persist subscription writes it
+    // under the active property's key). Route endpoints re-derive from the new
+    // building in the same update; floor resets to 0 (the file's levels may not
+    // include the current ordinal).
+    importBuildingFileText: (text) => {
+      const parsed = parseBuildingFileText(text);
+      if (!parsed) {
+        set({ importMsg: "Not a valid building file (expected a Save-building-file export)." });
+        return;
+      }
+      const building = parsed.building as unknown as Building;
+      commit(() => building);
+      set({
+        ...routeEndpointsFor(building),
+        ordinal: 0,
+        selectedId: null,
+        selectedIds: [],
+        selectedCameraId: null,
+        selectedIncidentId: null,
+        patrolDraft: null,
+        pendingLink: null,
+        highlightedPatrolId: null,
+        probe: null,
+        importMsg: `Loaded building file — ${building.units.length} units, ${building.cameras.length} cameras.`,
       });
     },
 
