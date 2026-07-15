@@ -7,6 +7,7 @@
 
 import type { Building, LngLat, MetreXY, SecurityLevel } from "./types";
 import { m2ll, polygonRing, bbox } from "./geo";
+import { occupantAnchor } from "./occupants";
 import type { ZipFile } from "./zip";
 
 const enc = new TextEncoder();
@@ -131,6 +132,49 @@ export function buildingToIMDFArchive(b: Building): ZipFile[] {
           id: op.id,
           properties: { feature_type: "opening", unit: op.unit, kind: op.kind ?? "door" },
           geometry: { type: "Point", coordinates: m2ll(b.origin, op.at[0], op.at[1]) },
+        })),
+      ),
+    ),
+  );
+
+  // IMDF occupant model: occupant (featureless business record) → anchor
+  // (Point inside the unit, carries unit_id) → unit. Logos are deliberately
+  // NOT exported here — interchange format, no data-URI payloads (the
+  // single-file export keeps full fidelity instead).
+  const occupants = b.occupants ?? [];
+  files.push(
+    file(
+      "anchor.geojson",
+      fc(
+        occupants.map((occ) => {
+          const at = occupantAnchor(b, occ);
+          return {
+            type: "Feature",
+            id: `anchor-${occ.id}`,
+            properties: { feature_type: "anchor", unit_id: occ.unitId },
+            geometry: { type: "Point", coordinates: m2ll(b.origin, at[0], at[1]) },
+          };
+        }),
+      ),
+    ),
+  );
+  files.push(
+    file(
+      "occupant.geojson",
+      fc(
+        occupants.map((occ) => ({
+          type: "Feature",
+          id: occ.id,
+          properties: {
+            feature_type: "occupant",
+            name: occ.name,
+            category: occ.category,
+            ...(occ.hours !== undefined && { hours: occ.hours }),
+            ...(occ.phone !== undefined && { phone: occ.phone }),
+            ...(occ.website !== undefined && { website: occ.website }),
+            anchor_id: `anchor-${occ.id}`,
+          },
+          geometry: null,
         })),
       ),
     ),

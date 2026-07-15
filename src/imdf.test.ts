@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildingToGeoJSON, geoJSONToBuilding } from "./imdf";
+import { buildingToIMDFArchive } from "./imdfArchive";
 import type { Building } from "./types";
 
 const base: Building = {
@@ -76,5 +77,43 @@ describe("occupant single-file round-trip", () => {
     const b = { ...base, occupants: [] };
     const back = geoJSONToBuilding(JSON.stringify(buildingToGeoJSON(b)));
     expect(back!.occupants).toEqual([]);
+  });
+});
+
+describe("IMDF archive occupant + anchor files", () => {
+  const dec = new TextDecoder();
+  const fileObj = (name: string) => {
+    const files = buildingToIMDFArchive(base);
+    const f = files.find((x) => x.name === name);
+    return f ? JSON.parse(dec.decode(f.data)) : null;
+  };
+
+  it("emits anchor.geojson with one Point per occupant, unit_id linked", () => {
+    const anchors = fileObj("anchor.geojson");
+    expect(anchors.features).toHaveLength(2);
+    const a1 = anchors.features.find((f: { id: string }) => f.id === "anchor-o1");
+    expect(a1.properties.unit_id).toBe("u1");
+    expect(a1.geometry.type).toBe("Point");
+  });
+
+  it("emits occupant.geojson with null geometry, anchor_id, and NO logo", () => {
+    const occs = fileObj("occupant.geojson");
+    expect(occs.features).toHaveLength(2);
+    const o1 = occs.features.find((f: { id: string }) => f.id === "o1");
+    expect(o1.geometry).toBeNull();
+    expect(o1.properties.anchor_id).toBe("anchor-o1");
+    expect(o1.properties.name).toBe("Ampersand Coffee");
+    expect(o1.properties.category).toBe("dining");
+    expect(o1.properties.hours).toBe("Mon–Sat 10–9");
+    expect(o1.properties.logo).toBeUndefined();
+  });
+
+  it("feature_type is stamped in properties on both files, matching unit.geojson's convention", () => {
+    const anchors = fileObj("anchor.geojson");
+    const occs = fileObj("occupant.geojson");
+    expect(anchors.features[0].properties.feature_type).toBe("anchor");
+    expect(anchors.features[0].feature_type).toBeUndefined();
+    expect(occs.features[0].properties.feature_type).toBe("occupant");
+    expect(occs.features[0].feature_type).toBeUndefined();
   });
 });
