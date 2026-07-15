@@ -1,0 +1,88 @@
+import type { Building, MetreXY, Opening, Unit } from "../types";
+import { distM, projectOnSegment } from "../geo";
+import { pointInRing } from "../coverage";
+import { isSpace } from "../categories";
+
+/** How far (metres) to probe each side of a door's wall for the adjoining unit. */
+const PROBE_M = 0.4;
+
+export interface DoorAdjacency {
+  owner: string;
+  /** Unit on the far side of the wall, or null for a one-sided door. */
+  other: string | null;
+}
+
+/** The wall segment of `poly` nearest to `p`, as its outward-agnostic unit
+ *  normal. Mirrors nearestPointOnPolygon's scan but keeps the segment. */
+function nearestWallNormal(p: MetreXY, poly: MetreXY[]): MetreXY {
+  let bestD = Infinity;
+  let normal: MetreXY = [0, 1];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const q = projectOnSegment(p, a, b);
+    const d = distM(p, q);
+    if (d < bestD) {
+      bestD = d;
+      const ex = b[0] - a[0];
+      const ey = b[1] - a[1];
+      const len = Math.hypot(ex, ey) || 1;
+      normal = [-ey / len, ex / len];
+    }
+  }
+  return normal;
+}
+
+/** Which two spaces a door joins: probe a point on each side of the owning
+ *  unit's nearest wall; the probe that lands OUTSIDE the owner is searched for
+ *  in every other same-ordinal unit. Pure; unknown owner → { owner, other: null }. */
+export function doorAdjacency(units: Unit[], op: Opening): DoorAdjacency {
+  const owner = units.find((u) => u.id === op.unit);
+  if (!owner) return { owner: op.unit, other: null };
+  const [nx, ny] = nearestWallNormal(op.at, owner.polygon);
+  const probes: MetreXY[] = [
+    [op.at[0] + nx * PROBE_M, op.at[1] + ny * PROBE_M],
+    [op.at[0] - nx * PROBE_M, op.at[1] - ny * PROBE_M],
+  ];
+  for (const probe of probes) {
+    if (pointInRing(probe, owner.polygon)) continue; // that's the inside — skip
+    const hit = units.find(
+      (u) => u.id !== owner.id && u.ordinal === owner.ordinal && pointInRing(probe, u.polygon),
+    );
+    if (hit) return { owner: owner.id, other: hit.id };
+  }
+  return { owner: owner.id, other: null };
+}
+
+export interface FloorHealth {
+  /** Space-category units (not circulation/outside) with no opening at all. */
+  doorlessRoomIds: string[];
+  /** Plain doors (kind !== "entrance") with no unit on the far side. */
+  oneSidedDoorIds: string[];
+  /** Floor has plain doors but no corridor unit — graph.ts's no-route condition. */
+  missingCorridor: boolean;
+}
+
+/** Authoring-health predicates for one floor. Shared by the on-canvas badges
+ *  (P1) and the Review checklist panel (P4). Pure. */
+export function floorHealth(building: Building, ordinal: number): FloorHealth {
+  const units = building.units.filter((u) => u.ordinal === ordinal);
+  const unitIds = new Set(units.map((u) => u.id));
+  const openings = building.openings.filter((o) => unitIds.has(o.unit));
+  const openedUnits = new Set(openings.map((o) => o.unit));
+
+  const doorlessRoomIds = units
+    .filter((u) => isSpace(u.category) && u.category !== "outside" && !openedUnits.has(u.id))
+    .map((u) => u.id);
+
+  const oneSidedDoorIds = openings
+    .filter((o) => (o.kind ?? "door") === "door")
+    .filter((o) => doorAdjacency(building.units, o).other === null)
+    .map((o) => o.id);
+
+  const plainDoors = openings.some((o) => (o.kind ?? "door") === "door");
+  const hasCorridor = units.some((u) => u.category === "corridor");
+  const missingCorridor = plainDoors && !hasCorridor;
+
+  return { doorlessRoomIds, oneSidedDoorIds, missingCorridor };
+}
