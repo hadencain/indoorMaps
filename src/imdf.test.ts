@@ -1,0 +1,80 @@
+import { describe, it, expect } from "vitest";
+import { buildingToGeoJSON, geoJSONToBuilding } from "./imdf";
+import type { Building } from "./types";
+
+const base: Building = {
+  origin: [-73.99, 40.75],
+  levels: [{ ordinal: 0, name: "G" }],
+  units: [
+    {
+      id: "u1",
+      ordinal: 0,
+      name: "Unit 101",
+      category: "retail",
+      polygon: [
+        [0, 0],
+        [10, 0],
+        [10, 10],
+        [0, 10],
+      ],
+    },
+  ],
+  openings: [],
+  verticals: [],
+  cameras: [],
+  occupants: [
+    {
+      id: "o1",
+      name: "Ampersand Coffee",
+      unitId: "u1",
+      category: "dining",
+      hours: "Mon–Sat 10–9",
+      phone: "555-0100",
+      website: "https://example.test",
+      logo: "data:image/png;base64,AAAA",
+      anchor: [4, 6],
+    },
+    { id: "o2", name: "Kiosk Nine", unitId: "u1", category: "retail" }, // minimal: no anchor/meta
+  ],
+};
+
+describe("occupant single-file round-trip", () => {
+  it("exports one indoormaps:type=occupant Point feature per occupant", () => {
+    const fcObj = JSON.parse(JSON.stringify(buildingToGeoJSON(base)));
+    const occs = fcObj.features.filter(
+      (f: { properties?: Record<string, unknown> }) => f.properties?.["indoormaps:type"] === "occupant",
+    );
+    expect(occs).toHaveLength(2);
+    expect(occs[0].properties.name).toBe("Ampersand Coffee");
+    expect(occs[0].properties.unit).toBe("u1");
+    expect(occs[0].properties.logo).toBe("data:image/png;base64,AAAA");
+    expect(occs[0].geometry.type).toBe("Point");
+  });
+
+  it("round-trips occupants through geoJSONToBuilding", () => {
+    const back = geoJSONToBuilding(JSON.stringify(buildingToGeoJSON(base)));
+    expect(back).not.toBeNull();
+    expect(back!.occupants).toHaveLength(2);
+    const o1 = back!.occupants!.find((o) => o.id === "o1")!;
+    expect(o1.name).toBe("Ampersand Coffee");
+    expect(o1.unitId).toBe("u1");
+    expect(o1.category).toBe("dining");
+    expect(o1.hours).toBe("Mon–Sat 10–9");
+    expect(o1.phone).toBe("555-0100");
+    expect(o1.website).toBe("https://example.test");
+    expect(o1.logo).toBe("data:image/png;base64,AAAA");
+    expect(o1.anchor![0]).toBeCloseTo(4, 3);
+    expect(o1.anchor![1]).toBeCloseTo(6, 3);
+    const o2 = back!.occupants!.find((o) => o.id === "o2")!;
+    expect(o2.hours).toBeUndefined();
+    // o2 had no explicit anchor: export wrote the centroid, so the re-import
+    // carries anchor=[~5,~5] — explicit-anchor semantics, same visual point.
+    expect(o2.anchor![0]).toBeCloseTo(5, 3);
+  });
+
+  it("a building with no occupants exports none and imports as []", () => {
+    const b = { ...base, occupants: [] };
+    const back = geoJSONToBuilding(JSON.stringify(buildingToGeoJSON(b)));
+    expect(back!.occupants).toEqual([]);
+  });
+});

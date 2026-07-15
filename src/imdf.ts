@@ -1,5 +1,17 @@
-import type { Building, Camera, CameraKind, Category, LngLat, MetreXY, Opening, Unit } from "./types";
+import type {
+  Building,
+  Camera,
+  CameraKind,
+  Category,
+  LngLat,
+  MetreXY,
+  Occupant,
+  OccupantCategory,
+  Opening,
+  Unit,
+} from "./types";
 import { m2ll, ll2m, polygonRing, polygonCentroid } from "./geo";
+import { occupantAnchor } from "./occupants";
 
 // IMDF-flavored GeoJSON export. Real IMDF is a zip of one FeatureCollection per
 // feature type; for portability we emit a single FeatureCollection whose features
@@ -67,6 +79,29 @@ export function buildingToGeoJSON(b: Building): unknown {
     });
   }
 
+  // Occupants (tenant businesses) — app extension, like cameras. Point at the
+  // resolved anchor (explicit or unit centroid) so external viewers get a
+  // usable POI; `unit` carries the unit linkage. Full fidelity incl. logo —
+  // the interchange-grade archive export strips logos instead.
+  for (const occ of b.occupants ?? []) {
+    const at = occupantAnchor(b, occ);
+    features.push({
+      type: "Feature",
+      id: occ.id,
+      properties: {
+        "indoormaps:type": "occupant",
+        unit: occ.unitId,
+        name: occ.name,
+        category: occ.category,
+        ...(occ.hours !== undefined && { hours: occ.hours }),
+        ...(occ.phone !== undefined && { phone: occ.phone }),
+        ...(occ.website !== undefined && { website: occ.website }),
+        ...(occ.logo !== undefined && { logo: occ.logo }),
+      },
+      geometry: { type: "Point", coordinates: m2ll(b.origin, at[0], at[1]) },
+    });
+  }
+
   return {
     type: "FeatureCollection",
     indoorMaps: { version: 1, origin: b.origin, levels: b.levels, verticals: b.verticals },
@@ -98,8 +133,25 @@ export function geoJSONToBuilding(text: string): Building | null {
   const units: Unit[] = [];
   const openings: Opening[] = [];
   const cameras: Camera[] = [];
+  const occupants: Occupant[] = [];
   for (const f of obj.features ?? []) {
     const ft = f.properties?.feature_type;
+    if (f.properties?.["indoormaps:type"] === "occupant") {
+      const p = f.properties as Record<string, unknown>;
+      const coords = (f.geometry as { type?: string; coordinates?: [number, number] } | null)?.coordinates;
+      occupants.push({
+        id: String(f.id ?? `occ-${occupants.length}`),
+        name: String(p.name ?? "Occupant"),
+        unitId: String(p.unit ?? ""),
+        category: (p.category as OccupantCategory) ?? "other",
+        ...(typeof p.hours === "string" && { hours: p.hours }),
+        ...(typeof p.phone === "string" && { phone: p.phone }),
+        ...(typeof p.website === "string" && { website: p.website }),
+        ...(typeof p.logo === "string" && { logo: p.logo }),
+        ...(coords && { anchor: ll2m(origin, coords[0], coords[1]) }),
+      });
+      continue;
+    }
     if (f.properties?.["indoormaps:type"] === "camera" && f.geometry?.type === "Point") {
       const [lng, lat] = f.geometry.coordinates as [number, number];
       cameras.push({
@@ -141,6 +193,7 @@ export function geoJSONToBuilding(text: string): Building | null {
     openings,
     verticals: meta.verticals ?? [],
     cameras,
+    occupants,
   };
 }
 
