@@ -14,6 +14,7 @@ import {
   bbox,
 } from "./geo";
 import { rankCamerasForPoint } from "./coverage";
+import { doorAdjacency } from "./interaction/health";
 import type { VisibilityPolygon } from "./coverage";
 import { gridToGeoJSON } from "./render";
 import { formatArea } from "./format";
@@ -855,20 +856,39 @@ export default function MapView() {
       for (const op of building.openings) {
         const owner = unitById.get(op.unit);
         if (!owner || owner.ordinal !== ordinal) continue;
-        const el = labelEl("", op.kind === "entrance" ? "door door-entrance" : "door");
+        const adj = doorAdjacency(building.units, op);
+        const otherUnit = adj.other ? unitById.get(adj.other) : undefined;
+        const oneSided = !otherUnit && (op.kind ?? "door") === "door";
+        const el = labelEl(
+          "",
+          (op.kind === "entrance" ? "door door-entrance" : "door") + (oneSided ? " door-warn" : ""),
+        );
+        el.title =
+          op.kind === "entrance"
+            ? `Entrance — ${owner.name}`
+            : otherUnit
+              ? `Connects ${owner.name} ↔ ${otherUnit.name}`
+              : `One-sided door — nothing on the far side of ${owner.name}'s wall`;
         const marker = new maplibregl.Marker({ element: el, draggable: true })
           .setLngLat(m2ll(building.origin, op.at[0], op.at[1]))
           .addTo(map);
+        // Magnetize while dragging: the handle glides along the owner's walls instead
+        // of floating free. Visual only — no store writes until dragend.
+        marker.on("drag", () => {
+          const ll = marker.getLngLat();
+          const p = ll2m(live.current.building.origin, ll.lng, ll.lat);
+          const o = live.current.building.units.find((x) => x.id === op.unit);
+          if (!o) return;
+          const onWall = nearestPointOnPolygon(p, o.polygon);
+          marker.setLngLat(m2ll(live.current.building.origin, onWall[0], onWall[1]));
+        });
         marker.on("dragend", () => {
           const ll = marker.getLngLat();
           let at = ll2m(building.origin, ll.lng, ll.lat);
-          if (live.current.showGrid) at = snapPoint(at, live.current.gridSize);
-          // Snap onto the owning room's nearest wall so doors sit on an edge.
-          const o = live.current.building.units.find((u) => u.id === op.unit);
+          const o = live.current.building.units.find((x) => x.id === op.unit);
           if (o) at = nearestPointOnPolygon(at, o.polygon);
           onMoveDoor(op.id, at);
         });
-        // Right-click a door handle to toggle it between door and entrance.
         el.addEventListener("contextmenu", (ev) => {
           ev.preventDefault();
           ev.stopPropagation();

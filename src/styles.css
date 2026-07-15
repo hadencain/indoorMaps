@@ -800,6 +800,12 @@ button.wide.ghost {
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
 }
 
+/* One-sided door: nothing on the far side — routing can't use it. */
+.door-warn {
+  background: #ff5c5c;
+  box-shadow: 0 0 0 3px rgba(255, 92, 92, 0.25), 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
 /* Vertex-edit handles */
 .vhandle {
   width: 12px;
