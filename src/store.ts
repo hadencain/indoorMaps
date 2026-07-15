@@ -304,6 +304,10 @@ interface State {
   moveVertex: (id: string, index: number, at: MetreXY) => void;
   insertVertex: (id: string, edgeIndex: number) => void;
   deleteVertex: (id: string, index: number) => void;
+  /** Replace a unit's whole polygon (edge drag commits through this). */
+  setUnitPolygon: (id: string, polygon: MetreXY[]) => void;
+  /** Insert a vertex on edge `edgeIndex` at an exact point (dbl-click an edge). */
+  insertVertexAt: (id: string, edgeIndex: number, at: MetreXY) => void;
   linkUnit: (id: string) => void;
   deleteVertical: (a: string, b: string) => void;
   addCamera: (at: MetreXY, ordinal: number) => void;
@@ -696,6 +700,23 @@ export const useStore = create<State>((set, get) => {
             ? { ...u, polygon: u.polygon.filter((_, i) => i !== index) }
             : u,
         ),
+      })),
+
+    setUnitPolygon: (id, polygon) =>
+      commit((b) => ({
+        ...b,
+        units: b.units.map((u) => (u.id === id ? { ...u, polygon } : u)),
+      })),
+
+    insertVertexAt: (id, edgeIndex, at) =>
+      commit((b) => ({
+        ...b,
+        units: b.units.map((u) => {
+          if (u.id !== id) return u;
+          const polygon = [...u.polygon];
+          polygon.splice(edgeIndex + 1, 0, at);
+          return { ...u, polygon };
+        }),
       })),
 
     linkUnit: (id) => {
