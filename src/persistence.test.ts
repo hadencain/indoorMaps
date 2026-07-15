@@ -108,7 +108,7 @@ const validBuilding = () => ({
 describe("withBuildingDefaults", () => {
   it("defaults every additive collection missing from a legacy blob", () => {
     const b = withBuildingDefaults(validBuilding() as Record<string, unknown>);
-    for (const k of ["cameras", "incidents", "patrols", "amenities", "fixtures", "footprints", "underlays"])
+    for (const k of ["cameras", "incidents", "patrols", "amenities", "fixtures", "footprints", "underlays", "occupants"])
       expect(b[k]).toEqual([]);
   });
   it("leaves present collections untouched", () => {
@@ -125,6 +125,7 @@ describe("building file round-trip", () => {
     expect(parsed!.propertyId).toBe("casino");
     expect(parsed!.building.units).toEqual(validBuilding().units);
     expect(parsed!.building.cameras).toEqual([]); // defaults applied on parse
+    expect(parsed!.building.occupants).toEqual([]);
   });
 
   it("stamps the format marker", () => {

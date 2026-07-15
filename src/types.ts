@@ -196,6 +196,35 @@ export interface Amenity {
   name?: string;
 }
 
+/** Business category for an occupant (tenant). Coarse IMDF-ish buckets. */
+export type OccupantCategory =
+  | "retail"
+  | "dining"
+  | "services"
+  | "entertainment"
+  | "health"
+  | "office"
+  | "transit"
+  | "other";
+
+/** A tenant business occupying a unit. Separate from the Unit polygon (IMDF
+ *  occupant → anchor → unit): the unit is the space ("Unit 214"), the occupant
+ *  is the business inside it. 1:N per unit (kiosks in a concourse); a
+ *  room-category unit with zero occupants is vacant — a real, queryable state.
+ *  Additive + defaulted (persistence stays v3, same pattern as cameras). */
+export interface Occupant {
+  id: string;
+  name: string; // display name ("Sunglass Hut")
+  unitId: string; // the unit it occupies
+  category: OccupantCategory;
+  hours?: string; // freeform for v1 ("Mon–Sat 10–9")
+  phone?: string;
+  website?: string;
+  logo?: string; // data URI, local-first
+  /** Label/POI point inside the unit; unset ⇒ unit centroid (occupantAnchor). */
+  anchor?: MetreXY;
+}
+
 /** The building outline for one floor — a floor-slab base + thick exterior wall,
  *  drawn beneath everything so the plan reads as an enclosed building. Visual
  *  only; coverage still measures the units. */
@@ -244,6 +273,8 @@ export interface Building {
   footprints?: Footprint[];
   /** Point-of-interest markers (restrooms, ATMs, exits…). Additive; visual. */
   amenities?: Amenity[];
+  /** Tenant businesses linked to units (IMDF occupant). Additive; defaults to []. */
+  occupants?: Occupant[];
   /** Site metadata for the operator console (photos, hours). Additive. */
   siteInfo?: SiteInfo;
   /** Operator camera presets (feed walls). Additive. */

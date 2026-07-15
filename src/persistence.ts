@@ -44,7 +44,7 @@ export function buildingKey(propertyId: string): string {
  *  arrays unguarded. Returns its argument for chaining. */
 export function withBuildingDefaults<T extends object>(b: T): T {
   const o = b as Record<string, unknown>;
-  for (const k of ["cameras", "incidents", "patrols", "amenities", "fixtures", "footprints", "underlays"])
+  for (const k of ["cameras", "incidents", "patrols", "amenities", "fixtures", "footprints", "underlays", "occupants"])
     if (!Array.isArray(o[k])) o[k] = [];
   return b;
 }
