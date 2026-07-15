@@ -106,8 +106,9 @@ describe("floorHealth", () => {
   });
 
   it("excludes outside-owned plain doors from missingCorridor, matching graph.ts", () => {
-    // Outside unit with a plain door, plus a room and corridor.
-    // missingCorridor should be false because outside-owned doors are not routable in graph.ts.
+    // Outside unit owning the floor's ONLY plain door, no corridor anywhere.
+    // graph.ts skips outside-owned doors before its no-route check, so this
+    // must NOT flag missingCorridor — with the old all-doors logic it would.
     const outside: Unit = {
       id: "outside",
       ordinal: 0,
@@ -125,7 +126,7 @@ describe("floorHealth", () => {
       unit: "outside",
       at: [25, 0],
     };
-    const b = makeBuilding([roomA, corridor, outside], [outsideDoor]);
+    const b = makeBuilding([roomA, outside], [outsideDoor]);
     expect(floorHealth(b, 0).missingCorridor).toBe(false);
   });
 });
