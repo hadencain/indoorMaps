@@ -335,6 +335,9 @@ export function bindDrawing(map: maplibregl.Map, deps: DrawDeps): DrawHandle {
       return;
     }
     if (tool !== "polygon") return;
+    // The 2nd click of a double-click is the close gesture — don't add its vertex
+    // (mirrors the patrol-waypoint guard); the dblclick handler closes the draft.
+    if (e.originalEvent.detail > 1) return;
     const prev = draw.poly.length > 0 ? draw.poly[draw.poly.length - 1] : null;
     const r = toSnapped(e.lngLat, prev);
     const p = r.point;
