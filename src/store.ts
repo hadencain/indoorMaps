@@ -14,6 +14,7 @@ import type {
   Unit,
   AmenityKind,
   SiteInfo,
+  Occupant,
 } from "./types";
 import { doorForRoom, selectableUnits } from "./building";
 import { defaultNameFor, isSpace } from "./categories";
@@ -210,6 +211,7 @@ let roomSeq = 0;
 let incSeq = 0;
 let patSeq = 0;
 let viewSeq = 0;
+let occSeq = 0;
 
 /** Transient click-to-camera probe result. NOT persisted, NOT routed through
  *  `commit`/undo — pure session UI state. `cameraIds` are the cameras whose
@@ -308,6 +310,14 @@ interface State {
   setUnitPolygon: (id: string, polygon: MetreXY[]) => void;
   /** Insert a vertex on edge `edgeIndex` at an exact point (dbl-click an edge). */
   insertVertexAt: (id: string, edgeIndex: number, at: MetreXY) => void;
+  /** Occupant CRUD (P2 data layer; Places UI arrives in P3). */
+  addOccupant: (unitId: string) => void;
+  updateOccupant: (id: string, patch: Partial<Omit<Occupant, "id">>) => void;
+  deleteOccupant: (id: string) => void;
+  /** Tenant swap: re-point to another unit; anchor resets (it was inside the old unit). */
+  moveOccupant: (id: string, unitId: string) => void;
+  /** null resets to the unit-centroid fallback. */
+  setOccupantAnchor: (id: string, at: MetreXY | null) => void;
   linkUnit: (id: string) => void;
   deleteVertical: (a: string, b: string) => void;
   addCamera: (at: MetreXY, ordinal: number) => void;
@@ -663,6 +673,7 @@ export const useStore = create<State>((set, get) => {
         units: b.units.filter((u) => u.id !== id),
         openings: b.openings.filter((o) => o.unit !== id),
         verticals: b.verticals.filter((v) => v.a !== id && v.b !== id),
+        occupants: (b.occupants ?? []).filter((o) => o.unitId !== id),
       }));
       set((s) => ({
         selectedId: s.selectedId === id ? null : s.selectedId,
@@ -717,6 +728,40 @@ export const useStore = create<State>((set, get) => {
           polygon.splice(edgeIndex + 1, 0, at);
           return { ...u, polygon };
         }),
+      })),
+
+    addOccupant: (unitId) => {
+      const id = `occ-${Date.now()}-${occSeq++}`;
+      const occ: Occupant = { id, name: "New occupant", unitId, category: "retail" };
+      commit((b) => ({ ...b, occupants: [...(b.occupants ?? []), occ] }));
+    },
+
+    updateOccupant: (id, patch) =>
+      commit((b) => ({
+        ...b,
+        occupants: (b.occupants ?? []).map((o) => (o.id === id ? { ...o, ...patch } : o)),
+      })),
+
+    deleteOccupant: (id) =>
+      commit((b) => ({
+        ...b,
+        occupants: (b.occupants ?? []).filter((o) => o.id !== id),
+      })),
+
+    moveOccupant: (id, unitId) =>
+      commit((b) => ({
+        ...b,
+        occupants: (b.occupants ?? []).map((o) =>
+          o.id === id ? { ...o, unitId, anchor: undefined } : o,
+        ),
+      })),
+
+    setOccupantAnchor: (id, at) =>
+      commit((b) => ({
+        ...b,
+        occupants: (b.occupants ?? []).map((o) =>
+          o.id === id ? { ...o, anchor: at ?? undefined } : o,
+        ),
       })),
 
     linkUnit: (id) => {
