@@ -11,7 +11,7 @@ export default function SearchBox({ placeholder }: { placeholder?: string }) {
     <div className="searchbox">
       <input
         value={searchQuery}
-        placeholder={placeholder ?? "Search name or type…"}
+        placeholder={placeholder ?? "Search name, tenant, or type…"}
         onChange={(e) => setSearch(e.target.value)}
       />
       {searchQuery && (

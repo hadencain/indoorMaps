@@ -735,6 +735,7 @@ export default function MapView() {
       "any",
       [">=", ["index-of", q, ["downcase", ["get", "name"]]], 0],
       [">=", ["index-of", q, ["downcase", ["get", "category"]]], 0],
+      [">=", ["index-of", q, ["downcase", ["get", "occupant"]]], 0],
     ];
     map.setPaintProperty("unit-fill", "fill-opacity", [
       "case",

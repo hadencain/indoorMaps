@@ -1,6 +1,7 @@
 import type { Building, Graph, LngLat } from "./types";
 import { polygonRing, distM, m2ll, bbox, pointsToLL } from "./geo";
 import { functionBucket } from "./categories";
+import { occupantNamesByUnit } from "./occupants";
 
 export type FC = GeoJSON.FeatureCollection;
 
@@ -75,6 +76,7 @@ export function footprintsToGeoJSON(b: Building): FC {
 
 /** Unit polygons (one Feature per unit, tagged with ordinal + category). */
 export function unitsToGeoJSON(b: Building): FC {
+  const occNames = occupantNamesByUnit(b);
   return {
     type: "FeatureCollection",
     features: b.units.map((u) => ({
@@ -86,6 +88,10 @@ export function unitsToGeoJSON(b: Building): FC {
         // Functional bucket for the space-plan fill (drives functionFillExpression).
         func: functionBucket(u),
         name: u.name,
+        // Space-joined tenant names for canvas search-dim (P2) and the
+        // occupant-anchored labels (P3). "" = vacant (property must exist so
+        // the MapLibre downcase/index-of expression never sees null).
+        occupant: occNames.get(u.id) ?? "",
         // Access-control level for the secure-perimeter `match` filter (P8).
         // Default "public" so the filter has a value on every feature.
         security: u.security ?? "public",

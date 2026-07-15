@@ -1,5 +1,6 @@
 import { useStore } from "../../store";
 import { isSpace } from "../../categories";
+import { occupantNamesByUnit } from "../../occupants";
 import SearchBox from "../SearchBox";
 
 export default function FloorContentsPanel() {
@@ -16,11 +17,15 @@ export default function FloorContentsPanel() {
   const nudgeUnderlay = useStore((s) => s.nudgeUnderlay);
   const removeUnderlay = useStore((s) => s.removeUnderlay);
   const q = searchQuery.trim().toLowerCase();
+  const occNames = occupantNamesByUnit(building);
   const spaces = building.units.filter(
     (u) =>
       u.ordinal === ordinal &&
       isSpace(u.category) &&
-      (q === "" || u.name.toLowerCase().includes(q) || u.category.toLowerCase().includes(q)),
+      (q === "" ||
+        u.name.toLowerCase().includes(q) ||
+        u.category.toLowerCase().includes(q) ||
+        (occNames.get(u.id) ?? "").toLowerCase().includes(q)),
   );
   const underlay = (building.underlays ?? []).find((u) => u.ordinal === ordinal);
   const NUDGE = 1; // metres per nudge step

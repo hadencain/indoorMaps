@@ -14,6 +14,10 @@ export default function RoutePanel() {
   const rooms = selectableUnits(building);
   const level = (o: number) => building.levels.find((l) => l.ordinal === o)?.name ?? `L${o}`;
   const egress = routeMode === "egress";
+  const occupants = building.occupants ?? [];
+  const roomIds = new Set(rooms.map((r) => r.id));
+  // Tenants routable via their unit; skip occupants of non-selectable units.
+  const occupantOptions = occupants.filter((o) => roomIds.has(o.unitId));
 
   return (
     <div className="panel">
@@ -33,6 +37,14 @@ export default function RoutePanel() {
             {r.name} · {level(r.ordinal)}
           </option>
         ))}
+        {occupantOptions.map((o) => {
+          const r = rooms.find((x) => x.id === o.unitId)!;
+          return (
+            <option key={`occ-${o.id}`} value={o.unitId}>
+              {o.name} · {level(r.ordinal)}
+            </option>
+          );
+        })}
       </select>
       {!egress && (
         <>
@@ -43,6 +55,14 @@ export default function RoutePanel() {
                 {r.name} · {level(r.ordinal)}
               </option>
             ))}
+            {occupantOptions.map((o) => {
+              const r = rooms.find((x) => x.id === o.unitId)!;
+              return (
+                <option key={`occ-${o.id}`} value={o.unitId}>
+                  {o.name} · {level(r.ordinal)}
+                </option>
+              );
+            })}
           </select>
         </>
       )}
