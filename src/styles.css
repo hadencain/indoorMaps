@@ -832,6 +832,21 @@ button.wide.ghost {
   background: #f2c14e;
 }
 
+/* Snap indicator: marks the vertex/edge point the cursor will snap to. */
+.snap-tick {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #5cf6ee;
+  border-radius: 50%;
+  background: transparent;
+  pointer-events: none;
+  box-shadow: 0 0 6px rgba(92, 246, 238, 0.8);
+}
+.snap-tick[data-kind="edge"] {
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+
 .roomrow.selected input {
   border-color: #f2c14e;
   color: #f2c14e;

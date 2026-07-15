@@ -7,19 +7,16 @@ import { INCIDENT_COLORS } from "./ui/panels/IncidentPanel";
 import {
   ll2m,
   m2ll,
-  distM,
   polygonRing,
-  pointsToLL,
   polygonArea,
   snapPoint,
   nearestPointOnPolygon,
   bbox,
 } from "./geo";
-import { rectFromDrag } from "./building";
 import { rankCamerasForPoint } from "./coverage";
 import type { VisibilityPolygon } from "./coverage";
 import { gridToGeoJSON } from "./render";
-import { formatLength, formatArea } from "./format";
+import { formatArea } from "./format";
 import { CATEGORY_ORDER, CATEGORY_LABELS, functionFillExpression } from "./categories";
 import { useStore } from "./store";
 import { useRoute } from "./ui/route";
@@ -28,15 +25,14 @@ import CameraWindow from "./ui/CameraWindow";
 import PatrolPlayback from "./ui/PatrolPlayback";
 import { amenityIconSvg, amenityBadgeStyle } from "./ui/amenity-icons";
 import OperatorEdgePanels from "./ui/OperatorEdgePanels";
+import { bindDrawing, type DrawHandle, type DrawTool } from "./interaction/draw";
+
+export type { DrawTool } from "./interaction/draw";
 
 const EMPTY: FC = { type: "FeatureCollection", features: [] };
 /** 1×1 transparent pixel — placeholder image for the underlay source until a real one loads. */
 const TRANSPARENT_PX =
   "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-/** Click within this many metres of the first vertex to close a polygon. */
-const CLOSE_SNAP_M = 2.5;
-
-export type DrawTool = "none" | "rect" | "polygon";
 
 /** Renders the building + route; supports rectangle + polygon room authoring. */
 export default function MapView() {
@@ -113,11 +109,7 @@ export default function MapView() {
   // Dedicated ref for the inspect-mode probe dot, managed only by the probe
   // effect so the main marker-rebuild effect can't wipe it out of sync.
   const probeMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const measureRef = useRef<maplibregl.Marker | null>(null);
-  const drawRef = useRef<{ poly: MetreXY[]; rectStart: MetreXY | null }>({
-    poly: [],
-    rectStart: null,
-  });
+  const drawHandleRef = useRef<DrawHandle | null>(null);
   const [ready, setReady] = useState(false);
   const [menu, setMenu] = useState<{ unitId: string; x: number; y: number } | null>(null);
 
@@ -532,7 +524,18 @@ export default function MapView() {
 
       frameBuilding(map, building);
 
-      bindDrawing(map);
+      drawHandleRef.current = bindDrawing(map, {
+        live: () => live.current,
+        setMenu,
+        onInspectClick: (pt) => {
+          const l = live.current;
+          const ringById = new Map(l.visPolys.map((v) => [v.cameraId, v.ring]));
+          const cams = l.building.cameras.filter((c) => c.ordinal === l.ordinal);
+          const ranked = rankCamerasForPoint(pt, cams, ringById);
+          l.onSetProbe({ point: pt });
+          l.onSelectCamera(ranked[0]?.cameraId ?? null);
+        },
+      });
       map.on("zoom", updateZoomDeclutter);
       setReady(true);
     });
@@ -548,8 +551,8 @@ export default function MapView() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (live.current.drawTool !== "polygon") return;
-      if (e.key === "Enter") closePolygon();
-      else if (e.key === "Escape") cancelDraft();
+      if (e.key === "Enter") drawHandleRef.current?.closePolygon();
+      else if (e.key === "Escape") drawHandleRef.current?.cancelDraft();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -596,8 +599,8 @@ export default function MapView() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    if (patrolMode) renderPatrolDraft(null);
-    else draftSource()?.setData(EMPTY); // leaving patrol clears its preview
+    if (patrolMode) drawHandleRef.current?.renderPatrolDraft(null);
+    else drawHandleRef.current?.cancelDraft(); // leaving patrol clears its preview
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, patrolDraft, patrolMode]);
 
@@ -1138,7 +1141,7 @@ export default function MapView() {
     // too. Only the plain "none" (non-patrol) tools clear the in-progress draft.
     if (drawTool === "none" && !patrolMode) {
       map.doubleClickZoom.enable();
-      cancelDraft();
+      drawHandleRef.current?.cancelDraft();
     } else {
       map.doubleClickZoom.disable();
     }
@@ -1185,11 +1188,12 @@ export default function MapView() {
             <kbd>Click</kbd> add vertex
           </span>
           <span>
-            <kbd>Click first pt</kbd> / <kbd>Enter</kbd> close
+            <kbd>Click first pt</kbd> / <kbd>Dbl-click</kbd> / <kbd>Enter</kbd> close
           </span>
           <span>
             <kbd>Esc</kbd> / <kbd>Right-click</kbd> cancel
           </span>
+          <span>snaps to walls &amp; corners</span>
           {live.current.showGrid && <span>snapping to {live.current.gridSize} m grid</span>}
         </div>
       )}
@@ -1275,97 +1279,6 @@ export default function MapView() {
     </div>
   );
 
-  // ---- draft rendering (component scope; hoisted) ----
-  function draftSource(): maplibregl.GeoJSONSource | undefined {
-    return mapRef.current?.getSource("draft") as maplibregl.GeoJSONSource | undefined;
-  }
-  function cancelDraft() {
-    drawRef.current.poly = [];
-    drawRef.current.rectStart = null;
-    draftSource()?.setData(EMPTY);
-    clearMeasure();
-  }
-  function setDraft(verts: MetreXY[], cursor: MetreXY | null) {
-    const origin = live.current.building.origin;
-    const features: GeoJSON.Feature[] = [];
-    if (verts.length >= 3) {
-      features.push({
-        type: "Feature",
-        properties: {},
-        geometry: { type: "Polygon", coordinates: [polygonRing(origin, verts)] },
-      });
-    }
-    const linePts = cursor ? [...verts, cursor] : verts;
-    if (linePts.length >= 2) {
-      features.push({
-        type: "Feature",
-        properties: {},
-        geometry: { type: "LineString", coordinates: pointsToLL(origin, linePts) },
-      });
-    }
-    for (const v of verts) {
-      features.push({
-        type: "Feature",
-        properties: {},
-        geometry: { type: "Point", coordinates: pointsToLL(origin, [v])[0] },
-      });
-    }
-    draftSource()?.setData({ type: "FeatureCollection", features });
-  }
-  function closePolygon() {
-    const { poly } = drawRef.current;
-    if (poly.length >= 3) live.current.onAddRoom([...poly], live.current.ordinal);
-    cancelDraft();
-  }
-  // Patrol draft preview into the shared `draft` source: an OPEN polyline (no
-  // fill) through committed waypoints, optionally rubber-banding to `cursor`.
-  // A null/empty draft clears the preview.
-  function renderPatrolDraft(cursor: MetreXY | null) {
-    const pts = live.current.patrolDraft;
-    const origin = live.current.building.origin;
-    if (!pts || pts.length === 0) {
-      draftSource()?.setData(EMPTY);
-      return;
-    }
-    const features: GeoJSON.Feature[] = [];
-    const linePts = cursor ? [...pts, cursor] : pts;
-    if (linePts.length >= 2) {
-      features.push({
-        type: "Feature",
-        properties: {},
-        geometry: { type: "LineString", coordinates: pointsToLL(origin, linePts) },
-      });
-    }
-    for (const v of pts) {
-      features.push({
-        type: "Feature",
-        properties: {},
-        geometry: { type: "Point", coordinates: pointsToLL(origin, [v])[0] },
-      });
-    }
-    draftSource()?.setData({ type: "FeatureCollection", features });
-  }
-  function setMeasure(at: MetreXY, text: string) {
-    const map = mapRef.current;
-    if (!map) return;
-    const ll = m2ll(live.current.building.origin, at[0], at[1]);
-    if (!measureRef.current) {
-      measureRef.current = new maplibregl.Marker({
-        element: labelEl("", "measure"),
-        anchor: "left",
-        offset: [12, 0],
-      })
-        .setLngLat(ll)
-        .addTo(map);
-    }
-    measureRef.current.setLngLat(ll);
-    measureRef.current.getElement().textContent = text;
-  }
-  function clearMeasure() {
-    measureRef.current?.remove();
-    measureRef.current = null;
-  }
-
   // ---- zoom declutter (room labels + camera markers) ----
   // Published-plan legibility: dense venues (airport tenant strip, stadium BOH
   // wing) collide labels and stack corner cameras at plan-wide zooms. A label
@@ -1402,180 +1315,6 @@ export default function MapView() {
     /* stub — intentionally no-op in P4 */
   }
 
-  // ---- event wiring (bound once; reads live/drawRef) ----
-  function bindDrawing(map: maplibregl.Map) {
-    const toMetre = (ll: maplibregl.LngLat): MetreXY => {
-      const p = ll2m(live.current.building.origin, ll.lng, ll.lat);
-      return live.current.showGrid ? snapPoint(p, live.current.gridSize) : p;
-    };
-
-    map.on("mousedown", (e) => {
-      if (live.current.drawTool !== "rect") return;
-      e.preventDefault();
-      map.dragPan.disable();
-      drawRef.current.rectStart = toMetre(e.lngLat);
-    });
-
-    map.on("mousemove", (e) => {
-      const tool = live.current.drawTool;
-      const cur = toMetre(e.lngLat);
-      const { unit: u, showDims: dims } = live.current;
-      if (tool === "rect" && drawRef.current.rectStart) {
-        const start = drawRef.current.rectStart;
-        setDraft(rectFromDrag(start, cur), null);
-        if (dims) {
-          setMeasure(
-            cur,
-            `${formatLength(Math.abs(cur[0] - start[0]), u)} × ` +
-              `${formatLength(Math.abs(cur[1] - start[1]), u)}`,
-          );
-        } else clearMeasure();
-      } else if (tool === "polygon" && drawRef.current.poly.length > 0) {
-        const poly = drawRef.current.poly;
-        setDraft(poly, cur);
-        if (dims) {
-          const edge = distM(poly[poly.length - 1], cur);
-          const area = polygonArea([...poly, cur]);
-          setMeasure(cur, `${formatLength(edge, u)} · ${formatArea(area, u)}`);
-        } else clearMeasure();
-      } else if (
-        live.current.patrolMode &&
-        live.current.patrolDraft &&
-        live.current.patrolDraft.length > 0
-      ) {
-        renderPatrolDraft(cur);
-      }
-    });
-
-    map.on("mouseup", (e) => {
-      if (live.current.drawTool !== "rect" || !drawRef.current.rectStart) return;
-      const rect = rectFromDrag(drawRef.current.rectStart, toMetre(e.lngLat));
-      drawRef.current.rectStart = null;
-      draftSource()?.setData(EMPTY);
-      clearMeasure();
-      map.dragPan.enable();
-      const [x0, y0, x1, y1] = [rect[0][0], rect[0][1], rect[2][0], rect[2][1]];
-      if (x1 - x0 >= 2 && y1 - y0 >= 2) {
-        live.current.onAddRoom(rect, live.current.ordinal);
-      }
-    });
-
-    // Patrol mode: double-click commits the draft (needs >= 2 points).
-    map.on("dblclick", (e) => {
-      if (!live.current.patrolMode || live.current.patrolDraft === null) return;
-      e.preventDefault();
-      live.current.onCommitPatrol();
-    });
-
-    map.on("contextmenu", (e) => {
-      const tool = live.current.drawTool;
-      if (tool === "polygon") {
-        e.preventDefault();
-        cancelDraft();
-        return;
-      }
-      // Patrol mode: right-click cancels the in-progress draft.
-      if (live.current.patrolMode && live.current.patrolDraft !== null) {
-        e.preventDefault();
-        live.current.onCancelPatrol();
-        return;
-      }
-      if (tool !== "none") return;
-      const hits = map.queryRenderedFeatures(e.point, { layers: ["unit-fill"] });
-      const id = hits[0]?.properties?.id as string | undefined;
-      if (id) {
-        e.preventDefault();
-        live.current.onSelect(id);
-        setMenu({ unitId: id, x: e.point.x, y: e.point.y });
-      } else {
-        setMenu(null);
-      }
-    });
-
-    map.on("click", (e) => {
-      const tool = live.current.drawTool;
-      if (tool === "none") {
-        setMenu(null);
-        // Camera mode: an empty-canvas click places a new camera. (Clicks on a
-        // camera marker are consumed by the marker's own listener and never
-        // reach the map.)
-        if (live.current.cameraMode) {
-          const at = toMetre(e.lngLat);
-          live.current.onAddCamera(at, live.current.ordinal);
-          return;
-        }
-        // Incident mode: empty-canvas click drops a pin (existing pins consume
-        // their own click). New pin is auto-selected for note entry.
-        if (live.current.incidentMode) {
-          live.current.onAddIncident(toMetre(e.lngLat), live.current.ordinal);
-          return;
-        }
-        // Inspect mode: resolve which cameras actually SEE the clicked point via
-        // the occlusion-clipped visibility rings (P5, NOT radial cones), ranked
-        // nearest-camera-first, and stash the transient probe. The raw click
-        // point is used (no grid snap) so the hit test matches the pixel clicked.
-        if (live.current.inspectMode) {
-          const origin = live.current.building.origin;
-          const pt = ll2m(origin, e.lngLat.lng, e.lngLat.lat);
-          const ord = live.current.ordinal;
-          const ringById = new Map(live.current.visPolys.map((v) => [v.cameraId, v.ring]));
-          const cams = live.current.building.cameras.filter((c) => c.ordinal === ord);
-          // View-quality ranking (aim + proximity + depth-in-view), NOT raw
-          // distance — the camera that actually sees this point best comes first.
-          const ranked = rankCamerasForPoint(pt, cams, ringById);
-          // Store only the point; InspectPanel re-derives the ranking live from
-          // current coverage. Anchor the preview to the best-view camera.
-          live.current.onSetProbe({ point: pt });
-          live.current.onSelectCamera(ranked[0]?.cameraId ?? null);
-          return;
-        }
-        // Patrol mode: click adds a waypoint (the draft is auto-armed on entering
-        // the tool). The 2nd click of a double-click (detail > 1) is the commit
-        // gesture — skip it so double-clicking to finish doesn't dump spurious
-        // waypoints at the end; the dblclick handler commits.
-        if (live.current.patrolMode) {
-          if (e.originalEvent.detail > 1) return;
-          // addPatrolPoint treats a null draft as [] — so clicks auto-start a
-          // fresh patrol on entering the tool and again after each commit.
-          live.current.onAddPatrolPoint(toMetre(e.lngLat));
-          return;
-        }
-        const hits = map.queryRenderedFeatures(e.point, { layers: ["unit-fill"] });
-        const id = hits[0]?.properties?.id as string | undefined;
-        // Any empty-canvas click clears a selected camera (mutually exclusive
-        // with unit selection). Unit hits below clear it via setSelected.
-        if (!id && live.current.selectedCameraId) live.current.onSelectCamera(null);
-        // Link mode: feed the click to the vertical-connection flow instead.
-        if (live.current.linkMode) {
-          if (id) live.current.onLinkUnit(id);
-          return;
-        }
-        // Vertex-edit: switch the edited room on a hit, but keep it on empty clicks.
-        if (live.current.vertexEdit) {
-          if (id) live.current.onSelect(id);
-          return;
-        }
-        // Shift-click a unit adds/removes it from the multi-selection (bulk edit).
-        if (id && e.originalEvent.shiftKey) {
-          live.current.onToggleSelected(id);
-          return;
-        }
-        // Plain select: clicking the currently-selected unit toggles it off.
-        const cur = live.current.selectedId;
-        live.current.onSelect(id && id === cur ? null : (id ?? null));
-        return;
-      }
-      if (tool !== "polygon") return;
-      const p = toMetre(e.lngLat);
-      const poly = drawRef.current.poly;
-      if (poly.length >= 3 && distM(p, poly[0]) < CLOSE_SNAP_M) {
-        closePolygon();
-        return;
-      }
-      poly.push(p);
-      setDraft(poly, null);
-    });
-  }
 }
 
 /** Frame the viewport on a building. Bounds come from the units; a building
