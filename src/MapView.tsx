@@ -12,9 +12,10 @@ import {
   snapPoint,
   nearestPointOnPolygon,
   bbox,
+  polygonCentroid,
 } from "./geo";
 import { rankCamerasForPoint } from "./coverage";
-import { doorAdjacency } from "./interaction/health";
+import { doorAdjacency, floorHealth } from "./interaction/health";
 import type { VisibilityPolygon } from "./coverage";
 import { gridToGeoJSON } from "./render";
 import { formatArea } from "./format";
@@ -1169,10 +1170,29 @@ export default function MapView() {
       }
     }
 
+    // Authoring-health badges (edit mode): rooms with no door can't route.
+    // Ambient signal only — the Review panel (P4) will list these as a worklist.
+    if (mode === "edit" && drawTool === "none") {
+      const health = floorHealth(building, ordinal);
+      const unitById2 = new Map(building.units.map((u) => [u.id, u]));
+      for (const id of health.doorlessRoomIds) {
+        const u = unitById2.get(id);
+        if (!u) continue;
+        const c = polygonCentroid(u.polygon);
+        const el = labelEl("!", "health-badge");
+        el.title = `${u.name} has no door — routing can't reach it`;
+        markersRef.current.push(
+          new maplibregl.Marker({ element: el, anchor: "bottom", offset: [0, -8] })
+            .setLngLat(m2ll(building.origin, c[0], c[1]))
+            .addTo(map),
+        );
+      }
+    }
+
     // Freshly-rebuilt markers need their zoom-dependent state applied now —
     // the zoom listener alone only covers zoom changes, not rebuilds.
     updateZoomDeclutter();
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter, suggestions, onAcceptSuggestion, onRejectSuggestion]);
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter, suggestions, onAcceptSuggestion, onRejectSuggestion, mode]);
 
   // Patrol highlight (display mode): emphasize the selected route, dim the rest.
   // Data-driven paint keyed on the feature `id` (patrolsToGeoJSON tags each line).
@@ -1289,6 +1309,12 @@ export default function MapView() {
             <kbd>Alt-click</kbd> / <kbd>Right-click</kbd> handle deletes
           </span>
           {showGrid && <span>snapping to {gridSize} m grid</span>}
+        </div>
+      )}
+      {mode === "edit" && floorHealth(building, ordinal).missingCorridor && (
+        <div className="floor-warn">
+          No corridor on this floor — doors have nowhere to route. Draw a corridor
+          (Rectangle/Polygon, category "Corridor").
         </div>
       )}
       {menu && menuUnit && (

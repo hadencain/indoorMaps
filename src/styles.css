@@ -806,6 +806,39 @@ button.wide.ghost {
   box-shadow: 0 0 0 3px rgba(255, 92, 92, 0.25), 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 
+/* Doorless-room badge: small amber "!" above the room centroid (edit mode). */
+.health-badge {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0b0d10;
+  background: #f2c14e;
+  border: 1.5px solid #0b0d10;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
+}
+
+/* Floor-level authoring warning chip (e.g. no corridor on this floor). */
+.floor-warn {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 420px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #f2c14e;
+  background: rgba(11, 13, 16, 0.92);
+  border: 1px solid rgba(242, 193, 78, 0.5);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 5;
+}
+
 /* Vertex-edit handles */
 .vhandle {
   width: 12px;
