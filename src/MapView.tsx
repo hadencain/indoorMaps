@@ -25,7 +25,9 @@ import CameraWindow from "./ui/CameraWindow";
 import PatrolPlayback from "./ui/PatrolPlayback";
 import { amenityIconSvg, amenityBadgeStyle } from "./ui/amenity-icons";
 import OperatorEdgePanels from "./ui/OperatorEdgePanels";
-import { bindDrawing, type DrawHandle, type DrawTool } from "./interaction/draw";
+import { bindDrawing, type DrawHandle, type DrawTool, SNAP_PX } from "./interaction/draw";
+import { snapDrawPoint, metresPerPixel } from "./interaction/snapping";
+import { translateEdge } from "./interaction/edit";
 
 export type { DrawTool } from "./interaction/draw";
 
@@ -88,6 +90,8 @@ export default function MapView() {
   const onMoveVertex = useStore((s) => s.moveVertex);
   const onInsertVertex = useStore((s) => s.insertVertex);
   const onDeleteVertex = useStore((s) => s.deleteVertex);
+  const onSetUnitPolygon = useStore((s) => s.setUnitPolygon);
+  const onInsertVertexAt = useStore((s) => s.insertVertexAt);
   const onAddCamera = useStore((s) => s.addCamera);
   const onMoveCamera = useStore((s) => s.moveCamera);
   const onRotateCamera = useStore((s) => s.rotateCamera);
@@ -132,6 +136,8 @@ export default function MapView() {
     onMoveVertex,
     onInsertVertex,
     onDeleteVertex,
+    onSetUnitPolygon,
+    onInsertVertexAt,
     cameraMode,
     selectedCameraId,
     onAddCamera,
@@ -173,6 +179,8 @@ export default function MapView() {
     onMoveVertex,
     onInsertVertex,
     onDeleteVertex,
+    onSetUnitPolygon,
+    onInsertVertexAt,
     cameraMode,
     selectedCameraId,
     onAddCamera,
@@ -900,31 +908,61 @@ export default function MapView() {
             .addTo(map);
           marker.on("dragend", () => {
             const ll = marker.getLngLat();
-            let at = ll2m(building.origin, ll.lng, ll.lat);
-            if (live.current.showGrid) at = snapPoint(at, live.current.gridSize);
-            live.current.onMoveVertex(u.id, i, at);
+            const l = live.current;
+            const raw = ll2m(l.building.origin, ll.lng, ll.lat);
+            const map = mapRef.current!;
+            const tolM = SNAP_PX * metresPerPixel(map.getZoom(), map.getCenter().lat);
+            const polygons = l.building.units
+              .filter((x) => x.ordinal === l.ordinal && x.id !== u.id)
+              .map((x) => x.polygon);
+            const r = snapDrawPoint(raw, {
+              polygons,
+              gridSize: l.showGrid ? l.gridSize : null,
+              tolM,
+            });
+            l.onMoveVertex(u.id, i, r.point);
           });
           el.addEventListener("contextmenu", (ev) => {
             ev.preventDefault();
             ev.stopPropagation();
             live.current.onDeleteVertex(u.id, i);
           });
+          el.addEventListener("click", (ev) => {
+            if (!ev.altKey) return;
+            ev.stopPropagation();
+            live.current.onDeleteVertex(u.id, i);
+          });
           markersRef.current.push(marker);
         });
-        // Midpoint "+" handles to insert a vertex on each edge.
+        // Edge handles: drag to move the whole wall along its normal; double-click
+        // to insert a vertex at the midpoint. Replaces the old "+" insert-only dots.
         u.polygon.forEach((v, i) => {
           const b2 = u.polygon[(i + 1) % u.polygon.length];
           const mid: MetreXY = [(v[0] + b2[0]) / 2, (v[1] + b2[1]) / 2];
-          const el = labelEl("+", "vadd");
-          el.addEventListener("click", (ev) => {
-            ev.stopPropagation();
-            live.current.onInsertVertex(u.id, i);
+          const el = labelEl("", "ehandle");
+          const marker = new maplibregl.Marker({ element: el, draggable: true })
+            .setLngLat(m2ll(building.origin, mid[0], mid[1]))
+            .addTo(map);
+          marker.on("dragend", () => {
+            const ll = marker.getLngLat();
+            const l = live.current;
+            const raw = ll2m(l.building.origin, ll.lng, ll.lat);
+            const tolM = SNAP_PX * metresPerPixel(map.getZoom(), map.getCenter().lat);
+            const others = l.building.units
+              .filter((x) => x.ordinal === l.ordinal && x.id !== u.id)
+              .map((x) => x.polygon);
+            const r = snapDrawPoint(raw, {
+              polygons: others,
+              gridSize: l.showGrid ? l.gridSize : null,
+              tolM,
+            });
+            l.onSetUnitPolygon(u.id, translateEdge(u.polygon, i, r.point));
           });
-          markersRef.current.push(
-            new maplibregl.Marker({ element: el }).setLngLat(
-              m2ll(building.origin, mid[0], mid[1]),
-            ).addTo(map),
-          );
+          el.addEventListener("dblclick", (ev) => {
+            ev.stopPropagation();
+            live.current.onInsertVertexAt(u.id, i, mid);
+          });
+          markersRef.current.push(marker);
         });
       }
     }
@@ -1222,10 +1260,13 @@ export default function MapView() {
             <kbd>Drag</kbd> a handle to move
           </span>
           <span>
-            <kbd>+</kbd> insert on edge
+            <kbd>Drag edge dot</kbd> move wall
           </span>
           <span>
-            <kbd>Right-click</kbd> a handle to delete
+            <kbd>Dbl-click edge dot</kbd> insert vertex
+          </span>
+          <span>
+            <kbd>Alt-click</kbd> / <kbd>Right-click</kbd> handle deletes
           </span>
           {showGrid && <span>snapping to {gridSize} m grid</span>}
         </div>

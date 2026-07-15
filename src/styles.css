@@ -814,22 +814,32 @@ button.wide.ghost {
   cursor: grabbing;
 }
 
-.vadd {
-  width: 16px;
-  height: 16px;
-  display: grid;
-  place-items: center;
-  font-size: 12px;
-  line-height: 1;
-  color: #0b0d10;
+/* Edge handle: drag = move the wall; double-click = insert a vertex. */
+.ehandle {
+  width: 10px;
+  height: 10px;
   background: rgba(242, 193, 78, 0.65);
   border: 1px solid #0b0d10;
   border-radius: 50%;
-  cursor: pointer;
+  cursor: move;
+  position: relative;
+}
+.ehandle:hover {
+  background: #f2c14e;
 }
 
-.vadd:hover {
-  background: #f2c14e;
+/* Invisible enlarged hit areas — visuals unchanged, grab targets ~2×. */
+.vhandle,
+.door,
+.ehandle {
+  position: relative;
+}
+.vhandle::after,
+.door::after,
+.ehandle::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
 }
 
 /* Snap indicator: marks the vertex/edge point the cursor will snap to. */
