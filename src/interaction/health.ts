@@ -71,6 +71,9 @@ export function floorHealth(building: Building, ordinal: number): FloorHealth {
   const openings = building.openings.filter((o) => unitIds.has(o.unit));
   const openedUnits = new Set(openings.map((o) => o.unit));
 
+  // Build unit lookup by id to check category
+  const unitsById = new Map(units.map((u) => [u.id, u]));
+
   const doorlessRoomIds = units
     .filter((u) => isSpace(u.category) && u.category !== "outside" && !openedUnits.has(u.id))
     .map((u) => u.id);
@@ -80,7 +83,11 @@ export function floorHealth(building: Building, ordinal: number): FloorHealth {
     .filter((o) => doorAdjacency(building.units, o).other === null)
     .map((o) => o.id);
 
-  const plainDoors = openings.some((o) => (o.kind ?? "door") === "door");
+  // Plain doors are those not owned by "outside" units; mirrors graph.ts's skip
+  // condition (line ~83) which ignores outside-owned doors before the corridor check.
+  const plainDoors = openings.some(
+    (o) => (o.kind ?? "door") === "door" && unitsById.get(o.unit)?.category !== "outside",
+  );
   const hasCorridor = units.some((u) => u.category === "corridor");
   const missingCorridor = plainDoors && !hasCorridor;
 

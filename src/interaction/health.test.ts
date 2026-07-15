@@ -104,4 +104,28 @@ describe("floorHealth", () => {
     expect(h.doorlessRoomIds).toEqual(["a"]);
     expect(floorHealth(b, 1).missingCorridor).toBe(false); // no doors upstairs → no corridor needed
   });
+
+  it("excludes outside-owned plain doors from missingCorridor, matching graph.ts", () => {
+    // Outside unit with a plain door, plus a room and corridor.
+    // missingCorridor should be false because outside-owned doors are not routable in graph.ts.
+    const outside: Unit = {
+      id: "outside",
+      ordinal: 0,
+      name: "Outside",
+      category: "outside",
+      polygon: [
+        [20, 0],
+        [30, 0],
+        [30, 10],
+        [20, 10],
+      ],
+    };
+    const outsideDoor: Opening = {
+      id: "outside_door",
+      unit: "outside",
+      at: [25, 0],
+    };
+    const b = makeBuilding([roomA, corridor, outside], [outsideDoor]);
+    expect(floorHealth(b, 0).missingCorridor).toBe(false);
+  });
 });
