@@ -2564,8 +2564,9 @@ button.wide.ghost {
   margin-right: 2px;
 }
 
-/* Occupant rows in the properties panel */
-.occrow .occ-head {
+/* Occupant rows in the properties panel (and the floor-contents tenant directory) */
+.occrow .occ-head,
+.roomrow .occ-head {
   flex: 1;
   display: flex;
   align-items: center;
@@ -2580,7 +2581,8 @@ button.wide.ghost {
 .occrow.open .occ-head {
   border-color: var(--accent);
 }
-.occrow .occ-cat {
+.occrow .occ-cat,
+.roomrow .occ-cat {
   margin-left: auto;
   font-size: 10px;
   color: var(--dim);
