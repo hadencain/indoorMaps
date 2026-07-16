@@ -22,8 +22,6 @@ export function rectFromDrag(a: MetreXY, b: MetreXY): MetreXY[] {
   );
 }
 
-export { casinoBuilding as initialBuilding } from "./demos/casino";
-
 /**
  * Units a user can pick as a route start/destination: every authored space
  * (room/office/restroom/lobby/retail/storage/mechanical/outside), excluding
