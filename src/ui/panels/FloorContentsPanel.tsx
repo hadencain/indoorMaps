@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { ImagePlus, X } from "lucide-react";
 import { useStore } from "../../store";
 import { isSpace } from "../../categories";
 import { occupantNamesByUnit, OCCUPANT_CATEGORY_LABELS } from "../../occupants";
 import { polygonCentroid } from "../../geo";
+import { fileToSmallDataUrl } from "../img";
 import type { OccupantCategory } from "../../types";
 import SearchBox from "../SearchBox";
 
@@ -20,7 +22,10 @@ export default function FloorContentsPanel() {
   const nudgeUnderlay = useStore((s) => s.nudgeUnderlay);
   const removeUnderlay = useStore((s) => s.removeUnderlay);
   const requestFly = useStore((s) => s.requestFly);
+  const updateSiteInfo = useStore((s) => s.updateSiteInfo);
   const [view, setView] = useState<"rooms" | "tenants">("rooms");
+  const [hoursDraft, setHoursDraft] = useState<string | null>(null);
+  const si = { photos: [], hours: "", ...building.siteInfo };
   const q = searchQuery.trim().toLowerCase();
   const occNames = occupantNamesByUnit(building);
   const spaces = building.units.filter(
@@ -34,6 +39,15 @@ export default function FloorContentsPanel() {
   );
   const underlay = (building.underlays ?? []).find((u) => u.ordinal === ordinal);
   const NUDGE = 1; // metres per nudge step
+
+  const addPhoto = async (file: File) => {
+    try {
+      const dataUrl = await fileToSmallDataUrl(file);
+      updateSiteInfo({ photos: [...si.photos, dataUrl] });
+    } catch {
+      /* unreadable image — ignore */
+    }
+  };
 
   return (
     <div className="panel">
@@ -146,6 +160,48 @@ export default function FloorContentsPanel() {
           </>
         );
       })()}
+
+      <div className="panel-subtitle" style={{ marginTop: 12 }}>
+        Site info
+      </div>
+      <div className="panel-photos">
+        {si.photos.map((p, i) => (
+          <div className="panel-photo" key={i}>
+            <img src={p} alt={`site photo ${i + 1}`} />
+            <button
+              className="panel-photo-del"
+              title="Remove photo"
+              onClick={() => updateSiteInfo({ photos: si.photos.filter((_, j) => j !== i) })}
+            >
+              <X size={11} />
+            </button>
+          </div>
+        ))}
+        <label className="panel-photo add" title="Add a location photo">
+          <ImagePlus size={16} />
+          <input
+            type="file"
+            accept="image/png,image/jpeg"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) void addPhoto(f);
+            }}
+          />
+        </label>
+      </div>
+      <label>Hours</label>
+      <textarea
+        placeholder={"Mon–Thu 10:00–02:00\nFri–Sun 24h"}
+        value={hoursDraft ?? si.hours}
+        onChange={(e) => setHoursDraft(e.target.value)}
+        onBlur={() => {
+          if (hoursDraft !== null && hoursDraft !== si.hours) updateSiteInfo({ hours: hoursDraft });
+          setHoursDraft(null);
+        }}
+        rows={3}
+      />
 
       {underlay && (
         <div className="underlay-sec">

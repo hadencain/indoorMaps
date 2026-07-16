@@ -2772,3 +2772,58 @@ button.wide.ghost {
   color: #2fbf71;
   margin-bottom: 8px;
 }
+
+.panel-photos {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  flex: none;
+  margin-bottom: 8px;
+}
+.panel-photo {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.panel-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.panel-photo-del {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: rgba(11, 13, 16, 0.85);
+  border: 1px solid var(--line-2);
+  color: var(--dim);
+  cursor: pointer;
+}
+.panel-photo:hover .panel-photo-del {
+  display: flex;
+}
+.panel-photo-del:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.panel-photo.add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  color: var(--dim);
+  cursor: pointer;
+}
+.panel-photo.add:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
