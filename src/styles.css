@@ -2686,3 +2686,16 @@ button.wide.ghost {
 .review-row.sev-info .review-glyph {
   color: var(--dim);
 }
+
+.floorpill-add {
+  background: var(--panel-2);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.floorpill-add:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}

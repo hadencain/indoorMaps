@@ -23,6 +23,8 @@ export default function TopBar() {
   const canRedo = useStore((s) => s.future.length > 0);
   const ordinal = useStore((s) => s.ordinal);
   const setOrdinal = useStore((s) => s.setOrdinal);
+  const addLevel = useStore((s) => s.addLevel);
+  const reopenGuide = useStore((s) => s.reopenGuide);
   const planWidth = useStore((s) => s.planWidth);
   const setPlanWidth = useStore((s) => s.setPlanWidth);
   const importSvgText = useStore((s) => s.importSvgText);
@@ -135,6 +137,11 @@ export default function TopBar() {
             {lv.name}
           </button>
         ))}
+        {mode === "edit" && (
+          <button className="floorpill-add" title="Add a floor" onClick={addLevel}>
+            +
+          </button>
+        )}
       </div>
       <div className="datamenu">
         <button className="datamenu-trigger" onClick={() => setOpen((v) => !v)}>
@@ -181,6 +188,17 @@ export default function TopBar() {
                     }}
                   />
                 </label>
+                {userProperties.some((u) => u.id === propertyId) && (
+                  <button
+                    className="dm-item"
+                    onClick={() => {
+                      reopenGuide(propertyId);
+                      setOpen(false);
+                    }}
+                  >
+                    Setup guide
+                  </button>
+                )}
               </>
             )}
             <button className="dm-item" onClick={exportBuildingFile}>

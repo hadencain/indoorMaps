@@ -88,6 +88,9 @@ const LAYERS_KEY = "indoormaps:layers:v1";
 // Operator/display prefs (current mode + which amenity kinds are shown). Own key
 // so the display filter never rides along with a shared building export.
 const DISPLAY_KEY = "indoormaps:display:v1";
+// Setup-guide dismissal, per property. Own key — dismissal is a per-browser
+// UI preference, never part of a shared building/GeoJSON export.
+const GUIDE_KEY = "indoormaps:guide:v1";
 
 type AmenityFilter = Record<AmenityKind, boolean>;
 const allAmenities = (on: boolean): AmenityFilter => {
@@ -152,6 +155,25 @@ function loadLayers(): LayerVisibility {
     /* fall through */
   }
   return { ...DEFAULT_LAYERS };
+}
+
+function loadGuideDismissed(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(GUIDE_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as Record<string, unknown>;
+      if (p && typeof p === "object") {
+        const out: Record<string, boolean> = {};
+        for (const k of Object.keys(p)) {
+          if (typeof p[k] === "boolean") out[k] = p[k] as boolean;
+        }
+        return out;
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+  return {};
 }
 
 /** The pristine building a property resets/falls back to: a demo's shipped
@@ -277,12 +299,16 @@ interface State {
   importMsg: string | null;
   draftCategory: Category;
   searchQuery: string;
+  /** Per-property setup-guide dismissal (propertyId -> dismissed), persisted. */
+  guideDismissed: Record<string, boolean>;
 
   setTool: (t: Tool) => void;
   setMode: (m: Mode) => void;
   setProperty: (id: string) => void;
   createProperty: (name: string, underlay: RasterUnderlay | null) => void;
   deleteProperty: (id: string) => void;
+  dismissGuide: (propertyId: string) => void;
+  reopenGuide: (propertyId: string) => void;
   toggleAmenityKind: (k: AmenityKind) => void;
   setAllAmenityKinds: (on: boolean) => void;
   setHighlightedPatrol: (id: string | null) => void;
@@ -300,6 +326,8 @@ interface State {
   setPlanWidth: (n: number) => void;
 
   addRoom: (polygon: MetreXY[], ordinal: number) => void;
+  /** Append a new level (next ordinal, default name), then switch to it. */
+  addLevel: () => void;
   moveDoor: (doorId: string, at: MetreXY) => void;
   setOpeningKind: (openingId: string, kind: "door" | "entrance") => void;
   toggleOpeningKind: (openingId: string) => void;
@@ -463,6 +491,7 @@ export const useStore = create<State>((set, get) => {
     draftCategory: "room",
     searchQuery: "",
     flyTarget: null,
+    guideDismissed: loadGuideDismissed(),
 
     setTool: (t) =>
       set((s) => ({
@@ -605,6 +634,15 @@ export const useStore = create<State>((set, get) => {
       set({ userProperties });
     },
 
+    dismissGuide: (propertyId) =>
+      set((s) => ({ guideDismissed: { ...s.guideDismissed, [propertyId]: true } })),
+    reopenGuide: (propertyId) =>
+      set((s) => {
+        const next = { ...s.guideDismissed };
+        delete next[propertyId];
+        return { guideDismissed: next };
+      }),
+
     toggleAmenityKind: (k) => set((s) => ({ amenityFilter: { ...s.amenityFilter, [k]: !s.amenityFilter[k] } })),
     setAllAmenityKinds: (on) => set({ amenityFilter: allAmenities(on) }),
     setHighlightedPatrol: (id) => set((s) => ({ highlightedPatrolId: s.highlightedPatrolId === id ? null : id })),
@@ -654,6 +692,15 @@ export const useStore = create<State>((set, get) => {
             : b.openings,
         };
       });
+    },
+
+    addLevel: () => {
+      const next = Math.max(...get().building.levels.map((l) => l.ordinal)) + 1;
+      commit((b) => ({
+        ...b,
+        levels: [...b.levels, { ordinal: next, name: `Floor ${b.levels.length + 1}` }],
+      }));
+      get().setOrdinal(next);
     },
 
     moveDoor: (doorId, at) =>
@@ -1598,6 +1645,16 @@ useStore.subscribe((s, prev) => {
   if (s.layers === prev.layers) return;
   try {
     localStorage.setItem(LAYERS_KEY, JSON.stringify(s.layers));
+  } catch {
+    /* storage unavailable — non-fatal */
+  }
+});
+
+// Setup-guide dismissal persists under its own key, separate from the building.
+useStore.subscribe((s, prev) => {
+  if (s.guideDismissed === prev.guideDismissed) return;
+  try {
+    localStorage.setItem(GUIDE_KEY, JSON.stringify(s.guideDismissed));
   } catch {
     /* storage unavailable — non-fatal */
   }
