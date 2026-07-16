@@ -1653,6 +1653,11 @@ function frameBuilding(map: maplibregl.Map, building: Building): void {
   if (b.isEmpty())
     for (const u of building.underlays ?? [])
       if (u.dataUrl) for (const c of underlayCoordinates(u, building.origin)) b.extend(c);
+  if (b.isEmpty())
+    for (const v of building.vectorUnderlays ?? [])
+      for (const polyline of v.polylines)
+        for (const [x, y] of polyline)
+          b.extend(m2ll(building.origin, x, y));
   if (!b.isEmpty()) map.fitBounds(b, { padding: 60, duration: 0 });
   else map.jumpTo({ center: m2ll(building.origin, 20, 15), zoom: 16 });
 }
