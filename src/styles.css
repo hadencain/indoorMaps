@@ -2608,3 +2608,23 @@ button.wide.ghost {
   align-items: center;
   gap: 6px;
 }
+
+/* Occupant anchor dot: where the tenant's label sits (drag to move). */
+.occ-anchor {
+  width: 12px;
+  height: 12px;
+  background: #35e0c0;
+  border: 2px solid #05201b;
+  border-radius: 50%;
+  cursor: grab;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  position: relative;
+}
+.occ-anchor:active {
+  cursor: grabbing;
+}
+.occ-anchor::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+}

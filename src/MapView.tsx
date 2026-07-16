@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import type { Building, MetreXY, Category, LngLat, RasterUnderlay } from "./types";
+import type { Building, MetreXY, Category, LngLat, RasterUnderlay, Occupant } from "./types";
 import type { FC } from "./render";
 import { unitsToGeoJSON, patrolsToGeoJSON, fixturesToGeoJSON, footprintsToGeoJSON } from "./render";
 import { INCIDENT_COLORS } from "./ui/panels/IncidentPanel";
@@ -14,7 +14,7 @@ import {
   bbox,
   polygonCentroid,
 } from "./geo";
-import { rankCamerasForPoint } from "./coverage";
+import { rankCamerasForPoint, pointInRing } from "./coverage";
 import { doorAdjacency, floorHealth } from "./interaction/health";
 import type { VisibilityPolygon } from "./coverage";
 import { gridToGeoJSON } from "./render";
@@ -30,6 +30,7 @@ import OperatorEdgePanels from "./ui/OperatorEdgePanels";
 import { bindDrawing, type DrawHandle, type DrawTool, SNAP_PX } from "./interaction/draw";
 import { snapDrawPoint, metresPerPixel } from "./interaction/snapping";
 import { translateEdge } from "./interaction/edit";
+import { occupantAnchor } from "./occupants";
 
 export type { DrawTool } from "./interaction/draw";
 
@@ -77,6 +78,7 @@ export default function MapView() {
   const incidentMode = activeTool === "incident";
   const patrolMode = activeTool === "patrol";
   const inspectMode = activeTool === "inspect";
+  const selectTool = activeTool === "select";
   const routeLines = geom?.lines ?? EMPTY;
   const routePoints = geom?.points ?? [];
 
@@ -106,6 +108,7 @@ export default function MapView() {
   const onCommitPatrol = useStore((s) => s.commitPatrol);
   const onCancelPatrol = useStore((s) => s.cancelPatrol);
   const onSetProbe = useStore((s) => s.setProbe);
+  const onSetOccupantAnchor = useStore((s) => s.setOccupantAnchor);
   const suggestions = useStore((s) => s.suggestions);
   const patrolPlayback = useStore((s) => s.patrolPlayback);
   const onAcceptSuggestion = useStore((s) => s.acceptSuggestion);
@@ -162,6 +165,7 @@ export default function MapView() {
     probe,
     onSetProbe,
     layers,
+    onSetOccupantAnchor,
   });
   live.current = {
     building,
@@ -205,6 +209,7 @@ export default function MapView() {
     probe,
     onSetProbe,
     layers,
+    onSetOccupantAnchor,
   };
 
   // Initialise the map once.
@@ -831,6 +836,12 @@ export default function MapView() {
     if (layers.labels) {
       const areaById = new Map(building.units.map((u) => [u.id, polygonArea(u.polygon)]));
       const unitById = new Map(building.units.map((u) => [u.id, u]));
+      const occByUnit = new Map<string, Occupant[]>();
+      for (const o of building.occupants ?? []) {
+        const arr = occByUnit.get(o.unitId);
+        if (arr) arr.push(o);
+        else occByUnit.set(o.unitId, [o]);
+      }
       for (const f of unitsToGeoJSON(building).features) {
         const props = f.properties as {
           id: string;
@@ -841,6 +852,24 @@ export default function MapView() {
         // Skip circulation + tiny vertical cores — their labels only collide
         // (the ↕ transition markers already identify them).
         if (props.ordinal !== ordinal || props.category === "corridor" || props.category === "stairs" || props.category === "elevator") continue;
+        const occs = unitById.get(props.id) ? occByUnit.get(props.id) ?? [] : [];
+        if (occs.length > 0) {
+          // Occupied: the business name IS the display name — one label per
+          // occupant at its anchor; the unit's space label stays panel-only.
+          const uu = unitById.get(props.id)!;
+          const [bx0, , bx1] = bbox(uu.polygon);
+          for (const o of occs) {
+            const at = occupantAnchor(building, o);
+            const el = labelEl(o.name, "label");
+            el.dataset.wm = String(Math.max(1, bx1 - bx0));
+            markersRef.current.push(
+              new maplibregl.Marker({ element: el })
+                .setLngLat(m2ll(building.origin, at[0], at[1]))
+                .addTo(map),
+            );
+          }
+          continue;
+        }
         const c = ringCentroid(
           (f.geometry as GeoJSON.Polygon).coordinates[0] as [number, number][],
         );
@@ -908,6 +937,41 @@ export default function MapView() {
           onToggleOpeningKind(op.id);
         });
         markersRef.current.push(marker);
+      }
+    }
+
+    // Occupant anchor dots: only while a unit is selected under the Select
+    // tool in edit mode — drag moves where that tenant's label sits. Clamped
+    // inside the owner polygon (project to the nearest wall point outside).
+    if (mode === "edit" && selectTool && selectedId) {
+      const u = building.units.find((x) => x.id === selectedId);
+      if (u && u.ordinal === ordinal) {
+        for (const o of (building.occupants ?? []).filter((x) => x.unitId === u.id)) {
+          const at = occupantAnchor(building, o);
+          const el = labelEl("", "occ-anchor");
+          el.title = `${o.name} — drag to place its label`;
+          const marker = new maplibregl.Marker({ element: el, draggable: true })
+            .setLngLat(m2ll(building.origin, at[0], at[1]))
+            .addTo(map);
+          marker.on("drag", () => {
+            const ll = marker.getLngLat();
+            const p = ll2m(live.current.building.origin, ll.lng, ll.lat);
+            const owner = live.current.building.units.find((x) => x.id === o.unitId);
+            if (!owner) return;
+            if (!pointInRing(p, owner.polygon)) {
+              const inside = nearestPointOnPolygon(p, owner.polygon);
+              marker.setLngLat(m2ll(live.current.building.origin, inside[0], inside[1]));
+            }
+          });
+          marker.on("dragend", () => {
+            const ll = marker.getLngLat();
+            let p = ll2m(live.current.building.origin, ll.lng, ll.lat);
+            const owner = live.current.building.units.find((x) => x.id === o.unitId);
+            if (owner && !pointInRing(p, owner.polygon)) p = nearestPointOnPolygon(p, owner.polygon);
+            live.current.onSetOccupantAnchor(o.id, p);
+          });
+          markersRef.current.push(marker);
+        }
       }
     }
 
@@ -1204,7 +1268,7 @@ export default function MapView() {
     // Freshly-rebuilt markers need their zoom-dependent state applied now —
     // the zoom listener alone only covers zoom changes, not rebuilds.
     updateZoomDeclutter();
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter, suggestions, onAcceptSuggestion, onRejectSuggestion, mode]);
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter, suggestions, onAcceptSuggestion, onRejectSuggestion, mode, selectTool]);
 
   // Patrol highlight (display mode): emphasize the selected route, dim the rest.
   // Data-driven paint keyed on the feature `id` (patrolsToGeoJSON tags each line).
