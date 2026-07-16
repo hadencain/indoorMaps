@@ -1485,7 +1485,7 @@ export const useStore = create<State>((set, get) => {
       set((s) => {
         if (s.past.length === 0) return {};
         const prev = s.past[s.past.length - 1];
-        return {
+        const patch: any = {
           building: prev,
           past: s.past.slice(0, -1),
           future: [s.building, ...s.future].slice(0, HISTORY_LIMIT),
@@ -1494,6 +1494,11 @@ export const useStore = create<State>((set, get) => {
           selectedCameraId: null,
           selectedIncidentId: null,
         };
+        // Clamp ordinal to an existing level if the current one was deleted.
+        if (!prev.levels.some((l) => l.ordinal === s.ordinal)) {
+          patch.ordinal = prev.levels[0]?.ordinal ?? 0;
+        }
+        return patch;
       });
     },
 
@@ -1502,7 +1507,7 @@ export const useStore = create<State>((set, get) => {
       set((s) => {
         if (s.future.length === 0) return {};
         const next = s.future[0];
-        return {
+        const patch: any = {
           building: next,
           past: [...s.past, s.building].slice(-HISTORY_LIMIT),
           future: s.future.slice(1),
@@ -1511,6 +1516,11 @@ export const useStore = create<State>((set, get) => {
           selectedCameraId: null,
           selectedIncidentId: null,
         };
+        // Clamp ordinal to an existing level if the current one was deleted.
+        if (!next.levels.some((l) => l.ordinal === s.ordinal)) {
+          patch.ordinal = next.levels[0]?.ordinal ?? 0;
+        }
+        return patch;
       });
     },
 
