@@ -158,8 +158,8 @@ describe("reviewFloor", () => {
       { a: "a", b: "up", name: "Stair OK" }, // fine
     ];
     const issues = reviewFloor(b, 0);
-    expect(issues.find((i) => i.id === "dangling-vertical:Elevator A")?.severity).toBe("error");
-    expect(issues.find((i) => i.id === "flat-vertical:Flat Link")?.severity).toBe("warn");
+    expect(issues.find((i) => i.id === "dangling-vertical:a:ghost")?.severity).toBe("error");
+    expect(issues.find((i) => i.id === "flat-vertical:a:b")?.severity).toBe("warn");
     expect(issues.some((i) => i.message.includes("Stair OK"))).toBe(false);
   });
 

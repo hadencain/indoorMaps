@@ -146,7 +146,7 @@ export function reviewFloor(building: Building, ordinal: number): ReviewIssue[] 
     if (!a || !b) {
       const resolved = a ?? b;
       issues.push({
-        id: `dangling-vertical:${v.name}`,
+        id: `dangling-vertical:${v.a}:${v.b}`,
         severity: "error",
         message: `Vertical "${v.name}" references a missing unit`,
         unitId: resolved?.id,
@@ -154,7 +154,7 @@ export function reviewFloor(building: Building, ordinal: number): ReviewIssue[] 
       });
     } else if (a.ordinal === b.ordinal) {
       issues.push({
-        id: `flat-vertical:${v.name}`,
+        id: `flat-vertical:${v.a}:${v.b}`,
         severity: "warn",
         message: `Vertical "${v.name}" links two units on the same floor`,
       });
