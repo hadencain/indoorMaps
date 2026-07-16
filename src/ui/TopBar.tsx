@@ -38,6 +38,7 @@ export default function TopBar() {
   const exportCameraIndex = useStore((s) => s.exportCameraIndex);
   const loadGeoJSONText = useStore((s) => s.loadGeoJSONText);
   const exportBuildingFile = useStore((s) => s.exportBuildingFile);
+  const exportViewer = useStore((s) => s.exportViewer);
   const importBuildingFileText = useStore((s) => s.importBuildingFileText);
   const resetBuilding = useStore((s) => s.resetBuilding);
   const importMsg = useStore((s) => s.importMsg);
@@ -234,6 +235,9 @@ export default function TopBar() {
             )}
             <button className="dm-item" onClick={exportBuildingFile}>
               Save building file (JSON)…
+            </button>
+            <button className="dm-item" onClick={exportViewer}>
+              Export shareable viewer (.html)…
             </button>
             <button className="dm-item" onClick={exportGeoJSON}>
               Export GeoJSON

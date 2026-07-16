@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:viewer": "vite build --config vite.viewer.config.ts && node scripts/build-viewer-template.mjs",
     "preview": "vite preview",
     "test": "vitest run"
   },
