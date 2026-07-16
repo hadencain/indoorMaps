@@ -23,6 +23,10 @@ describe("isStepFreeVertical", () => {
     expect(isStepFreeVertical({ a: "esc-0", b: "esc-1", name: "Escalator Bank A" }, us)).toBe(false));
   it("ramp by name is step-free", () =>
     expect(isStepFreeVertical({ a: "elevA-0", b: "elevA-1", name: "Accessible Ramp" }, us)).toBe(true));
+  it("'Upstairs Elevator' with elevator endpoints IS step-free (no false match on substring)", () =>
+    expect(isStepFreeVertical({ a: "elevA-0", b: "elevA-1", name: "Upstairs Elevator" }, us)).toBe(true));
+  it("'Grand Stair' with elevator endpoints is NOT step-free (word boundary still catches legitimate stair)", () =>
+    expect(isStepFreeVertical({ a: "elevA-0", b: "elevA-1", name: "Grand Stair" }, us)).toBe(false));
 });
 
 describe("buildGraph stepFree option", () => {
