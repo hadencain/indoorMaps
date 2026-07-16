@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import type { Building, MetreXY, Category, LngLat, RasterUnderlay, Occupant } from "./types";
 import type { FC } from "./render";
@@ -113,6 +113,9 @@ export default function MapView() {
   const patrolPlayback = useStore((s) => s.patrolPlayback);
   const onAcceptSuggestion = useStore((s) => s.acceptSuggestion);
   const onRejectSuggestion = useStore((s) => s.rejectSuggestion);
+  // One health pass per building/floor change — feeds the on-canvas badges and
+  // the floor-warn chip (was computed twice per render).
+  const health = useMemo(() => floorHealth(building, ordinal), [building, ordinal]);
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
@@ -1249,7 +1252,6 @@ export default function MapView() {
     // Authoring-health badges (edit mode): rooms with no door can't route.
     // Ambient signal only — the Review panel (P4) will list these as a worklist.
     if (mode === "edit" && drawTool === "none") {
-      const health = floorHealth(building, ordinal);
       const unitById2 = new Map(building.units.map((u) => [u.id, u]));
       for (const id of health.doorlessRoomIds) {
         const u = unitById2.get(id);
@@ -1268,7 +1270,7 @@ export default function MapView() {
     // Freshly-rebuilt markers need their zoom-dependent state applied now —
     // the zoom listener alone only covers zoom changes, not rebuilds.
     updateZoomDeclutter();
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter, suggestions, onAcceptSuggestion, onRejectSuggestion, mode, selectTool]);
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter, suggestions, onAcceptSuggestion, onRejectSuggestion, mode, selectTool, health]);
 
   // Patrol highlight (display mode): emphasize the selected route, dim the rest.
   // Data-driven paint keyed on the feature `id` (patrolsToGeoJSON tags each line).
@@ -1387,7 +1389,7 @@ export default function MapView() {
           {showGrid && <span>snapping to {gridSize} m grid</span>}
         </div>
       )}
-      {mode === "edit" && floorHealth(building, ordinal).missingCorridor && (
+      {mode === "edit" && health.missingCorridor && (
         <div className="floor-warn">
           No corridor on this floor — doors have nowhere to route. Draw a corridor
           (Rectangle/Polygon, category "Corridor").
