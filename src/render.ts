@@ -1,4 +1,4 @@
-import type { Building, Graph, LngLat, MetreXY } from "./types";
+import type { Building, Category, Graph, LngLat, MetreXY } from "./types";
 import { polygonRing, distM, m2ll, bbox, pointsToLL } from "./geo";
 import { functionBucket } from "./categories";
 import { occupantNamesByUnit } from "./occupants";
@@ -6,6 +6,45 @@ import { collectWalls } from "./coverage";
 import { losShortcut, roundCorners } from "./route-smooth";
 
 export type FC = GeoJSON.FeatureCollection;
+
+// Extrusion heights (display-only synthesis for the 3D view — no data field;
+// per-unit custom heights are a future additive field). Structural/enclosed
+// categories stand full height; corridor/lobby are low circulation slabs;
+// outside is flat (never extruded).
+export const UNIT_HEIGHT_M: Record<Category, number> = {
+  room: 3.2,
+  office: 3.2,
+  retail: 3.2,
+  restroom: 3.2,
+  storage: 3.2,
+  mechanical: 3.2,
+  stairs: 3.2,
+  elevator: 3.2,
+  corridor: 0.15,
+  lobby: 0.15,
+  outside: 0,
+};
+
+// Fixture extrusion heights by kind (display-only synthesis, same rationale
+// as UNIT_HEIGHT_M). Kinds not listed here fall back to DEFAULT_FIXTURE_HEIGHT_M.
+export const FIXTURE_HEIGHT_M: Record<string, number> = {
+  slot: 1.6,
+  bar: 1.1,
+  counter: 1.1,
+  blackjack: 0.9,
+  baccarat: 0.9,
+  poker: 0.9,
+  roulette: 0.9,
+  craps: 0.9,
+  wheel: 0.9,
+  stage: 0.6,
+  planter: 0.5,
+  seating: 0.45,
+  car: 1.4,
+  parking: 0,
+};
+
+export const DEFAULT_FIXTURE_HEIGHT_M = 0.8;
 
 /** Grid lines (lng/lat) spanning the building footprint + margin, every `size` m. */
 export function gridToGeoJSON(b: Building, size: number): FC {
@@ -58,7 +97,12 @@ export function fixturesToGeoJSON(b: Building): FC {
     type: "FeatureCollection",
     features: (b.fixtures ?? []).map((f) => ({
       type: "Feature",
-      properties: { id: f.id, ordinal: f.ordinal, kind: f.kind },
+      properties: {
+        id: f.id,
+        ordinal: f.ordinal,
+        kind: f.kind,
+        heightM: FIXTURE_HEIGHT_M[f.kind] ?? DEFAULT_FIXTURE_HEIGHT_M,
+      },
       geometry: { type: "Polygon", coordinates: [polygonRing(b.origin, f.polygon)] },
     })),
   };
@@ -97,6 +141,8 @@ export function unitsToGeoJSON(b: Building): FC {
         // Access-control level for the secure-perimeter `match` filter (P8).
         // Default "public" so the filter has a value on every feature.
         security: u.security ?? "public",
+        // Extrusion height for the 3D view's fill-extrusion layer (Phase A).
+        heightM: UNIT_HEIGHT_M[u.category],
       },
       geometry: { type: "Polygon", coordinates: [polygonRing(b.origin, u.polygon)] },
     })),
