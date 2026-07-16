@@ -9,7 +9,6 @@ import {
   m2ll,
   polygonRing,
   polygonArea,
-  snapPoint,
   nearestPointOnPolygon,
   bbox,
   polygonCentroid,
@@ -1116,9 +1115,14 @@ export default function MapView() {
       if (cameraMode) {
         marker.on("dragend", () => {
           const ll = marker.getLngLat();
-          let at = ll2m(live.current.building.origin, ll.lng, ll.lat);
-          if (live.current.showGrid) at = snapPoint(at, live.current.gridSize);
-          live.current.onMoveCamera(cam.id, at);
+          const l = live.current;
+          const raw = ll2m(l.building.origin, ll.lng, ll.lat);
+          const tolM = SNAP_PX * metresPerPixel(map.getZoom(), map.getCenter().lat);
+          const polygons = l.building.units
+            .filter((x) => x.ordinal === l.ordinal)
+            .map((x) => x.polygon);
+          const r = snapDrawPoint(raw, { polygons, gridSize: l.showGrid ? l.gridSize : null, tolM });
+          l.onMoveCamera(cam.id, r.point);
         });
         el.addEventListener("dblclick", (ev) => {
           ev.stopPropagation();
@@ -1221,9 +1225,14 @@ export default function MapView() {
         if (incidentMode) {
           marker.on("dragend", () => {
             const ll = marker.getLngLat();
-            let at = ll2m(live.current.building.origin, ll.lng, ll.lat);
-            if (live.current.showGrid) at = snapPoint(at, live.current.gridSize);
-            live.current.onMoveIncident(inc.id, at);
+            const l = live.current;
+            const raw = ll2m(l.building.origin, ll.lng, ll.lat);
+            const tolM = SNAP_PX * metresPerPixel(map.getZoom(), map.getCenter().lat);
+            const polygons = l.building.units
+              .filter((x) => x.ordinal === l.ordinal)
+              .map((x) => x.polygon);
+            const r = snapDrawPoint(raw, { polygons, gridSize: l.showGrid ? l.gridSize : null, tolM });
+            l.onMoveIncident(inc.id, r.point);
           });
         }
         markersRef.current.push(marker);
