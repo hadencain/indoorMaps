@@ -2563,3 +2563,48 @@ button.wide.ghost {
   height: 15px;
   margin-right: 2px;
 }
+
+/* Occupant rows in the properties panel */
+.occrow .occ-head {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #10161e;
+  border: 1px solid var(--line);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.occrow.open .occ-head {
+  border-color: var(--accent);
+}
+.occrow .occ-cat {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.occ-editor {
+  padding: 4px 0 8px 8px;
+  border-left: 1px solid var(--line);
+  margin: 4px 0 6px 4px;
+}
+.occ-logo {
+  max-width: 96px;
+  max-height: 48px;
+  display: block;
+  border: 1px solid var(--line);
+}
+.occ-logo-mini {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+.occ-logo-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

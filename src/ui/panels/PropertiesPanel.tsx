@@ -1,12 +1,26 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStore } from "../../store";
 import { bbox, polygonArea, polygonPerimeter } from "../../geo";
 import { formatArea, formatLength } from "../../format";
-import { CATEGORY_ORDER, CATEGORY_LABELS } from "../../categories";
+import { CATEGORY_ORDER, CATEGORY_LABELS, isSpace } from "../../categories";
 import { rankCamerasForUnitWithRings } from "../../security/coverage-link";
 import { useVisibility } from "../visibility";
 import { SECURITY_LEVELS, SECURITY_LABELS, SECURITY_COLORS, securityOf } from "../security";
-import type { Category, SecurityLevel } from "../../types";
+import { occupantsForUnit } from "../../occupants";
+import { selectableUnits } from "../../building";
+import { fileToSmallDataUrl } from "../img";
+import type { Category, SecurityLevel, Occupant, OccupantCategory, Unit } from "../../types";
+
+export const OCCUPANT_CATEGORY_LABELS: Record<OccupantCategory, string> = {
+  retail: "Retail",
+  dining: "Food & drink",
+  services: "Services",
+  entertainment: "Entertainment",
+  health: "Health",
+  office: "Office",
+  transit: "Transit",
+  other: "Other",
+};
 
 export default function PropertiesPanel() {
   const building = useStore((s) => s.building);
@@ -19,7 +33,9 @@ export default function PropertiesPanel() {
   const setSecurity = useStore((s) => s.setSecurity);
   const setSelectedCamera = useStore((s) => s.setSelectedCamera);
   const deleteUnit = useStore((s) => s.deleteUnit);
+  const addOccupant = useStore((s) => s.addOccupant);
   const { polys } = useVisibility();
+  const [expandedOcc, setExpandedOcc] = useState<string | null>(null);
   // Cameras that see this unit, ranked by view quality (best first). Built from
   // the SHARED active-floor visibility (useVisibility's per-camera cache) so it
   // never re-runs the full-floor ray-cast on a rename keystroke, and it recomputes
@@ -39,6 +55,7 @@ export default function PropertiesPanel() {
       </div>
     );
   const [x0, y0, x1, y1] = bbox(u.polygon);
+  const occs = occupantsForUnit(building, u.id);
 
   return (
     <div className="panel">
@@ -100,6 +117,24 @@ export default function PropertiesPanel() {
         </div>
       )}
 
+      {isSpace(u.category) && (
+        <>
+          <div className="panel-subtitle" style={{ marginTop: 12 }}>
+            Occupants
+          </div>
+          {occs.length === 0 && <p className="hint">Vacant.</p>}
+          <div className="roomlist">
+            {occs.map((o) => (
+              <OccupantRow key={o.id} occ={o} unit={u} expanded={expandedOcc === o.id}
+                onToggle={() => setExpandedOcc(expandedOcc === o.id ? null : o.id)} />
+            ))}
+          </div>
+          <button className="wide ghost" style={{ marginTop: 6 }} onClick={() => addOccupant(u.id)}>
+            + Add occupant
+          </button>
+        </>
+      )}
+
       <button
         className={`wide ${activeTool === "vertex" ? "active" : ""}`}
         style={{ marginTop: 8 }}
@@ -110,6 +145,111 @@ export default function PropertiesPanel() {
       <button className="wide danger" style={{ marginTop: 8 }} onClick={() => deleteUnit(u.id)}>
         Delete unit
       </button>
+    </div>
+  );
+}
+
+function OccupantRow({
+  occ,
+  unit,
+  expanded,
+  onToggle,
+}: {
+  occ: Occupant;
+  unit: Unit;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const building = useStore((s) => s.building);
+  const updateOccupant = useStore((s) => s.updateOccupant);
+  const deleteOccupant = useStore((s) => s.deleteOccupant);
+  const moveOccupant = useStore((s) => s.moveOccupant);
+  const setOccupantAnchor = useStore((s) => s.setOccupantAnchor);
+  // Same-floor tenant-swap targets; exclude the current unit (no-op move).
+  const moveTargets = selectableUnits(building).filter(
+    (r) => r.ordinal === unit.ordinal && r.id !== unit.id,
+  );
+  return (
+    <div className={`occrow ${expanded ? "open" : ""}`}>
+      <div className="roomrow">
+        <button className="occ-head" onClick={onToggle} title={expanded ? "Collapse" : "Edit occupant"}>
+          {occ.logo && <img className="occ-logo-mini" src={occ.logo} alt="" />}
+          <span className="vlabel">{occ.name || "(unnamed)"}</span>
+          <span className="occ-cat">{OCCUPANT_CATEGORY_LABELS[occ.category]}</span>
+        </button>
+        <button className="del" title="Delete occupant" onClick={() => deleteOccupant(occ.id)}>
+          ✕
+        </button>
+      </div>
+      {expanded && (
+        <div className="occ-editor">
+          <label>Name</label>
+          <input value={occ.name} onChange={(e) => updateOccupant(occ.id, { name: e.target.value })} />
+          <label>Category</label>
+          <select
+            value={occ.category}
+            onChange={(e) => updateOccupant(occ.id, { category: e.target.value as OccupantCategory })}
+          >
+            {(Object.keys(OCCUPANT_CATEGORY_LABELS) as OccupantCategory[]).map((c) => (
+              <option key={c} value={c}>
+                {OCCUPANT_CATEGORY_LABELS[c]}
+              </option>
+            ))}
+          </select>
+          <label>Hours</label>
+          <input
+            placeholder="Mon–Sat 10–9"
+            value={occ.hours ?? ""}
+            onChange={(e) => updateOccupant(occ.id, { hours: e.target.value || undefined })}
+          />
+          <label>Phone</label>
+          <input value={occ.phone ?? ""} onChange={(e) => updateOccupant(occ.id, { phone: e.target.value || undefined })} />
+          <label>Website</label>
+          <input value={occ.website ?? ""} onChange={(e) => updateOccupant(occ.id, { website: e.target.value || undefined })} />
+          <label>Logo</label>
+          {occ.logo ? (
+            <div className="occ-logo-row">
+              <img className="occ-logo" src={occ.logo} alt={`${occ.name} logo`} />
+              <button className="del" title="Remove logo" onClick={() => updateOccupant(occ.id, { logo: undefined })}>
+                ✕
+              </button>
+            </div>
+          ) : (
+            <input
+              type="file"
+              accept="image/*"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                try {
+                  const logo = await fileToSmallDataUrl(f, 320);
+                  updateOccupant(occ.id, { logo });
+                } catch {
+                  /* unreadable image — leave logo unset */
+                }
+                e.target.value = "";
+              }}
+            />
+          )}
+          <label>Move to unit</label>
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) moveOccupant(occ.id, e.target.value);
+            }}
+          >
+            <option value="">(same floor…)</option>
+            {moveTargets.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+          <button className="wide ghost" style={{ marginTop: 6 }} onClick={() => setOccupantAnchor(occ.id, null)}>
+            Reset label anchor to centroid
+          </button>
+        </div>
+      )}
     </div>
   );
 }
