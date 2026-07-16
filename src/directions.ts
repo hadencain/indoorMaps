@@ -27,6 +27,31 @@ function turnSuffix(angle: number): string {
   return "and continue straight";
 }
 
+/** True for the floor's corridor-hub centroid node — the node the LOS-smoothed
+ *  render line skips over when it has a clear shot past it (see losShortcut in
+ *  route-smooth.ts). Turn geometry and leg distances below skip it the same
+ *  way so prose matches the drawn line instead of the raw A* detour through
+ *  the hub. */
+function isHub(n: NodeMeta | undefined): boolean {
+  return !!n && n.kind === "unit" && n.category === "corridor";
+}
+
+/** xy of the next path node after index i, skipping a mid-path corridor-hub
+ *  node (never skips past the final node — arrival must stay anchored). */
+function turnTarget(path: string[], i: number, meta: (id: string) => NodeMeta | undefined): MetreXY | undefined {
+  let j = i + 1;
+  while (j < path.length - 1 && isHub(meta(path[j]))) j++;
+  return meta(path[j])?.xy;
+}
+
+/** xy of the path node before index i, skipping a mid-path corridor-hub node
+ *  immediately behind it (never skips past the first/start node). */
+function turnSource(path: string[], i: number, meta: (id: string) => NodeMeta | undefined): MetreXY | undefined {
+  let j = i - 1;
+  while (j > 0 && isHub(meta(path[j]))) j--;
+  return meta(path[j])?.xy;
+}
+
 /** Turn-by-turn steps from the RAW A* node path (unit/door/entrance metas) —
  *  never re-runs A*, never reads smoothed geometry. */
 export function routeSteps(graph: Graph, path: string[], building: Building): RouteStep[] {
@@ -56,7 +81,9 @@ export function routeSteps(graph: Graph, path: string[], building: Building): Ro
           at: node.xy,
         });
       } else if (prev && next) {
-        const angle = turnAngleDeg(prev.xy, node.xy, next.xy);
+        const sourceXY = turnSource(path, i, meta) ?? prev.xy;
+        const targetXY = turnTarget(path, i, meta) ?? next.xy;
+        const angle = turnAngleDeg(sourceXY, node.xy, targetXY);
         const suffix = turnSuffix(angle);
         const prefix =
           prev.kind === "unit" && prev.name ? `Exit ${prev.name} through the door` : "Go through the door";
@@ -101,7 +128,9 @@ export function routeSteps(graph: Graph, path: string[], building: Building): Ro
     }
 
     if (!prev) continue;
-    const d = Math.round((distM(prev.xy, node.xy) + distM(node.xy, next.xy)) / 5) * 5;
+    const legFrom = turnSource(path, i, meta) ?? prev.xy;
+    const legTo = turnTarget(path, i, meta) ?? next.xy;
+    const d = Math.round(distM(legFrom, legTo) / 5) * 5;
     if (d < 8) continue;
     steps.push({
       text: `Follow ${node.name ?? "the corridor"} for ~${d} m`,
