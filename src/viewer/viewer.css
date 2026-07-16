@@ -1,0 +1,494 @@
+/* Self-contained viewer stylesheet. Trimmed copy of the app's dark tokens +
+ * only the label/pin/amenity/panel rules the read-only viewer actually uses
+ * (see src/styles.css / src/ui/tokens.css for the full authoring set this
+ * was pulled from). System font stack only — no @fontsource import, so a
+ * file:// open never fetches anything. */
+
+:root {
+  --bg: #0b0d10;
+  --panel: #0d1116;
+  --panel-2: #10161e;
+  --line: #1e2733;
+  --line-2: #2c3a4c;
+  --text: #e8e8e8;
+  --dim: #8a96a5;
+  --accent: #00d7cd;
+  --danger: #ff5c5c;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --topbar: 48px;
+  --inspector: 300px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#viewer-root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* ---- shell layout ---- */
+.viewer-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.viewer-topbar {
+  flex: 0 0 var(--topbar);
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  padding: 0 var(--s4);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.wordmark {
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.viewer-topbar-spacer {
+  flex: 1;
+}
+
+.floorpills {
+  display: flex;
+  gap: var(--s1);
+}
+
+.floorpills button {
+  background: var(--panel-2);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  padding: 4px 12px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.floorpills button.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.unittoggle {
+  display: flex;
+}
+
+.unittoggle button {
+  width: 26px;
+  height: 28px;
+  font-size: 11px;
+  font-family: var(--font-sans);
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.unittoggle button.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.viewer-3d-btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-family: var(--font-sans);
+  background: var(--panel-2);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.viewer-3d-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.viewer-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.canvas-zone {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+}
+
+.viewer-inspector {
+  width: var(--inspector);
+  flex: 0 0 var(--inspector);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  overflow-y: auto;
+  padding: var(--s4);
+}
+
+.viewer-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: 14px;
+  text-align: center;
+  padding: var(--s4);
+}
+
+/* ---- panel / directory / route-finder ---- */
+.panel {
+  padding: 0;
+}
+
+.panel-title {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: var(--s3);
+}
+
+.panel-subtitle {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+
+.panel label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 10px 0 4px;
+}
+
+.panel select,
+.panel input {
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 7px 8px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+}
+
+.panel select:focus,
+.panel input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.hint {
+  margin-top: 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
+.readout {
+  font-size: 13px;
+  line-height: 1.9;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.readout .k {
+  display: inline-block;
+  width: 54px;
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.readout .warn {
+  color: var(--danger);
+}
+
+.route-steps {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.route-steps li::marker {
+  color: var(--accent);
+}
+
+/* ---- search box ---- */
+.searchbox {
+  position: relative;
+  margin-bottom: var(--s3);
+}
+
+.searchbox input {
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 6px 26px 6px 8px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+}
+
+.searchbox input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.searchclear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
+.searchclear:hover {
+  color: var(--accent);
+}
+
+/* ---- directory / route panel toggle ---- */
+.modetoggle {
+  display: flex;
+  border: 1px solid var(--line);
+  margin-bottom: var(--s4);
+}
+
+.modetoggle button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: var(--panel);
+  color: var(--dim);
+  border: none;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.modetoggle button + button {
+  border-left: 1px solid var(--line);
+}
+
+.modetoggle button.active {
+  background: var(--panel-2);
+  color: var(--accent);
+}
+
+/* ---- directory rows ---- */
+.roomlist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.roomrow {
+  display: flex;
+  gap: 6px;
+}
+
+.roomrow .occ-head {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+  font-size: 13px;
+  font-family: var(--font-sans);
+}
+
+.roomrow .occ-head:hover {
+  border-color: var(--accent);
+}
+
+.roomrow .occ-cat {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vlabel {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- MapLibre HTML markers ---- */
+.label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #cdd6e0;
+  text-shadow: 0 1px 3px #000;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.label-hidden {
+  display: none;
+}
+
+.pin {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  color: #05070a;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.pin-start {
+  background: #43d675;
+}
+
+.pin-end {
+  background: #ff5c5c;
+  color: #fff;
+}
+
+.pin-transition {
+  background: var(--accent);
+}
+
+/* Amenity POI badges — colored chips with per-kind pictograms (identity
+ * color + icon come inline from amenityBadgeStyle, shared with the app). */
+.amenity {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  color: #05070a;
+  background: #b9c2cc;
+  border: 1px solid #05070a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.amenity svg {
+  display: block;
+}
+
+.amenities-compact .amenity:not(.amenity-exit) {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.amenities-compact .amenity:not(.amenity-exit) svg {
+  display: none;
+}
+
+/* ---- compass overlay (3D) ---- */
+.compass {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 5;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(13, 17, 22, 0.9);
+  border: 1px solid var(--line);
+  color: var(--dim);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.compass:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.compass-arrow {
+  font-size: 10px;
+  color: var(--accent);
+  transition: transform 0.1s linear;
+}
+
+.compass-n {
+  font-size: 10px;
+  font-weight: 600;
+  margin-top: 1px;
+}
+
+/* Theme the MapLibre metric scale bar to the dark palette. */
+.maplibregl-ctrl-scale {
+  background: rgba(13, 17, 22, 0.8);
+  color: var(--text);
+  border: 2px solid var(--line);
+  border-top: none;
+  font-size: 10px;
+  padding: 0 5px;
+  font-family: var(--font-mono);
+}

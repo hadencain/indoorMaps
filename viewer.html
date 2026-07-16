@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>indoorMaps — viewer</title>
+  </head>
+  <body>
+    <div id="viewer-root"></div>
+    <!-- Sentinel: the export step (Task 3) replaces this element's text with
+         the visitor-safe building JSON. Empty in dev/main-build. -->
+    <script id="building-data" type="application/json"></script>
+    <script type="module" src="/src/viewer/main.tsx"></script>
+  </body>
+</html>
