@@ -404,6 +404,32 @@ EOF`;
     expect(parsed.result.layers.length).toBe(0); // no valid geometry, no layer emitted
   });
 
+  it("skips an ARC with center and radius but no angle codes 50/51 (malformed)", () => {
+    const malformedDxf = `0
+SECTION
+2
+ENTITIES
+0
+ARC
+8
+ARCLAYER
+10
+500.0
+20
+500.0
+40
+500.0
+0
+ENDSEC
+0
+EOF`;
+    const parsed = parseDxfText(malformedDxf);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.result.skipped.ARC).toBe(1);
+    expect(parsed.result.layers.length).toBe(0); // no valid geometry, no layer emitted
+  });
+
   it("ensures no NaN points appear in polylines from malformed geometry", () => {
     const allDxf = `0
 SECTION

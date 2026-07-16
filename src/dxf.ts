@@ -213,7 +213,7 @@ export function parseDxfText(
       }
       case "ARC": {
         const bucket = layerBucket(layersMap, entity.layer ?? "0");
-        if (!entity.center || typeof entity.center.x !== "number" || typeof entity.center.y !== "number" || typeof entity.radius !== "number" || !(entity.radius > 0)) {
+        if (!entity.center || typeof entity.center.x !== "number" || typeof entity.center.y !== "number" || typeof entity.radius !== "number" || !(entity.radius > 0) || typeof entity.startAngle !== "number" || typeof entity.endAngle !== "number") {
           skip("ARC");
           break;
         }
