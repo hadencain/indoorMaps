@@ -1,4 +1,4 @@
-import { Grid3x3, Ruler } from "lucide-react";
+import { Box, Grid3x3, Ruler } from "lucide-react";
 import { useStore } from "../store";
 import LayersControl from "./LayersControl";
 
@@ -11,6 +11,8 @@ export default function ViewControls() {
   const toggleDims = useStore((s) => s.toggleDims);
   const unit = useStore((s) => s.unit);
   const setUnit = useStore((s) => s.setUnit);
+  const view3d = useStore((s) => s.view3d);
+  const setView3d = useStore((s) => s.setView3d);
 
   return (
     <div className="viewctl">
@@ -31,6 +33,13 @@ export default function ViewControls() {
       )}
       <button className={showDims ? "active" : ""} title="Dimensions" onClick={toggleDims}>
         <Ruler size={15} />
+      </button>
+      <button
+        className={view3d ? "active" : ""}
+        title="3D view (tilt & rotate)"
+        onClick={() => setView3d(!view3d)}
+      >
+        <Box size={15} />
       </button>
       <div className="unittoggle">
         <button className={unit === "m" ? "active" : ""} onClick={() => setUnit("m")}>

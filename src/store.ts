@@ -99,12 +99,22 @@ const allAmenities = (on: boolean): AmenityFilter => {
   for (const k of ALL_AMENITY_KINDS) o[k] = on;
   return o;
 };
-function loadDisplay(): { mode: Mode; amenityFilter: AmenityFilter; propertyId: string } {
-  const base = { mode: "edit" as Mode, amenityFilter: allAmenities(true), propertyId: DEFAULT_PROPERTY_ID };
+function loadDisplay(): { mode: Mode; amenityFilter: AmenityFilter; propertyId: string; view3d: boolean } {
+  const base = {
+    mode: "edit" as Mode,
+    amenityFilter: allAmenities(true),
+    propertyId: DEFAULT_PROPERTY_ID,
+    view3d: false,
+  };
   try {
     const raw = localStorage.getItem(DISPLAY_KEY);
     if (raw) {
-      const p = JSON.parse(raw) as { mode?: unknown; amenityFilter?: Record<string, unknown>; propertyId?: unknown };
+      const p = JSON.parse(raw) as {
+        mode?: unknown;
+        amenityFilter?: Record<string, unknown>;
+        propertyId?: unknown;
+        view3d?: unknown;
+      };
       if (p.mode === "display" || p.mode === "edit") base.mode = p.mode;
       if (p.amenityFilter && typeof p.amenityFilter === "object")
         for (const k of ALL_AMENITY_KINDS)
@@ -115,6 +125,7 @@ function loadDisplay(): { mode: Mode; amenityFilter: AmenityFilter; propertyId: 
           loadUserProperties(localStorage).some((u) => u.id === p.propertyId))
       )
         base.propertyId = p.propertyId;
+      if (typeof p.view3d === "boolean") base.view3d = p.view3d;
     }
   } catch {
     /* fall through */
@@ -263,6 +274,9 @@ interface State {
   mode: Mode;
   // Which amenity kinds are shown (display-mode POI filter; also gates markers in edit).
   amenityFilter: AmenityFilter;
+  // 3D view preference (tilt + rotate + category-height extrusions). Persisted
+  // alongside mode/amenityFilter in the DISPLAY_KEY payload.
+  view3d: boolean;
   // The patrol route currently emphasized on the map (others dimmed). Session-only.
   highlightedPatrolId: string | null;
   selectedId: string | null;
@@ -313,6 +327,7 @@ interface State {
   reopenGuide: (propertyId: string) => void;
   toggleAmenityKind: (k: AmenityKind) => void;
   setAllAmenityKinds: (on: boolean) => void;
+  setView3d: (on: boolean) => void;
   setHighlightedPatrol: (id: string | null) => void;
   setDraftCategory: (c: Category) => void;
   setOrdinal: (o: number) => void;
@@ -472,6 +487,7 @@ export const useStore = create<State>((set, get) => {
     activeTool: DISPLAY0.mode === "display" ? "inspect" : "select",
     mode: DISPLAY0.mode,
     amenityFilter: DISPLAY0.amenityFilter,
+    view3d: DISPLAY0.view3d,
     highlightedPatrolId: null,
     selectedId: null,
     selectedIds: [],
@@ -655,6 +671,7 @@ export const useStore = create<State>((set, get) => {
 
     toggleAmenityKind: (k) => set((s) => ({ amenityFilter: { ...s.amenityFilter, [k]: !s.amenityFilter[k] } })),
     setAllAmenityKinds: (on) => set({ amenityFilter: allAmenities(on) }),
+    setView3d: (on) => set({ view3d: on }),
     setHighlightedPatrol: (id) => set((s) => ({ highlightedPatrolId: s.highlightedPatrolId === id ? null : id })),
     setDraftCategory: (c) => set({ draftCategory: c }),
     // Floor change clears floor-scoped transient state: a probe/selected camera
@@ -1732,11 +1749,17 @@ useStore.subscribe((s, prev) => {
 // Display prefs (mode + amenity-kind filter + active property) persist under
 // their own key.
 useStore.subscribe((s, prev) => {
-  if (s.mode === prev.mode && s.amenityFilter === prev.amenityFilter && s.propertyId === prev.propertyId) return;
+  if (
+    s.mode === prev.mode &&
+    s.amenityFilter === prev.amenityFilter &&
+    s.propertyId === prev.propertyId &&
+    s.view3d === prev.view3d
+  )
+    return;
   try {
     localStorage.setItem(
       DISPLAY_KEY,
-      JSON.stringify({ mode: s.mode, amenityFilter: s.amenityFilter, propertyId: s.propertyId }),
+      JSON.stringify({ mode: s.mode, amenityFilter: s.amenityFilter, propertyId: s.propertyId, view3d: s.view3d }),
     );
   } catch {
     /* storage unavailable — non-fatal */
