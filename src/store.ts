@@ -4,6 +4,7 @@ import type {
   MetreXY,
   Category,
   RasterUnderlay,
+  VectorUnderlay,
   Camera,
   CameraKind,
   SecurityLevel,
@@ -17,6 +18,7 @@ import type {
   Occupant,
   Opening,
 } from "./types";
+import type { DxfParseResult } from "./dxf";
 import { autoDoorsForRooms, doorForRoom, selectableUnits } from "./building";
 import { defaultNameFor, isSpace } from "./categories";
 import { parseSvgShapes } from "./svgImport";
@@ -248,6 +250,7 @@ let patSeq = 0;
 let viewSeq = 0;
 let occSeq = 0;
 let doorSeq = 0;
+let dxfSeq = 0;
 
 /** Transient click-to-camera probe result. NOT persisted, NOT routed through
  *  `commit`/undo — pure session UI state. `cameraIds` are the cameras whose
@@ -423,6 +426,17 @@ interface State {
   nudgeUnderlay: (ordinal: number, d: MetreXY) => void;
   setUnderlayWidth: (ordinal: number, widthM: number) => void;
   removeUnderlay: (ordinal: number) => void;
+  /** DXF/CAD import (Phase B): selected layers' polylines merge into ONE
+   *  vector underlay on the CURRENT floor (replacing any existing one there,
+   *  mirroring importRasterFile's replace semantics); convertLayers' closed
+   *  shapes become new units of `category`. A corridor conversion runs the
+   *  same retro-door pass addRoom uses. ONE commit; importMsg reports counts. */
+  importDxf: (
+    parsed: DxfParseResult,
+    opts: { layerNames: string[]; convertLayers: string[]; category: Category },
+  ) => void;
+  setVectorUnderlayOpacity: (ordinal: number, v: number) => void;
+  removeVectorUnderlay: (ordinal: number) => void;
   exportGeoJSON: () => void;
   loadGeoJSONText: (text: string) => void;
   exportBuildingFile: () => void;
@@ -1446,6 +1460,79 @@ export const useStore = create<State>((set, get) => {
       commit((b) => ({
         ...b,
         underlays: (b.underlays ?? []).filter((u) => u.ordinal !== ordinal),
+      })),
+
+    // DXF/CAD import (Phase B). Selected layers' linework merges into ONE
+    // VectorUnderlay for the current floor; convertLayers' closedShapes become
+    // new units. Everything — underlay replace, unit insertion, retro corridor
+    // doors — happens inside ONE commit() call, so the whole import is a
+    // single undo step.
+    importDxf: (parsed, opts) => {
+      const ord = get().ordinal;
+      const selectedNames = new Set(opts.layerNames);
+      const selectedLayers = parsed.layers.filter((l) => selectedNames.has(l.name));
+      const polylines = selectedLayers.flatMap((l) => l.polylines);
+      const stamp = Date.now();
+      const newUnits: Unit[] = [];
+      for (const layerName of opts.convertLayers) {
+        const layer = parsed.layers.find((l) => l.name === layerName);
+        if (!layer) continue;
+        layer.closedShapes.forEach((polygon, i) => {
+          newUnits.push({
+            id: `dxf-${stamp}-${dxfSeq++}`,
+            ordinal: ord,
+            name: `${layerName} ${i + 1}`,
+            category: opts.category,
+            polygon,
+          });
+        });
+      }
+      commit((b) => {
+        const rest = (b.vectorUnderlays ?? []).filter((v) => v.ordinal !== ord);
+        const underlay: VectorUnderlay = { ordinal: ord, name: "DXF import", polylines, opacity: 0.5 };
+        let next: Building = {
+          ...b,
+          vectorUnderlays: [...rest, underlay],
+          units: [...b.units, ...newUnits],
+        };
+        // Mirrors addRoom's corridor branch: a corridor converted from CAD
+        // linework can strand already-converted doorless rooms on the same
+        // floor (conversion bypasses addRoom's per-room doorForRoom call).
+        if (opts.category === "corridor" && newUnits.length > 0) {
+          const retro = autoDoorsForRooms(next, ord);
+          if (retro.length > 0) {
+            next = {
+              ...next,
+              openings: [
+                ...next.openings,
+                ...retro.map((r) => ({ id: `d-${r.unit}`, unit: r.unit, at: r.at })),
+              ],
+            };
+          }
+        }
+        return next;
+      });
+      const skippedParts = Object.entries(parsed.skipped)
+        .filter(([, n]) => n > 0)
+        .map(([t, n]) => `${n} ${t}`);
+      const skippedMsg = skippedParts.length > 0 ? `; skipped ${skippedParts.join(", ")}` : "";
+      set({
+        importMsg: `DXF: ${polylines.length} polylines, ${newUnits.length} units created${skippedMsg}`,
+      });
+    },
+
+    setVectorUnderlayOpacity: (ordinal, v) =>
+      commit((b) => ({
+        ...b,
+        vectorUnderlays: (b.vectorUnderlays ?? []).map((u) =>
+          u.ordinal === ordinal ? { ...u, opacity: Math.min(1, Math.max(0, v)) } : u,
+        ),
+      })),
+
+    removeVectorUnderlay: (ordinal) =>
+      commit((b) => ({
+        ...b,
+        vectorUnderlays: (b.vectorUnderlays ?? []).filter((u) => u.ordinal !== ordinal),
       })),
 
     exportGeoJSON: () => {

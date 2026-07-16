@@ -2001,6 +2001,48 @@ button.wide.ghost {
   cursor: default;
 }
 
+/* DXF import dialog: layer checklist + extent readout */
+.dxf-layer-list {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.dxf-layer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: 6px 8px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.dxf-layer-row:last-child {
+  border-bottom: none;
+}
+.dxf-layer-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  min-width: 0;
+}
+.dxf-layer-convert {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.wiz-derived-line {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--dim);
+  margin: var(--s3) 0 0;
+}
+
 /* ---- Suggest cameras: ghost markers + panel controls ---- */
 .camera.ghost {
   cursor: default;

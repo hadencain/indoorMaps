@@ -4,6 +4,8 @@ import { useStore } from "../store";
 import { DEMOS } from "../demos";
 import { propertyNameFor } from "../properties";
 import NewPropertyWizard from "./NewPropertyWizard";
+import DxfImportDialog from "./DxfImportDialog";
+import { parseDxfText, type DxfParseResult } from "../dxf";
 
 export default function TopBar() {
   const levels = useStore((s) => s.building.levels);
@@ -13,6 +15,7 @@ export default function TopBar() {
   const deleteProperty = useStore((s) => s.deleteProperty);
   const [propOpen, setPropOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [dxfDialog, setDxfDialog] = useState<{ raw: string; initial: DxfParseResult } | null>(null);
   // Two-step delete: first click arms, second click deletes (no blocking confirm()).
   const [armedDelete, setArmedDelete] = useState<string | null>(null);
   const mode = useStore((s) => s.mode);
@@ -109,6 +112,13 @@ export default function TopBar() {
         )}
       </div>
       {wizardOpen && <NewPropertyWizard onClose={() => setWizardOpen(false)} />}
+      {dxfDialog && (
+        <DxfImportDialog
+          raw={dxfDialog.raw}
+          initial={dxfDialog.initial}
+          onClose={() => setDxfDialog(null)}
+        />
+      )}
       <div className="modetoggle" role="group" aria-label="Mode">
         <button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")} title="Authoring — draw & edit the map">
           <Pencil size={13} /> Edit
@@ -185,6 +195,27 @@ export default function TopBar() {
                       const f = e.target.files?.[0];
                       e.target.value = "";
                       if (f) await importRasterFile(f);
+                    }}
+                  />
+                </label>
+                <label className="dm-item">
+                  Import DXF (CAD)…
+                  <input
+                    type="file"
+                    accept=".dxf"
+                    hidden
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!f) return;
+                      const text = await f.text();
+                      const r = parseDxfText(text);
+                      if (!r.ok) {
+                        useStore.setState({ importMsg: `DXF import failed: ${r.error}` });
+                      } else {
+                        setOpen(false);
+                        setDxfDialog({ raw: text, initial: r.result });
+                      }
                     }}
                   />
                 </label>

@@ -12,6 +12,16 @@ import type {
 } from "./types";
 import { m2ll, ll2m, polygonRing, polygonCentroid } from "./geo";
 import { occupantAnchor } from "./occupants";
+import { CATEGORY_ORDER } from "./categories";
+
+/** Validate an imported unit's category against the live Category union,
+ *  falling back to "room" — an imported/hand-edited GeoJSON can carry a
+ *  category this build doesn't know (typo, older/newer schema), and a blind
+ *  cast otherwise renders that unit flat in the 3D view (UNIT_HEIGHT_M has no
+ *  entry for it). */
+function toCategory(v: unknown): Category {
+  return (CATEGORY_ORDER as string[]).includes(v as string) ? (v as Category) : "room";
+}
 
 // IMDF-flavored GeoJSON export. Real IMDF is a zip of one FeatureCollection per
 // feature type; for portability we emit a single FeatureCollection whose features
@@ -173,7 +183,7 @@ export function geoJSONToBuilding(text: string): Building | null {
         id: String(f.id ?? `u-${units.length}`),
         ordinal: Number(f.properties?.ordinal ?? 0),
         name: String(f.properties?.name ?? "Unit"),
-        category: (f.properties?.category as Category) ?? "room",
+        category: toCategory(f.properties?.category),
         polygon: open.map(([lng, lat]) => ll2m(origin, lng, lat) as MetreXY),
       });
     } else if (ft === "opening" && f.geometry?.type === "Point") {

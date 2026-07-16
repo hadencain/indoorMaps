@@ -108,6 +108,22 @@ export function fixturesToGeoJSON(b: Building): FC {
   };
 }
 
+/** CAD linework (DXF vector underlays), one LineString feature per polyline,
+ *  tagged with ordinal for the floor filter. Pure — mirrors patrolsToGeoJSON. */
+export function vectorUnderlaysToGeoJSON(b: Building): FC {
+  const features: GeoJSON.Feature[] = [];
+  for (const v of b.vectorUnderlays ?? []) {
+    for (const poly of v.polylines) {
+      features.push({
+        type: "Feature",
+        properties: { ordinal: v.ordinal },
+        geometry: { type: "LineString", coordinates: pointsToLL(b.origin, poly) },
+      });
+    }
+  }
+  return { type: "FeatureCollection", features };
+}
+
 /** Per-floor building footprint (floor slab + exterior wall), tagged with ordinal. */
 export function footprintsToGeoJSON(b: Building): FC {
   return {

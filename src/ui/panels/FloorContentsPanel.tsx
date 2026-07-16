@@ -21,6 +21,8 @@ export default function FloorContentsPanel() {
   const setUnderlayOpacity = useStore((s) => s.setUnderlayOpacity);
   const nudgeUnderlay = useStore((s) => s.nudgeUnderlay);
   const removeUnderlay = useStore((s) => s.removeUnderlay);
+  const setVectorUnderlayOpacity = useStore((s) => s.setVectorUnderlayOpacity);
+  const removeVectorUnderlay = useStore((s) => s.removeVectorUnderlay);
   const requestFly = useStore((s) => s.requestFly);
   const updateSiteInfo = useStore((s) => s.updateSiteInfo);
   const [view, setView] = useState<"rooms" | "tenants">("rooms");
@@ -38,6 +40,7 @@ export default function FloorContentsPanel() {
         (occNames.get(u.id) ?? "").toLowerCase().includes(q)),
   );
   const underlay = (building.underlays ?? []).find((u) => u.ordinal === ordinal);
+  const vectorUnderlay = (building.vectorUnderlays ?? []).find((v) => v.ordinal === ordinal);
   const NUDGE = 1; // metres per nudge step
 
   const addPhoto = async (file: File) => {
@@ -239,6 +242,24 @@ export default function FloorContentsPanel() {
           </div>
           <button className="wide ghost danger" onClick={() => removeUnderlay(ordinal)}>
             Remove underlay
+          </button>
+        </div>
+      )}
+
+      {vectorUnderlay && (
+        <div className="underlay-sec">
+          <div className="panel-title">CAD linework</div>
+          <label>Opacity</label>
+          <input
+            type="range"
+            min={0.05}
+            max={1}
+            step={0.05}
+            value={vectorUnderlay.opacity}
+            onChange={(e) => setVectorUnderlayOpacity(ordinal, Number(e.target.value))}
+          />
+          <button className="wide ghost danger" onClick={() => removeVectorUnderlay(ordinal)}>
+            Remove CAD linework
           </button>
         </div>
       )}

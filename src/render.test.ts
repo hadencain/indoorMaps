@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { unitsToGeoJSON, fixturesToGeoJSON, UNIT_HEIGHT_M } from "./render";
+import { unitsToGeoJSON, fixturesToGeoJSON, vectorUnderlaysToGeoJSON, UNIT_HEIGHT_M } from "./render";
 import type { Building } from "./types";
 
 const b = {
@@ -32,5 +32,37 @@ describe("extrusion height synthesis", () => {
   it("every Category has a height (exhaustive map)", () => {
     // compile-time Record<Category, number> enforces this; runtime sanity:
     expect(Object.keys(UNIT_HEIGHT_M).length).toBeGreaterThanOrEqual(11);
+  });
+});
+
+describe("vectorUnderlaysToGeoJSON", () => {
+  it("emits one LineString feature per polyline, tagged with ordinal", () => {
+    const vb = {
+      origin: [0, 0],
+      vectorUnderlays: [
+        {
+          ordinal: 0,
+          name: "DXF import",
+          polylines: [
+            [[0, 0], [10, 0]],
+            [[0, 10], [10, 10], [10, 0]],
+          ],
+          opacity: 0.5,
+        },
+        { ordinal: 1, name: "DXF import", polylines: [[[0, 0], [5, 5]]], opacity: 0.5 },
+      ],
+    } as unknown as Building;
+    const fc = vectorUnderlaysToGeoJSON(vb);
+    expect(fc.features).toHaveLength(3);
+    expect(fc.features[0].geometry).toEqual({
+      type: "LineString",
+      coordinates: expect.any(Array),
+    });
+    expect(fc.features.map((f) => f.properties!.ordinal)).toEqual([0, 0, 1]);
+  });
+
+  it("a building with no vectorUnderlays yields an empty collection", () => {
+    const vb = { origin: [0, 0] } as unknown as Building;
+    expect(vectorUnderlaysToGeoJSON(vb).features).toEqual([]);
   });
 });

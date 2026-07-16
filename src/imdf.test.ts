@@ -39,6 +39,25 @@ const base: Building = {
   ],
 };
 
+describe("geoJSONToBuilding category validation", () => {
+  it("falls back an unrecognized category to room, keeps a valid one unchanged", () => {
+    const fcObj = JSON.parse(JSON.stringify(buildingToGeoJSON(base)));
+    fcObj.features.push({
+      type: "Feature",
+      id: "u-bad",
+      properties: { feature_type: "unit", name: "Bad", category: "not-a-real-category", ordinal: 0 },
+      geometry: {
+        type: "Polygon",
+        coordinates: [[[0, 20], [10, 20], [10, 30], [0, 30], [0, 20]]],
+      },
+    });
+    const back = geoJSONToBuilding(JSON.stringify(fcObj));
+    expect(back).not.toBeNull();
+    expect(back!.units.find((u) => u.id === "u1")!.category).toBe("retail");
+    expect(back!.units.find((u) => u.id === "u-bad")!.category).toBe("room");
+  });
+});
+
 describe("occupant single-file round-trip", () => {
   it("exports one indoormaps:type=occupant Point feature per occupant", () => {
     const fcObj = JSON.parse(JSON.stringify(buildingToGeoJSON(base)));

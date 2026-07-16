@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import type { Building, MetreXY, Category, LngLat, RasterUnderlay, Occupant } from "./types";
 import type { FC } from "./render";
-import { unitsToGeoJSON, patrolsToGeoJSON, fixturesToGeoJSON, footprintsToGeoJSON } from "./render";
+import {
+  unitsToGeoJSON,
+  patrolsToGeoJSON,
+  fixturesToGeoJSON,
+  footprintsToGeoJSON,
+  vectorUnderlaysToGeoJSON,
+} from "./render";
 import { INCIDENT_COLORS } from "./ui/panels/IncidentPanel";
 import {
   ll2m,
@@ -255,6 +261,9 @@ export default function MapView() {
         ],
       });
       map.addSource("grid", { type: "geojson", data: EMPTY });
+      // CAD linework imported from DXF (Phase B) — one per-floor vector underlay
+      // to trace over, rendered beneath the grid like the raster underlay.
+      map.addSource("vector-underlay", { type: "geojson", data: vectorUnderlaysToGeoJSON(building) });
       // Building footprint (floor slab + exterior wall) + fixtures (furniture).
       map.addSource("footprint", { type: "geojson", data: footprintsToGeoJSON(building) });
       map.addSource("fixtures", { type: "geojson", data: fixturesToGeoJSON(building) });
@@ -491,6 +500,18 @@ export default function MapView() {
         },
         "grid-line",
       );
+      // CAD linework (DXF vector underlay) — also beneath the grid, one floor's
+      // worth visible at a time via the floor filter; opacity set per-floor by
+      // the underlay effect (defaults to 0.5 when the floor has none).
+      map.addLayer(
+        {
+          id: "vector-underlay-line",
+          type: "line",
+          source: "vector-underlay",
+          paint: { "line-color": "#5b7089", "line-width": 0.75, "line-opacity": 0.5 },
+        },
+        "grid-line",
+      );
 
       // Building footprint floor slab (warm carpet) — beneath everything (above
       // the underlay, below the grid), so the plan reads as an enclosed building.
@@ -643,6 +664,9 @@ export default function MapView() {
     );
     (map.getSource("fixtures") as maplibregl.GeoJSONSource | undefined)?.setData(
       fixturesToGeoJSON(building),
+    );
+    (map.getSource("vector-underlay") as maplibregl.GeoJSONSource | undefined)?.setData(
+      vectorUnderlaysToGeoJSON(building),
     );
   }, [ready, building]);
 
@@ -874,16 +898,23 @@ export default function MapView() {
     const map = mapRef.current;
     if (!map || !ready) return;
     const src = map.getSource("underlay") as maplibregl.ImageSource | undefined;
-    if (!src) return;
-    // Only render an underlay that still has its image (dataUrl may be "" after a
-    // quota-stripped reload — its metadata persists, but re-import is required).
-    const u = (building.underlays ?? []).find((x) => x.ordinal === ordinal && x.dataUrl);
-    if (u) {
-      src.updateImage({ url: u.dataUrl, coordinates: underlayCoordinates(u, building.origin) });
-      map.setPaintProperty("underlay", "raster-opacity", u.opacity);
-      map.setLayoutProperty("underlay", "visibility", "visible");
-    } else {
-      map.setLayoutProperty("underlay", "visibility", "none");
+    if (src) {
+      // Only render an underlay that still has its image (dataUrl may be "" after a
+      // quota-stripped reload — its metadata persists, but re-import is required).
+      const u = (building.underlays ?? []).find((x) => x.ordinal === ordinal && x.dataUrl);
+      if (u) {
+        src.updateImage({ url: u.dataUrl, coordinates: underlayCoordinates(u, building.origin) });
+        map.setPaintProperty("underlay", "raster-opacity", u.opacity);
+        map.setLayoutProperty("underlay", "visibility", "visible");
+      } else {
+        map.setLayoutProperty("underlay", "visibility", "none");
+      }
+    }
+    // CAD vector underlay opacity for the active floor (default 0.5 when the
+    // floor has none — matches the layer's initial paint value).
+    if (map.getLayer("vector-underlay-line")) {
+      const vu = (building.vectorUnderlays ?? []).find((v) => v.ordinal === ordinal);
+      map.setPaintProperty("vector-underlay-line", "line-opacity", vu?.opacity ?? 0.5);
     }
   }, [ready, ordinal, building]);
 
@@ -899,6 +930,7 @@ export default function MapView() {
     map.setFilter("footprint-fill", floorFilter);
     map.setFilter("footprint-wall-casing", floorFilter);
     map.setFilter("footprint-wall", floorFilter);
+    map.setFilter("vector-underlay-line", floorFilter);
     map.setFilter("fixture-fill", floorFilter);
     map.setFilter("fixture-line", floorFilter);
     map.setFilter("fixture-extrude", floorFilter);
