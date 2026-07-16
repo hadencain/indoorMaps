@@ -861,18 +861,17 @@ button.wide.ghost {
   border: 1px solid #0b0d10;
   border-radius: 50%;
   cursor: move;
-  position: relative;
 }
 .ehandle:hover {
   background: #f2c14e;
 }
 
-/* Invisible enlarged hit areas — visuals unchanged, grab targets ~2×. */
-.vhandle,
-.door,
-.ehandle {
-  position: relative;
-}
+/* Invisible enlarged hit areas — visuals unchanged, grab targets ~2×.
+   NEVER set `position` on marker elements: MapLibre positions markers via
+   `.maplibregl-marker { position: absolute }` + translate, and overriding it
+   to relative re-bases the translate at the element's static flow position —
+   the marker renders hundreds of px off. The absolute marker element is
+   already a containing block for the ::after inset. */
 .vhandle::after,
 .door::after,
 .ehandle::after {
@@ -2620,7 +2619,6 @@ button.wide.ghost {
   border-radius: 50%;
   cursor: grab;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
-  position: relative;
 }
 .occ-anchor:active {
   cursor: grabbing;
