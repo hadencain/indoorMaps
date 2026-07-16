@@ -18,6 +18,8 @@ export default function RouteFinder({
   setGoalId,
   route,
   lengthUnit,
+  stepFree,
+  setStepFree,
 }: {
   building: Building;
   startId: string;
@@ -26,6 +28,8 @@ export default function RouteFinder({
   setGoalId: (id: string) => void;
   route: ViewerRouteInfo;
   lengthUnit: LengthUnit;
+  stepFree: boolean;
+  setStepFree: (on: boolean) => void;
 }) {
   const rooms = selectableUnits(building);
   const level = (o: number) => building.levels.find((l) => l.ordinal === o)?.name ?? `Floor ${o}`;
@@ -55,6 +59,10 @@ export default function RouteFinder({
   return (
     <div className="panel">
       <div className="panel-title">Wayfinding</div>
+      <label className="stepfree-row">
+        <input type="checkbox" checked={stepFree} onChange={(e) => setStepFree(e.target.checked)} />
+        Step-free (avoid stairs)
+      </label>
       <label>From</label>
       <select value={fromValue} onChange={(e) => onPick(e.target.value, "from")}>
         {rooms.map((r) => (
@@ -102,7 +110,7 @@ export default function RouteFinder({
             </div>
           </>
         ) : (
-          <div className="warn">no route found</div>
+          <div className="warn">{stepFree ? "No step-free route" : "no route found"}</div>
         )}
       </div>
       {steps.length > 0 && (

@@ -40,8 +40,9 @@ export default function Viewer({ building, propertyName }: { building: Building;
   const [flyTarget, setFlyTarget] = useState<{ ordinal: number; center: MetreXY } | null>(null);
   const [bearingDeg, setBearingDeg] = useState(0);
   const [ready, setReady] = useState(false);
+  const [stepFree, setStepFree] = useState(false);
 
-  const route = useViewerRoute(building, startId, goalId);
+  const route = useViewerRoute(building, startId, goalId, stepFree);
   const routeLines = route.geom?.lines ?? EMPTY;
   const routePoints = route.geom?.points ?? [];
 
@@ -442,6 +443,8 @@ export default function Viewer({ building, propertyName }: { building: Building;
               setGoalId={setGoalId}
               route={route}
               lengthUnit={lengthUnit}
+              stepFree={stepFree}
+              setStepFree={setStepFree}
             />
           )}
         </aside>

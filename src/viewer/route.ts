@@ -20,11 +20,16 @@ export interface ViewerRouteInfo {
  * operator concept (nearest-exit routing) and out of scope for a read-only
  * visitor viewer — only direct A→B routing is offered here.
  */
-export function useViewerRoute(building: Building, startId: string, goalId: string): ViewerRouteInfo {
+export function useViewerRoute(
+  building: Building,
+  startId: string,
+  goalId: string,
+  stepFree = false,
+): ViewerRouteInfo {
   return useMemo<ViewerRouteInfo>(() => {
     if (!startId || !goalId) return { geom: null, steps: [] };
     try {
-      const graph = buildGraph(building);
+      const graph = buildGraph(building, { stepFree });
       const route = findRoute(graph, startId, goalId);
       return {
         geom: route ? routeToGeometry(graph, route.path, building) : null,
@@ -37,5 +42,5 @@ export function useViewerRoute(building: Building, startId: string, goalId: stri
       // crash if a hand-edited file slips through.
       return { geom: null, steps: [] };
     }
-  }, [building, startId, goalId]);
+  }, [building, startId, goalId, stepFree]);
 }
