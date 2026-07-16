@@ -375,6 +375,156 @@ body {
   white-space: nowrap;
 }
 
+/* ---- occupant detail expansion (tenant rows with hours/phone/website/logo) ---- */
+.occrow {
+  display: flex;
+  flex-direction: column;
+}
+
+.occrow.open .occ-head {
+  border-color: var(--accent);
+}
+
+.occ-toggle {
+  flex: 0 0 26px;
+  background: var(--panel-2);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: var(--font-sans);
+}
+
+.occ-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.occ-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 0 0;
+  padding: 8px 0 2px 8px;
+  border-left: 1px solid var(--line);
+}
+
+.occ-logo {
+  max-width: 96px;
+  max-height: 48px;
+  display: block;
+  border: 1px solid var(--line);
+}
+
+.occ-detail-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  min-width: 0;
+}
+
+.occ-detail-row .k {
+  flex: 0 0 40px;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.occ-detail-row a {
+  color: var(--accent);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.occ-detail-row a:hover {
+  text-decoration: underline;
+}
+
+/* ---- site info (hours + photos, collapsible atop the Directory panel) ---- */
+.siteinfo {
+  margin-bottom: var(--s4);
+  border: 1px solid var(--line);
+}
+
+.siteinfo-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--panel-2);
+  color: var(--dim);
+  border: none;
+  padding: 7px 8px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.siteinfo-toggle:hover {
+  color: var(--accent);
+}
+
+.siteinfo-chev {
+  font-size: 10px;
+}
+
+.siteinfo-body {
+  padding: 10px 8px;
+  border-top: 1px solid var(--line);
+}
+
+.siteinfo-hours {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-line;
+}
+
+.siteinfo-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.siteinfo-photo {
+  width: 56px;
+  height: 42px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  cursor: zoom-in;
+}
+
+.siteinfo-photo:hover {
+  border-color: var(--accent);
+}
+
+.siteinfo-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(4, 6, 9, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+
+.siteinfo-lightbox img {
+  max-width: 88vw;
+  max-height: 88vh;
+  border: 1px solid var(--line-2);
+}
+
 /* ---- MapLibre HTML markers ---- */
 .label {
   font-size: 11px;
