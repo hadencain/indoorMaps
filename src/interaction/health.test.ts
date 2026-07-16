@@ -164,8 +164,16 @@ describe("reviewFloor", () => {
   });
 
   it("emits no vacant issues for an occupant-free building", () => {
-    const b = makeBuilding([roomA, corridor], [hallDoor]);
-    expect(reviewFloor(b, 0).some((i) => i.severity === "info")).toBe(false);
+    const b = makeBuilding([roomA, roomB, corridor], [sharedDoor, hallDoor]);
+    expect(reviewFloor(b, 0).some((i) => i.id.startsWith("vacant:"))).toBe(false);
+  });
+
+  it("flags one-sided plain doors as info severity", () => {
+    const b = makeBuilding([roomA, roomB, corridor], [lonelyDoor, hallDoor]);
+    const issues = reviewFloor(b, 0);
+    const oneSidedIssue = issues.find((i) => i.id === "one-sided-door:d3");
+    expect(oneSidedIssue?.severity).toBe("info");
+    expect(oneSidedIssue?.message).toMatch(/opens onto unmapped space/);
   });
 
   it("a healthy floor reviews clean", () => {

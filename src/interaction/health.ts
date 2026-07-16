@@ -177,10 +177,12 @@ export function reviewFloor(building: Building, ordinal: number): ReviewIssue[] 
     const op = building.openings.find((o) => o.id === openingId);
     if (!op) continue;
     const owner = unitsById.get(op.unit);
+    // Geometric one-sidedness never breaks routing: corridor-hub edges route plain doors
+    // regardless of whether the far side is mapped. This is advisory only.
     issues.push({
       id: `one-sided-door:${openingId}`,
-      severity: "warn",
-      message: `Door on ${owner?.name ?? "unknown unit"} has nothing on the far side`,
+      severity: "info",
+      message: `Door on ${owner?.name ?? "unknown unit"} opens onto unmapped space`,
       unitId: op.unit,
       at: op.at,
     });

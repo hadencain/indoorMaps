@@ -39,7 +39,7 @@ export default function ReviewPanel() {
         </div>
       )}
       <p className="hint" style={{ marginTop: 10 }}>
-        Errors break routing. Warnings are reachability or data smells. Info is tenancy.
+        Errors break routing. Warnings are reachability or data smells. Info is advisory.
       </p>
     </div>
   );
