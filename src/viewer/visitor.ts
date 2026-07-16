@@ -1,4 +1,6 @@
-import type { Building, Unit } from "../types";
+import type { Building, MetreXY, Unit } from "../types";
+import { polygonCentroid } from "../geo";
+import { pointInRing } from "../coverage";
 
 /**
  * Produces a public-viewer-safe building: strips all operator/security data
@@ -11,14 +13,23 @@ import type { Building, Unit } from "../types";
  * themselves come out. Surviving units — including `secure` ones, since only
  * `restricted` is dropped — have `security` cleared (all become public).
  *
+ * Also culls any fixture or amenity that physically sits inside a dropped
+ * unit's footprint (same floor) — otherwise a counter or restroom badge
+ * inside a dropped vault would still render, leaking the vault's location
+ * even though the unit polygon itself is gone.
+ *
  * Result carries NO cameras/incidents/patrols/cameraViews/underlays/
  * vectorUnderlays (camera `streamRef` goes with them) and satisfies
  * `isValidBuildingShape`.
  */
 export function toVisitorBuilding(b: Building): Building {
-  const dropped = new Set(
-    b.units.filter((u) => u.security === "restricted").map((u) => u.id),
-  );
+  const droppedUnits = b.units.filter((u) => u.security === "restricted");
+  const dropped = new Set(droppedUnits.map((u) => u.id));
+
+  /** True when `pt` on `ordinal` falls inside any dropped unit's polygon on
+   *  the same floor. Only called when there are dropped units. */
+  const insideDroppedUnit = (ordinal: number, pt: MetreXY): boolean =>
+    droppedUnits.some((u) => u.ordinal === ordinal && pointInRing(pt, u.polygon));
 
   const units: Unit[] = b.units
     .filter((u) => !dropped.has(u.id))
@@ -41,8 +52,14 @@ export function toVisitorBuilding(b: Building): Building {
     occupants: (b.occupants ?? [])
       .filter((o) => !dropped.has(o.unitId))
       .map((o) => (o.anchor ? { ...o, anchor: [...o.anchor] as typeof o.anchor } : { ...o })),
-    amenities: (b.amenities ?? []).map((a) => ({ ...a, at: [...a.at] as typeof a.at })),
-    fixtures: (b.fixtures ?? []).map((f) => ({ ...f, polygon: f.polygon.map((p) => [...p] as typeof p) })),
+    amenities: (b.amenities ?? [])
+      .filter((a) => dropped.size === 0 || !insideDroppedUnit(a.ordinal, a.at))
+      .map((a) => ({ ...a, at: [...a.at] as typeof a.at })),
+    fixtures: (b.fixtures ?? [])
+      .filter(
+        (f) => dropped.size === 0 || !insideDroppedUnit(f.ordinal, polygonCentroid(f.polygon)),
+      )
+      .map((f) => ({ ...f, polygon: f.polygon.map((p) => [...p] as typeof p) })),
     footprints: (b.footprints ?? []).map((f) => ({ ...f, polygon: f.polygon.map((p) => [...p] as typeof p) })),
     siteInfo: b.siteInfo ? { ...b.siteInfo, photos: [...b.siteInfo.photos] } : undefined,
     // incidents/patrols/cameraViews/underlays/vectorUnderlays: intentionally

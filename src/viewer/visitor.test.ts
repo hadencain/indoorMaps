@@ -118,6 +118,17 @@ function fixture(): Building {
           [0, 1],
         ],
       },
+      {
+        id: "fix-public",
+        ordinal: 0,
+        kind: "seating",
+        polygon: [
+          [11, 1],
+          [12, 1],
+          [12, 2],
+          [11, 2],
+        ],
+      },
     ],
     footprints: [
       {
@@ -130,7 +141,10 @@ function fixture(): Building {
         ],
       },
     ],
-    amenities: [{ id: "am1", ordinal: 0, at: [2, 2], kind: "restroom", name: "Restroom" }],
+    amenities: [
+      { id: "am1", ordinal: 0, at: [2, 2], kind: "restroom", name: "Restroom" },
+      { id: "am-public", ordinal: 0, at: [11, 1], kind: "atm", name: "ATM" },
+    ],
     occupants: [
       { id: "occ-vault", name: "Vault Contents Co", unitId: "vault", category: "services" },
       { id: "occ-room", name: "Room Tenant", unitId: "room1", category: "retail" },
@@ -190,15 +204,37 @@ describe("toVisitorBuilding", () => {
     expect(result.occupants?.length).toBe(1);
   });
 
-  it("keeps amenities, fixtures, footprints, siteInfo, levels, origin", () => {
+  it("keeps footprints, siteInfo, levels, origin untouched", () => {
     const f = fixture();
     const result = toVisitorBuilding(f);
-    expect(result.amenities).toEqual(f.amenities);
-    expect(result.fixtures).toEqual(f.fixtures);
     expect(result.footprints).toEqual(f.footprints);
     expect(result.siteInfo).toEqual(f.siteInfo);
     expect(result.levels).toEqual(f.levels);
     expect(result.origin).toEqual(f.origin);
+  });
+
+  it("keeps fixtures and amenities that sit safely in a public unit", () => {
+    const result = toVisitorBuilding(fixture());
+    expect(result.fixtures?.find((x) => x.id === "fix-public")).toBeDefined();
+    expect(result.amenities?.find((x) => x.id === "am-public")).toBeDefined();
+  });
+
+  it("culls a fixture whose centroid falls inside a dropped restricted unit", () => {
+    const result = toVisitorBuilding(fixture());
+    expect(result.fixtures?.find((x) => x.id === "fix1")).toBeUndefined();
+  });
+
+  it("culls an amenity whose position falls inside a dropped restricted unit", () => {
+    const result = toVisitorBuilding(fixture());
+    expect(result.amenities?.find((x) => x.id === "am1")).toBeUndefined();
+  });
+
+  it("does not cull any fixture/amenity when no unit is restricted", () => {
+    const f = fixture();
+    f.units = f.units.map((u) => (u.security === "restricted" ? { ...u, security: "secure" } : u));
+    const result = toVisitorBuilding(f);
+    expect(result.fixtures?.map((x) => x.id).sort()).toEqual(["fix-public", "fix1"]);
+    expect(result.amenities?.map((x) => x.id).sort()).toEqual(["am-public", "am1"]);
   });
 
   it("carries no streamRef / camera data anywhere in the result", () => {
