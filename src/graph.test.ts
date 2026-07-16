@@ -27,6 +27,14 @@ describe("isStepFreeVertical", () => {
     expect(isStepFreeVertical({ a: "elevA-0", b: "elevA-1", name: "Upstairs Elevator" }, us)).toBe(true));
   it("'Grand Stair' with elevator endpoints is NOT step-free (word boundary still catches legitimate stair)", () =>
     expect(isStepFreeVertical({ a: "elevA-0", b: "elevA-1", name: "Grand Stair" }, us)).toBe(false));
+  it("'Stairwell' is NOT step-free (stair-family name)", () =>
+    expect(isStepFreeVertical({ a: "elevA-0", b: "elevA-1", name: "Stairwell" }, us)).toBe(false));
+  it("'Staircase' is NOT step-free (stair-family name)", () =>
+    expect(isStepFreeVertical({ a: "elevA-0", b: "elevA-1", name: "Staircase" }, us)).toBe(false));
+  it("'Stairway' is NOT step-free (stair-family name)", () =>
+    expect(isStepFreeVertical({ a: "elevA-0", b: "elevA-1", name: "Stairway" }, us)).toBe(false));
+  it("'Escalators' (plural) is NOT step-free", () =>
+    expect(isStepFreeVertical({ a: "esc-0", b: "esc-1", name: "Escalators" }, us)).toBe(false));
 });
 
 describe("buildGraph stepFree option", () => {

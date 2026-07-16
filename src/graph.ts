@@ -6,7 +6,7 @@ import { isNonRoutable } from "./categories";
 const VERTICAL_COST = 6;
 
 /** Verticals named like a stair/escalator run, by author convention. */
-const STAIR_LIKE_NAME = /\bstair(s)?\b|\bescalator\b/i;
+const STAIR_LIKE_NAME = /\bstair|escalator/i;
 
 /**
  * Whether a vertical connection can be traversed without steps (elevator/ramp)
