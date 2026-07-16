@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useStore } from "../../store";
 import { useRoute } from "../route";
 import { selectableUnits } from "../../building";
@@ -19,6 +20,26 @@ export default function RoutePanel() {
   // Tenants routable via their unit; skip occupants of non-selectable units.
   const occupantOptions = occupants.filter((o) => roomIds.has(o.unitId));
 
+  const [fromTok, setFromTok] = useState<string | null>(null);
+  const [toTok, setToTok] = useState<string | null>(null);
+  const tokToUnit = (tok: string): string =>
+    tok.startsWith("o:") ? occupantOptions.find((o) => o.id === tok.slice(2))?.unitId ?? "" : tok.slice(2);
+  // The local token only sticks while it still resolves to the store's unit —
+  // external changes (AppShell keeps endpoints valid) fall back to the unit token.
+  const fromValue = fromTok && tokToUnit(fromTok) === startId ? fromTok : `u:${startId}`;
+  const toValue = toTok && tokToUnit(toTok) === goalId ? toTok : `u:${goalId}`;
+  const onPick = (tok: string, which: "from" | "to") => {
+    const unitId = tokToUnit(tok);
+    if (!unitId) return;
+    if (which === "from") {
+      setFromTok(tok);
+      setStart(unitId);
+    } else {
+      setToTok(tok);
+      setGoal(unitId);
+    }
+  };
+
   return (
     <div className="panel">
       <div className="panel-title">Wayfinding</div>
@@ -31,16 +52,16 @@ export default function RoutePanel() {
         </button>
       </div>
       <label>From</label>
-      <select value={startId} onChange={(e) => setStart(e.target.value)}>
+      <select value={fromValue} onChange={(e) => onPick(e.target.value, "from")}>
         {rooms.map((r) => (
-          <option key={r.id} value={r.id}>
+          <option key={r.id} value={`u:${r.id}`}>
             {r.name} · {level(r.ordinal)}
           </option>
         ))}
         {occupantOptions.map((o) => {
           const r = rooms.find((x) => x.id === o.unitId)!;
           return (
-            <option key={`occ-${o.id}`} value={o.unitId}>
+            <option key={`occ-${o.id}`} value={`o:${o.id}`}>
               {o.name} · {level(r.ordinal)}
             </option>
           );
@@ -49,16 +70,16 @@ export default function RoutePanel() {
       {!egress && (
         <>
           <label>To</label>
-          <select value={goalId} onChange={(e) => setGoal(e.target.value)}>
+          <select value={toValue} onChange={(e) => onPick(e.target.value, "to")}>
             {rooms.map((r) => (
-              <option key={r.id} value={r.id}>
+              <option key={r.id} value={`u:${r.id}`}>
                 {r.name} · {level(r.ordinal)}
               </option>
             ))}
             {occupantOptions.map((o) => {
               const r = rooms.find((x) => x.id === o.unitId)!;
               return (
-                <option key={`occ-${o.id}`} value={o.unitId}>
+                <option key={`occ-${o.id}`} value={`o:${o.id}`}>
                   {o.name} · {level(r.ordinal)}
                 </option>
               );
