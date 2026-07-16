@@ -26,6 +26,7 @@ import CameraWindow from "./ui/CameraWindow";
 import PatrolPlayback from "./ui/PatrolPlayback";
 import { amenityIconSvg, amenityBadgeStyle } from "./ui/amenity-icons";
 import OperatorEdgePanels from "./ui/OperatorEdgePanels";
+import SetupGuide from "./ui/SetupGuide";
 import { bindDrawing, type DrawHandle, type DrawTool, SNAP_PX } from "./interaction/draw";
 import { snapDrawPoint, metresPerPixel } from "./interaction/snapping";
 import { translateEdge } from "./interaction/edit";
@@ -1401,6 +1402,7 @@ export default function MapView() {
           (Rectangle/Polygon, category "Corridor").
         </div>
       )}
+      {mode === "edit" && <SetupGuide />}
       {menu && menuUnit && (
         <div className="props-popup" style={{ left: menu.x, top: menu.y }}>
           <div className="props-head">

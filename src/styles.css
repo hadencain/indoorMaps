@@ -2699,3 +2699,74 @@ button.wide.ghost {
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* Setup guide card: staged authoring checklist for new user properties. */
+.setup-guide {
+  position: absolute;
+  left: 12px;
+  bottom: 40px;
+  width: 250px;
+  background: rgba(11, 13, 16, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  z-index: 6;
+  font-size: 12px;
+}
+.setup-guide-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 8px;
+}
+.setup-guide-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.setup-step {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--dim);
+}
+.setup-step.active {
+  color: var(--text);
+}
+.setup-step.done {
+  color: var(--dim);
+}
+.setup-step.done .setup-mark {
+  color: #2fbf71;
+}
+.setup-step.active .setup-mark {
+  color: var(--accent);
+}
+.setup-mark {
+  width: 12px;
+  flex: none;
+  text-align: center;
+}
+.setup-opt {
+  font-size: 10px;
+  color: var(--dim);
+}
+.setup-guide-foot {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+.setup-instruction {
+  margin: 0 0 8px;
+  color: var(--text);
+  line-height: 1.45;
+}
+.setup-done-msg {
+  display: block;
+  color: #2fbf71;
+  margin-bottom: 8px;
+}
