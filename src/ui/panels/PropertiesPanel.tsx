@@ -9,6 +9,7 @@ import { SECURITY_LEVELS, SECURITY_LABELS, SECURITY_COLORS, securityOf } from ".
 import { occupantsForUnit, OCCUPANT_CATEGORY_LABELS } from "../../occupants";
 import { selectableUnits } from "../../building";
 import { fileToSmallDataUrl } from "../img";
+import { doorAdjacency } from "../../interaction/health";
 import type { Category, SecurityLevel, Occupant, OccupantCategory, Unit } from "../../types";
 
 export default function PropertiesPanel() {
@@ -23,6 +24,9 @@ export default function PropertiesPanel() {
   const setSelectedCamera = useStore((s) => s.setSelectedCamera);
   const deleteUnit = useStore((s) => s.deleteUnit);
   const addOccupant = useStore((s) => s.addOccupant);
+  const addOpening = useStore((s) => s.addOpening);
+  const deleteOpening = useStore((s) => s.deleteOpening);
+  const toggleOpeningKind = useStore((s) => s.toggleOpeningKind);
   const { polys } = useVisibility();
   const [expandedOcc, setExpandedOcc] = useState<string | null>(null);
   // Cameras that see this unit, ranked by view quality (best first). Built from
@@ -45,6 +49,7 @@ export default function PropertiesPanel() {
     );
   const [x0, y0, x1, y1] = bbox(u.polygon);
   const occs = occupantsForUnit(building, u.id);
+  const unitOpenings = building.openings.filter((o) => o.unit === u.id);
 
   return (
     <div className="panel">
@@ -104,6 +109,42 @@ export default function PropertiesPanel() {
             </div>
           ))}
         </div>
+      )}
+
+      {isSpace(u.category) && (
+        <>
+          <div className="panel-subtitle" style={{ marginTop: 12 }}>
+            Doors
+          </div>
+          {unitOpenings.length === 0 && <p className="hint">No doors — routing can't reach this unit.</p>}
+          <div className="roomlist">
+            {unitOpenings.map((op) => {
+              const adj = doorAdjacency(building.units, op);
+              const other = adj.other ? building.units.find((x) => x.id === adj.other) : undefined;
+              const isEntrance = op.kind === "entrance";
+              return (
+                <div className="roomrow" key={op.id}>
+                  <button
+                    className="occ-head"
+                    title="Toggle door / entrance"
+                    onClick={() => toggleOpeningKind(op.id)}
+                  >
+                    <span className="vlabel">{isEntrance ? "Entrance" : "Door"}</span>
+                    <span className="occ-cat">
+                      {isEntrance ? "to outside" : other ? `↔ ${other.name}` : "unmapped side"}
+                    </span>
+                  </button>
+                  <button className="del" title="Delete door" onClick={() => deleteOpening(op.id)}>
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <button className="wide ghost" style={{ marginTop: 6 }} onClick={() => addOpening(u.id)}>
+            + Add door
+          </button>
+        </>
       )}
 
       {isSpace(u.category) && (

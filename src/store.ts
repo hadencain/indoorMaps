@@ -15,6 +15,7 @@ import type {
   AmenityKind,
   SiteInfo,
   Occupant,
+  Opening,
 } from "./types";
 import { autoDoorsForRooms, doorForRoom, selectableUnits } from "./building";
 import { defaultNameFor, isSpace } from "./categories";
@@ -235,6 +236,7 @@ let incSeq = 0;
 let patSeq = 0;
 let viewSeq = 0;
 let occSeq = 0;
+let doorSeq = 0;
 
 /** Transient click-to-camera probe result. NOT persisted, NOT routed through
  *  `commit`/undo — pure session UI state. `cameraIds` are the cameras whose
@@ -331,6 +333,11 @@ interface State {
   moveDoor: (doorId: string, at: MetreXY) => void;
   setOpeningKind: (openingId: string, kind: "door" | "entrance") => void;
   toggleOpeningKind: (openingId: string) => void;
+  /** Add a door to a unit: auto-placed on the corridor-facing wall when a
+   *  corridor exists (doorForRoom), else the first edge's midpoint — the user
+   *  drags the dot afterward. */
+  addOpening: (unitId: string) => void;
+  deleteOpening: (openingId: string) => void;
   renameUnit: (id: string, name: string) => void;
   setCategory: (id: string, category: Category) => void;
   setSecurity: (id: string, level: SecurityLevel) => void;
@@ -739,6 +746,20 @@ export const useStore = create<State>((set, get) => {
             : o,
         ),
       })),
+
+    addOpening: (unitId) => {
+      const b0 = get().building;
+      const u = b0.units.find((x) => x.id === unitId);
+      if (!u) return;
+      const at =
+        doorForRoom(b0, u.polygon, u.ordinal) ??
+        ([(u.polygon[0][0] + u.polygon[1][0]) / 2, (u.polygon[0][1] + u.polygon[1][1]) / 2] as MetreXY);
+      const opening: Opening = { id: `d-${unitId}-${Date.now()}-${doorSeq++}`, unit: unitId, at };
+      commit((b) => ({ ...b, openings: [...b.openings, opening] }));
+    },
+
+    deleteOpening: (openingId) =>
+      commit((b) => ({ ...b, openings: b.openings.filter((o) => o.id !== openingId) })),
 
     renameUnit: (id, name) =>
       commit(
