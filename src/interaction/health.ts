@@ -1,7 +1,7 @@
 import type { Building, MetreXY, Opening, Unit } from "../types";
 import { distM, polygonArea, polygonCentroid, projectOnSegment } from "../geo";
 import { pointInRing } from "../coverage";
-import { isSpace } from "../categories";
+import { isSpace, isNonRoutable } from "../categories";
 
 /** How far (metres) to probe each side of a door's wall for the adjoining unit. */
 const PROBE_M = 0.4;
@@ -83,11 +83,13 @@ export function floorHealth(building: Building, ordinal: number): FloorHealth {
     .filter((o) => doorAdjacency(building.units, o).other === null)
     .map((o) => o.id);
 
-  // Plain doors are those not owned by "outside" units; mirrors graph.ts's skip
-  // condition (line ~83) which ignores outside-owned doors before the corridor check.
-  const plainDoors = openings.some(
-    (o) => (o.kind ?? "door") === "door" && unitsById.get(o.unit)?.category !== "outside",
-  );
+  // Plain doors are those not owned by "outside" or restricted (non-routable) units;
+  // mirrors graph.ts's skip condition (line ~83), which never reaches the
+  // corridor-hub throw for doors owned by outside patches or non-routable units.
+  const plainDoors = openings.some((o) => {
+    const owner = unitsById.get(o.unit);
+    return (o.kind ?? "door") === "door" && owner?.category !== "outside" && !(owner && isNonRoutable(owner));
+  });
   const hasCorridor = units.some((u) => u.category === "corridor");
   const missingCorridor = plainDoors && !hasCorridor;
 

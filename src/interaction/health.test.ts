@@ -129,6 +129,13 @@ describe("floorHealth", () => {
     const b = makeBuilding([roomA, outside], [outsideDoor]);
     expect(floorHealth(b, 0).missingCorridor).toBe(false);
   });
+
+  it("missingCorridor ignores doors owned by restricted units, matching graph.ts", () => {
+    const vault: Unit = { ...roomA, id: "vault", security: "restricted" };
+    const vaultDoor: Opening = { id: "dv", unit: "vault", at: [5, 0] };
+    const b = makeBuilding([vault, roomB], [vaultDoor]); // no corridor
+    expect(floorHealth(b, 0).missingCorridor).toBe(false); // graph never throws here
+  });
 });
 
 describe("reviewFloor", () => {
