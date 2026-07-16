@@ -1,9 +1,30 @@
-import type { Building, Category, Edge, Graph, MetreXY, NodeMeta, Unit } from "./types";
+import type { Building, Category, Edge, Graph, MetreXY, NodeMeta, Unit, Vertical } from "./types";
 import { distM, m2ll, polygonCentroid } from "./geo";
 import { isNonRoutable } from "./categories";
 
 /** Extra cost (metres-equivalent) to traverse one vertical connection. */
 const VERTICAL_COST = 6;
+
+/** Verticals named like a stair/escalator run, by author convention. */
+const STAIR_LIKE_NAME = /stair|escalator/i;
+
+/**
+ * Whether a vertical connection can be traversed without steps (elevator/ramp)
+ * vs. not (stairs/escalator). Two independent signals, either one disqualifies:
+ *   - the name reads as a stair/escalator run (authors often mis-categorize an
+ *     escalator's endpoint units as "elevator", so name is checked first-class,
+ *     not just as a fallback), OR
+ *   - either endpoint unit is category "stairs".
+ * A missing endpoint unit (unknown id) is treated as not-stairs for that
+ * endpoint — falls through to the name check alone.
+ */
+export function isStepFreeVertical(v: Vertical, unitById: Map<string, Unit>): boolean {
+  if (STAIR_LIKE_NAME.test(v.name)) return false;
+  const a = unitById.get(v.a);
+  const b = unitById.get(v.b);
+  if (a?.category === "stairs" || b?.category === "stairs") return false;
+  return true;
+}
 
 /**
  * Build a routable navigation graph from the IMDF-flavored building:
@@ -14,8 +35,12 @@ const VERTICAL_COST = 6;
  *
  * Non-routable units (`isNonRoutable`, i.e. `security === "restricted"`) get no
  * node; their openings and verticals drop out silently rather than throwing.
+ *
+ * `opts.stepFree`: when true, verticals that aren't step-free (see
+ * `isStepFreeVertical`) are skipped entirely — no edge, so no route can cross
+ * on stairs/escalators. Omitted/false is byte-identical to the old behavior.
  */
-export function buildGraph(b: Building): Graph {
+export function buildGraph(b: Building, opts?: { stepFree?: boolean }): Graph {
   const nodes = new Map<string, NodeMeta>();
   const adj = new Map<string, Edge[]>();
 
@@ -107,12 +132,14 @@ export function buildGraph(b: Building): Graph {
   });
 
   // Vertical connections.
+  const unitById = new Map(b.units.map((u) => [u.id, u]));
   for (const v of b.verticals) {
     if (!nodes.has(v.a) || !nodes.has(v.b)) {
       // A non-routable endpoint (both ids are real units) → skip; otherwise throw.
       if (b.units.some((u) => u.id === v.a) && b.units.some((u) => u.id === v.b)) continue;
       throw new Error(`vertical references unknown unit: ${v.a}/${v.b}`);
     }
+    if (opts?.stepFree && !isStepFreeVertical(v, unitById)) continue;
     addEdge(v.a, v.b, VERTICAL_COST);
   }
 
