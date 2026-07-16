@@ -229,6 +229,21 @@ function layer(result: DxfParseResult, name: string) {
   return result.layers.find((l) => l.name === name);
 }
 
+/** Flat Number.isFinite scan over every polyline AND every closed shape of
+ *  every layer — the invariant the finite-geometry chokepoint in dxf.ts
+ *  guarantees (no non-finite coordinate ever reaches a layer bucket).
+ *  Shared by every malformed-input test below. */
+function assertAllFinite(result: DxfParseResult) {
+  for (const l of result.layers) {
+    for (const line of [...l.polylines, ...l.closedShapes]) {
+      for (const [x, y] of line) {
+        expect(Number.isFinite(x)).toBe(true);
+        expect(Number.isFinite(y)).toBe(true);
+      }
+    }
+  }
+}
+
 describe("parseDxfText", () => {
   it("scales mm units and extracts a closed LWPOLYLINE as a room-sized shape", () => {
     const parsed = parseDxfText(FULL_DXF);
@@ -374,6 +389,7 @@ EOF`;
     if (!parsed.ok) return;
     expect(parsed.result.skipped.CIRCLE).toBe(1);
     expect(parsed.result.layers.length).toBe(0); // no valid geometry, no layer emitted
+    assertAllFinite(parsed.result);
   });
 
   it("skips an ARC with center but no radius (malformed)", () => {
@@ -402,6 +418,7 @@ EOF`;
     if (!parsed.ok) return;
     expect(parsed.result.skipped.ARC).toBe(1);
     expect(parsed.result.layers.length).toBe(0); // no valid geometry, no layer emitted
+    assertAllFinite(parsed.result);
   });
 
   it("skips an ARC with center and radius but no angle codes 50/51 (malformed)", () => {
@@ -428,6 +445,7 @@ EOF`;
     if (!parsed.ok) return;
     expect(parsed.result.skipped.ARC).toBe(1);
     expect(parsed.result.layers.length).toBe(0); // no valid geometry, no layer emitted
+    assertAllFinite(parsed.result);
   });
 
   it("ensures no NaN points appear in polylines from malformed geometry", () => {
@@ -477,14 +495,182 @@ EOF`;
     expect(parsed.result.skipped.ARC).toBe(1);
     // Only the valid LWPOLYLINE creates a layer
     expect(parsed.result.layers.length).toBe(1);
-    // Scan all points — none should be NaN
-    for (const layer of parsed.result.layers) {
-      for (const polyline of layer.polylines) {
-        for (const [x, y] of polyline) {
-          expect(Number.isFinite(x)).toBe(true);
-          expect(Number.isFinite(y)).toBe(true);
-        }
-      }
-    }
+    assertAllFinite(parsed.result);
+  });
+
+  // dxf-parser runs parseFloat on numeric group codes, so garbage text in a
+  // numeric field yields NaN that still satisfies `typeof === "number"` —
+  // these four probe the finite-geometry chokepoint at each of its entry
+  // points (a plain vertex, a LINE endpoint, a guard that only checks type,
+  // and a transform that corrupts geometry it never directly reads).
+
+  it("skips an LWPOLYLINE with a non-finite (garbage-text) vertex Y", () => {
+    const dxf = `0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+8
+L1
+90
+2
+70
+0
+10
+0.0
+20
+0.0
+10
+100.0
+20
+GARBAGE
+0
+ENDSEC
+0
+EOF`;
+    const parsed = parseDxfText(dxf);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.result.skipped.LWPOLYLINE).toBe(1);
+    expect(parsed.result.layers.length).toBe(0); // entity dropped, no layer emitted
+    assertAllFinite(parsed.result);
+  });
+
+  it("skips a LINE with a non-finite (garbage-text) endpoint X", () => {
+    const dxf = `0
+SECTION
+2
+ENTITIES
+0
+LINE
+8
+L1
+10
+0.0
+20
+0.0
+11
+GARBAGE
+21
+100.0
+0
+ENDSEC
+0
+EOF`;
+    const parsed = parseDxfText(dxf);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.result.skipped.LINE).toBe(1);
+    expect(parsed.result.layers.length).toBe(0);
+    assertAllFinite(parsed.result);
+  });
+
+  it("skips a CIRCLE with a non-finite (garbage-text) center X, bypassing the typeof guard", () => {
+    const dxf = `0
+SECTION
+2
+ENTITIES
+0
+CIRCLE
+8
+L1
+10
+GARBAGE
+20
+0.0
+40
+1000.0
+0
+ENDSEC
+0
+EOF`;
+    const parsed = parseDxfText(dxf);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // NaN is typeof "number", so the structural center/radius guard passes —
+    // only the finite-geometry chokepoint catches this one.
+    expect(parsed.result.skipped.CIRCLE).toBe(1);
+    expect(parsed.result.layers.length).toBe(0);
+    assertAllFinite(parsed.result);
+  });
+
+  it("skips an INSERT-expanded entity when the INSERT's rotation is non-finite (garbage text)", () => {
+    const dxf = `0
+SECTION
+2
+BLOCKS
+0
+BLOCK
+2
+DOORBLK
+10
+0.0
+20
+0.0
+0
+LWPOLYLINE
+8
+BLOCKLAYER
+90
+4
+70
+1
+10
+0.0
+20
+0.0
+10
+100.0
+20
+0.0
+10
+100.0
+20
+100.0
+10
+0.0
+20
+100.0
+0
+ENDBLK
+0
+ENDSEC
+0
+SECTION
+2
+ENTITIES
+0
+INSERT
+8
+INSERTS
+2
+DOORBLK
+10
+500.0
+20
+500.0
+30
+0.0
+41
+1.0
+42
+1.0
+50
+GARBAGE
+0
+ENDSEC
+0
+EOF`;
+    const parsed = parseDxfText(dxf);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // rotation is NaN but still typeof "number", so it passes the `typeof
+    // === "number"` fallback check and NaN cos/sin corrupts every expanded
+    // point; the nested LWPOLYLINE is dropped and counted under its own
+    // type, not "INSERT".
+    expect(parsed.result.skipped.LWPOLYLINE).toBe(1);
+    expect(parsed.result.layers.length).toBe(0);
+    assertAllFinite(parsed.result);
   });
 });

@@ -50,6 +50,22 @@ type RawPoint = { x: number; y: number };
 // rather than fighting the library's typings with casts everywhere.
 type RawEntity = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+/** True when every point has finite x and y. dxf-parser runs `parseFloat` on
+ *  every numeric group code, so corrupt/garbage text yields NaN that still
+ *  satisfies a `typeof === "number"` guard — per-entity field guards can't
+ *  catch that (whack-a-mole). This is the single chokepoint every polyline/
+ *  closed-shape push runs through right before it lands in a layer bucket:
+ *  called pre-scale (RawPoint, drawing units) rather than post-scale
+ *  (MetreXY) purely so a failure can still be attributed to the entity's own
+ *  type here — NaN survives any linear transform unchanged, so the check is
+ *  equivalent either way. INSERT-expanded nested entities flow back through
+ *  these same LINE/LWPOLYLINE/POLYLINE/CIRCLE/ARC push sites, so a garbage
+ *  INSERT rotation (NaN cos/sin corrupting every expanded point) is caught
+ *  here too, without any INSERT-specific guard. */
+function allFinite(pts: RawPoint[]): boolean {
+  return pts.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+}
+
 /** Drop consecutive duplicate points (exact match — DXF coordinates that are
  *  genuinely the same vertex repeat with identical text). */
 function dedupeConsecutive(pts: RawPoint[]): RawPoint[] {
@@ -129,8 +145,16 @@ function layerBucket(map: Map<string, LayerAccum>, name: string): LayerAccum {
  *  vertex === last vertex (post-dedupe). `polylines` always gets the full
  *  outline (closed rings get the first point duplicated at the end so line
  *  rendering draws a complete loop); `closedCandidates` gets the deduped
- *  OPEN ring, only when it has >=3 distinct vertices. */
-function addPolylineVertices(bucket: LayerAccum, rawVerts: RawPoint[], explicitClosed: boolean) {
+ *  OPEN ring, only when it has >=3 distinct vertices. Non-finite vertices
+ *  (see `allFinite`) skip the whole entity under `type` instead of entering
+ *  either array. */
+function addPolylineVertices(
+  bucket: LayerAccum,
+  rawVerts: RawPoint[],
+  explicitClosed: boolean,
+  type: string,
+  skip: (type: string) => void,
+) {
   let verts = dedupeConsecutive(rawVerts);
   let closed = explicitClosed;
   if (verts.length >= 2) {
@@ -140,6 +164,10 @@ function addPolylineVertices(bucket: LayerAccum, rawVerts: RawPoint[], explicitC
       closed = true;
       verts = verts.slice(0, -1); // drop the repeated closing vertex
     }
+  }
+  if (!allFinite(verts)) {
+    skip(type);
+    return;
   }
   bucket.entityCount++;
   if (verts.length < 2) return; // degenerate — nothing drawable
@@ -187,6 +215,10 @@ export function parseDxfText(
       case "LINE": {
         const bucket = layerBucket(layersMap, entity.layer ?? "0");
         const pts: RawPoint[] = (entity.vertices ?? []).map((v: RawPoint) => transform(v));
+        if (!allFinite(pts)) {
+          skip("LINE");
+          break;
+        }
         bucket.entityCount++;
         if (pts.length >= 2) bucket.polylines.push(pts);
         break;
@@ -195,7 +227,7 @@ export function parseDxfText(
       case "POLYLINE": {
         const bucket = layerBucket(layersMap, entity.layer ?? "0");
         const pts: RawPoint[] = (entity.vertices ?? []).map((v: RawPoint) => transform(v));
-        addPolylineVertices(bucket, pts, !!entity.shape);
+        addPolylineVertices(bucket, pts, !!entity.shape, type as string, skip);
         break;
       }
       case "CIRCLE": {
@@ -206,6 +238,10 @@ export function parseDxfText(
         }
         const raw = tessellateCircle(entity.center.x, entity.center.y, entity.radius);
         const pts = raw.map(transform);
+        if (!allFinite(pts)) {
+          skip("CIRCLE");
+          break;
+        }
         bucket.entityCount++;
         bucket.polylines.push([...pts, pts[0]]);
         bucket.closedCandidates.push(pts);
@@ -219,6 +255,10 @@ export function parseDxfText(
         }
         const raw = tessellateArc(entity.center.x, entity.center.y, entity.radius, entity.startAngle, entity.endAngle);
         const pts = raw.map(transform);
+        if (!allFinite(pts)) {
+          skip("ARC");
+          break;
+        }
         bucket.entityCount++;
         bucket.polylines.push(pts); // ARCs are polylines only, never closed shapes
         break;
