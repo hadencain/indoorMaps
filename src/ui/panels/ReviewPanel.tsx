@@ -17,7 +17,7 @@ export default function ReviewPanel() {
 
   const go = (issue: ReviewIssue) => {
     if (issue.unitId) setSelected(issue.unitId);
-    if (issue.at) requestFly(issue.at, ordinal);
+    if (issue.at) requestFly(issue.at, issue.ordinal ?? ordinal);
   };
 
   return (

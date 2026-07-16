@@ -751,15 +751,22 @@ export default function MapView() {
     ] as maplibregl.ExpressionSpecification);
   }, [ready, searchQuery]);
 
-  // Sidebar-initiated camera moves (directory rows). One-shot: ease, clear.
+  // Sidebar-initiated camera moves. Cross-floor: switch the floor first, then
+  // ease on the re-run (ordinal is a dep). Cleared after easing, or immediately
+  // when the target floor doesn't exist (stale request).
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || !flyTarget) return;
     if (flyTarget.ordinal === ordinal) {
       map.easeTo({ center: m2ll(building.origin, flyTarget.center[0], flyTarget.center[1]), duration: 450 });
+      useStore.setState({ flyTarget: null });
+    } else if (building.levels.some((l) => l.ordinal === flyTarget.ordinal)) {
+      useStore.getState().setOrdinal(flyTarget.ordinal);
+      // keep flyTarget — the effect re-runs with the new ordinal and eases
+    } else {
+      useStore.setState({ flyTarget: null });
     }
-    useStore.setState({ flyTarget: null });
-  }, [ready, flyTarget, ordinal, building.origin]);
+  }, [ready, flyTarget, ordinal, building.origin, building.levels]);
 
   // Rebuild the snap grid when toggled / resized / building extent changes.
   useEffect(() => {

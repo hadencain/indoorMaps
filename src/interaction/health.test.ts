@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { doorAdjacency, floorHealth, reviewFloor } from "./health";
+import { polygonCentroid } from "../geo";
 import type { Building, Unit, Opening } from "../types";
 
 // Two rooms sharing the wall x=10, plus a corridor strip above both.
@@ -165,8 +166,15 @@ describe("reviewFloor", () => {
       { a: "a", b: "up", name: "Stair OK" }, // fine
     ];
     const issues = reviewFloor(b, 0);
-    expect(issues.find((i) => i.id === "dangling-vertical:a:ghost")?.severity).toBe("error");
-    expect(issues.find((i) => i.id === "flat-vertical:a:b")?.severity).toBe("warn");
+    const dangling = issues.find((i) => i.id === "dangling-vertical:a:ghost");
+    expect(dangling?.severity).toBe("error");
+    expect(dangling?.unitId).toBe("a"); // surviving endpoint
+    expect(dangling?.ordinal).toBe(0); // surviving endpoint's ordinal
+    const flat = issues.find((i) => i.id === "flat-vertical:a:b");
+    expect(flat?.severity).toBe("warn");
+    expect(flat?.unitId).toBe("a"); // now clickable, from the `a` endpoint
+    expect(flat?.at).toEqual(polygonCentroid(roomA.polygon));
+    expect(flat?.ordinal).toBe(0);
     expect(issues.some((i) => i.message.includes("Stair OK"))).toBe(false);
   });
 

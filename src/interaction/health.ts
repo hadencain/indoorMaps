@@ -104,6 +104,7 @@ export interface ReviewIssue {
   message: string; // human sentence naming the offender
   unitId?: string; // click target (select)
   at?: MetreXY; // fly target
+  ordinal?: number; // floor the fly target lives on, when it differs from the reviewed floor
 }
 
 const SEV_ORDER: Record<ReviewSeverity, number> = { error: 0, warn: 1, info: 2 };
@@ -136,6 +137,7 @@ export function reviewFloor(building: Building, ordinal: number): ReviewIssue[] 
       severity: "error",
       message: "No corridor on this floor — plain doors have nowhere to route",
       at,
+      ordinal,
     });
   }
 
@@ -153,12 +155,16 @@ export function reviewFloor(building: Building, ordinal: number): ReviewIssue[] 
         message: `Vertical "${v.name}" references a missing unit`,
         unitId: resolved?.id,
         at: resolved ? polygonCentroid(resolved.polygon) : undefined,
+        ordinal: resolved?.ordinal,
       });
     } else if (a.ordinal === b.ordinal) {
       issues.push({
         id: `flat-vertical:${v.a}:${v.b}`,
         severity: "warn",
         message: `Vertical "${v.name}" links two units on the same floor`,
+        unitId: a.id,
+        at: polygonCentroid(a.polygon),
+        ordinal: a.ordinal,
       });
     }
   }
@@ -172,6 +178,7 @@ export function reviewFloor(building: Building, ordinal: number): ReviewIssue[] 
       message: `${name} has no door — routing can't reach it`,
       unitId,
       at: u ? polygonCentroid(u.polygon) : undefined,
+      ordinal,
     });
   }
 
@@ -187,6 +194,7 @@ export function reviewFloor(building: Building, ordinal: number): ReviewIssue[] 
       message: `Door on ${owner?.name ?? "unknown unit"} opens onto unmapped space`,
       unitId: op.unit,
       at: op.at,
+      ordinal,
     });
   }
 
@@ -198,6 +206,7 @@ export function reviewFloor(building: Building, ordinal: number): ReviewIssue[] 
         message: `Unnamed unit (${u.category})`,
         unitId: u.id,
         at: polygonCentroid(u.polygon),
+        ordinal,
       });
     }
   }
@@ -212,6 +221,7 @@ export function reviewFloor(building: Building, ordinal: number): ReviewIssue[] 
           message: `${u.name.trim() ? u.name : "Unnamed unit"} is vacant`,
           unitId: u.id,
           at: polygonCentroid(u.polygon),
+          ordinal,
         });
       }
     }
