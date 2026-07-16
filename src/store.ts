@@ -416,7 +416,10 @@ export const useStore = create<State>((set, get) => {
       const fold =
         coalesceKey !== undefined &&
         coalesceKey === lastCommitKey &&
-        Date.now() - lastCommitAt < 1000;
+        // 2.5s idle window, not 1s: on large venues every keystroke rebuilds
+        // ~10^3 map markers, so real inter-keystroke commit gaps exceed 1s
+        // under load and a burst would fragment into several undo entries.
+        Date.now() - lastCommitAt < 2500;
       lastCommitKey = coalesceKey ?? null;
       lastCommitAt = Date.now();
       if (fold) return { building: next, future: [] };
