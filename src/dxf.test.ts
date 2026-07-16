@@ -353,4 +353,112 @@ describe("parseDxfText", () => {
     expect(typeof parsed.error).toBe("string");
     expect(parsed.error.length).toBeGreaterThan(0);
   });
+
+  it("skips a CIRCLE with radius but no center (malformed)", () => {
+    const malformedDxf = `0
+SECTION
+2
+ENTITIES
+0
+CIRCLE
+8
+FIXTURES
+40
+1000.0
+0
+ENDSEC
+0
+EOF`;
+    const parsed = parseDxfText(malformedDxf);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.result.skipped.CIRCLE).toBe(1);
+    expect(parsed.result.layers.length).toBe(0); // no valid geometry, no layer emitted
+  });
+
+  it("skips an ARC with center but no radius (malformed)", () => {
+    const malformedDxf = `0
+SECTION
+2
+ENTITIES
+0
+ARC
+8
+ARCLAYER
+10
+1000.0
+20
+1000.0
+50
+0.0
+51
+90.0
+0
+ENDSEC
+0
+EOF`;
+    const parsed = parseDxfText(malformedDxf);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.result.skipped.ARC).toBe(1);
+    expect(parsed.result.layers.length).toBe(0); // no valid geometry, no layer emitted
+  });
+
+  it("ensures no NaN points appear in polylines from malformed geometry", () => {
+    const allDxf = `0
+SECTION
+2
+ENTITIES
+0
+CIRCLE
+8
+L1
+40
+1000.0
+0
+ARC
+8
+L2
+10
+500.0
+20
+500.0
+0
+LWPOLYLINE
+8
+L3
+90
+2
+70
+0
+10
+0.0
+20
+0.0
+10
+100.0
+20
+100.0
+0
+ENDSEC
+0
+EOF`;
+    const parsed = parseDxfText(allDxf);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // Malformed entities are skipped
+    expect(parsed.result.skipped.CIRCLE).toBe(1);
+    expect(parsed.result.skipped.ARC).toBe(1);
+    // Only the valid LWPOLYLINE creates a layer
+    expect(parsed.result.layers.length).toBe(1);
+    // Scan all points — none should be NaN
+    for (const layer of parsed.result.layers) {
+      for (const polyline of layer.polylines) {
+        for (const [x, y] of polyline) {
+          expect(Number.isFinite(x)).toBe(true);
+          expect(Number.isFinite(y)).toBe(true);
+        }
+      }
+    }
+  });
 });

@@ -200,6 +200,10 @@ export function parseDxfText(
       }
       case "CIRCLE": {
         const bucket = layerBucket(layersMap, entity.layer ?? "0");
+        if (!entity.center || typeof entity.center.x !== "number" || typeof entity.center.y !== "number" || typeof entity.radius !== "number" || !(entity.radius > 0)) {
+          skip("CIRCLE");
+          break;
+        }
         const raw = tessellateCircle(entity.center.x, entity.center.y, entity.radius);
         const pts = raw.map(transform);
         bucket.entityCount++;
@@ -209,6 +213,10 @@ export function parseDxfText(
       }
       case "ARC": {
         const bucket = layerBucket(layersMap, entity.layer ?? "0");
+        if (!entity.center || typeof entity.center.x !== "number" || typeof entity.center.y !== "number" || typeof entity.radius !== "number" || !(entity.radius > 0)) {
+          skip("ARC");
+          break;
+        }
         const raw = tessellateArc(entity.center.x, entity.center.y, entity.radius, entity.startAngle, entity.endAngle);
         const pts = raw.map(transform);
         bucket.entityCount++;
