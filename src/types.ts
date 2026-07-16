@@ -82,6 +82,18 @@ export interface RasterUnderlay {
   opacity: number; // 0..1, default 0.5
 }
 
+/** A CAD linework layer imported from a DXF file, kept as a per-floor vector
+ *  underlay to trace over (Phase B DXF import). `polylines` are already
+ *  scaled to metres and translated into the building's local-metre frame —
+ *  same representation dxf.ts produces. Additive; defaults to [] in
+ *  loadBuilding, same pattern as `underlays` (raster). */
+export interface VectorUnderlay {
+  ordinal: number;
+  name: string;
+  polylines: MetreXY[][];
+  opacity: number; // 0..1
+}
+
 /** CCTV camera kind.
  *  - "fixed" = static sector (a wedge at a fixed heading).
  *  - "dome"  = 360° sight; `fovDeg`/`heading` are ignored (treated as full circle).
@@ -263,6 +275,10 @@ export interface Building {
   cameras: Camera[];
   /** Optional raster floorplan underlays, at most one per ordinal (P11c). */
   underlays?: RasterUnderlay[];
+  /** CAD linework underlays imported from DXF, one per floor per import
+   *  (Phase B). Additive; defaults to [] for legacy buildings — a building
+   *  with no CAD import loads unchanged, same pattern as `underlays`. */
+  vectorUnderlays?: VectorUnderlay[];
   /** Incident annotation pins (P10). Additive; defaults to [] in loadBuilding. */
   incidents?: Incident[];
   /** Guard patrol paths (P10). Additive; defaults to [] in loadBuilding. */

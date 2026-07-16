@@ -1664,6 +1664,9 @@ export const useStore = create<State>((set, get) => {
 // So on quota failure we retry persisting a copy with each underlay `dataUrl`
 // stripped to "" (metadata kept). Net: the building always persists; oversized
 // underlay images are session-only and must be re-imported after reload.
+// Same story for `vectorUnderlays`: a DXF import can carry thousands of
+// tessellated points across many polylines — strip those to [] too
+// (metadata kept) so CAD linework can never take the whole building down.
 function persistBuilding(building: Building, key: string) {
   try {
     localStorage.setItem(key, JSON.stringify(building));
@@ -1672,6 +1675,7 @@ function persistBuilding(building: Building, key: string) {
       const stripped: Building = {
         ...building,
         underlays: building.underlays?.map((u) => ({ ...u, dataUrl: "" })),
+        vectorUnderlays: building.vectorUnderlays?.map((v) => ({ ...v, polylines: [] })),
       };
       localStorage.setItem(key, JSON.stringify(stripped));
     } catch {
