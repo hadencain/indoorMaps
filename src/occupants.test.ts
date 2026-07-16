@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { occupantAnchor, occupantsForUnit, occupantNamesByUnit } from "./occupants";
 import type { Building, Occupant, Unit } from "./types";
+import { mallBuilding } from "./demos/mall";
+import { airportBuilding } from "./demos/airport";
 
 const unit: Unit = {
   id: "u1",
@@ -68,4 +70,16 @@ describe("occupantNamesByUnit", () => {
   it("omits units with no occupants", () => {
     expect(occupantNamesByUnit(withOcc([])).has("u1")).toBe(false);
   });
+});
+
+describe("demo occupant seeding", () => {
+  for (const [label, b] of [["mall", mallBuilding], ["airport", airportBuilding]] as const) {
+    it(`${label}: every occupant resolves to a real unit, ids unique`, () => {
+      const unitIds = new Set(b.units.map((u) => u.id));
+      const occs = b.occupants ?? [];
+      expect(occs.length).toBeGreaterThan(0);
+      for (const o of occs) expect(unitIds.has(o.unitId)).toBe(true);
+      expect(new Set(occs.map((o) => o.id)).size).toBe(occs.length);
+    });
+  }
 });

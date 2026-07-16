@@ -509,4 +509,5 @@ export const airportBuilding: Building = {
     {"id":"fix-134","ordinal":1,"kind":"seating","polygon":[[318,201],[336,201],[336,204],[318,204]]},
     {"id":"fix-135","ordinal":1,"kind":"seating","polygon":[[318,211],[336,211],[336,214],[318,214]]},
   ],
+  occupants: [{"id":"occ-rentalcar-0","name":"Rental Car Counters","unitId":"rentalcar-0","category":"retail","hours":"Daily 5a–11p"},{"id":"occ-cafe1-0","name":"Landside Café 1","unitId":"cafe1-0","category":"dining","hours":"Daily 5a–11p"},{"id":"occ-cafe2-0","name":"Landside Café 2","unitId":"cafe2-0","category":"dining","hours":"Daily 5a–11p"},{"id":"occ-cafe3-0","name":"Landside Café 3","unitId":"cafe3-0","category":"dining","hours":"Daily 5a–11p"},{"id":"occ-cafe4-0","name":"Landside Café 4","unitId":"cafe4-0","category":"dining","hours":"Daily 5a–11p"},{"id":"occ-dutyfree-1","name":"Duty-Free Shop","unitId":"dutyfree-1","category":"retail","hours":"Daily 5a–11p"}],
 };

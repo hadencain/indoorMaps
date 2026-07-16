@@ -15515,5 +15515,329 @@ export const mallBuilding: Building = {
         ]
       ]
     }
+  ],
+  "occupants": [
+    {
+      "id": "occ-anchorW-0",
+      "name": "Anchor Store West",
+      "unitId": "anchorW-0",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorE-0",
+      "name": "Anchor Store East",
+      "unitId": "anchorE-0",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorN-0",
+      "name": "Anchor Store North",
+      "unitId": "anchorN-0",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorS-0",
+      "name": "Anchor Store South",
+      "unitId": "anchorS-0",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-swn-0-0",
+      "name": "Marbled Home Goods 0-swn0",
+      "unitId": "swn-0-0",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-swn-0-1",
+      "name": "Quill Stationery 0-swn1",
+      "unitId": "swn-0-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-swn-0-2",
+      "name": "Foundry Games 0-swn2",
+      "unitId": "swn-0-2",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sws-0-0",
+      "name": "Ampersand Coffee 0-sws0",
+      "unitId": "sws-0-0",
+      "category": "dining",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sws-0-1",
+      "name": "Halcyon Fragrance 0-sws1",
+      "unitId": "sws-0-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sws-0-2",
+      "name": "Wren & Co Kids 0-sws2",
+      "unitId": "sws-0-2",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sen-0-0",
+      "name": "Marbled Home Goods 0-sen0",
+      "unitId": "sen-0-0",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sen-0-1",
+      "name": "Quill Stationery 0-sen1",
+      "unitId": "sen-0-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-ses-0-0",
+      "name": "Ampersand Coffee 0-ses0",
+      "unitId": "ses-0-0",
+      "category": "dining",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-ses-0-1",
+      "name": "Halcyon Fragrance 0-ses1",
+      "unitId": "ses-0-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorW-1",
+      "name": "Anchor Store West",
+      "unitId": "anchorW-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorE-1",
+      "name": "Anchor Store East",
+      "unitId": "anchorE-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorN-1",
+      "name": "Anchor Store North",
+      "unitId": "anchorN-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorS-1",
+      "name": "Anchor Store South",
+      "unitId": "anchorS-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-swn-1-0",
+      "name": "Marbled Home Goods 1-swn0",
+      "unitId": "swn-1-0",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-swn-1-1",
+      "name": "Quill Stationery 1-swn1",
+      "unitId": "swn-1-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-swn-1-2",
+      "name": "Foundry Games 1-swn2",
+      "unitId": "swn-1-2",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sws-1-0",
+      "name": "Ampersand Coffee 1-sws0",
+      "unitId": "sws-1-0",
+      "category": "dining",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sws-1-1",
+      "name": "Halcyon Fragrance 1-sws1",
+      "unitId": "sws-1-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sws-1-2",
+      "name": "Wren & Co Kids 1-sws2",
+      "unitId": "sws-1-2",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sen-1-0",
+      "name": "Marbled Home Goods 1-sen0",
+      "unitId": "sen-1-0",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sen-1-1",
+      "name": "Quill Stationery 1-sen1",
+      "unitId": "sen-1-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-ses-1-0",
+      "name": "Ampersand Coffee 1-ses0",
+      "unitId": "ses-1-0",
+      "category": "dining",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-ses-1-1",
+      "name": "Halcyon Fragrance 1-ses1",
+      "unitId": "ses-1-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorW-2",
+      "name": "Anchor Store West",
+      "unitId": "anchorW-2",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorE-2",
+      "name": "Anchor Store East",
+      "unitId": "anchorE-2",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorN-2",
+      "name": "Anchor Store North",
+      "unitId": "anchorN-2",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorS-2",
+      "name": "Anchor Store South",
+      "unitId": "anchorS-2",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-swn-2-0",
+      "name": "Marbled Home Goods 2-swn0",
+      "unitId": "swn-2-0",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-swn-2-1",
+      "name": "Quill Stationery 2-swn1",
+      "unitId": "swn-2-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-swn-2-2",
+      "name": "Foundry Games 2-swn2",
+      "unitId": "swn-2-2",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sws-2-0",
+      "name": "Ampersand Coffee 2-sws0",
+      "unitId": "sws-2-0",
+      "category": "dining",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sws-2-1",
+      "name": "Halcyon Fragrance 2-sws1",
+      "unitId": "sws-2-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sws-2-2",
+      "name": "Wren & Co Kids 2-sws2",
+      "unitId": "sws-2-2",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sen-2-0",
+      "name": "Marbled Home Goods 2-sen0",
+      "unitId": "sen-2-0",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-sen-2-1",
+      "name": "Quill Stationery 2-sen1",
+      "unitId": "sen-2-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-ses-2-0",
+      "name": "Ampersand Coffee 2-ses0",
+      "unitId": "ses-2-0",
+      "category": "dining",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-ses-2-1",
+      "name": "Halcyon Fragrance 2-ses1",
+      "unitId": "ses-2-1",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorW-3",
+      "name": "Anchor Store West",
+      "unitId": "anchorW-3",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorE-3",
+      "name": "Anchor Store East",
+      "unitId": "anchorE-3",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorN-3",
+      "name": "Anchor Store North",
+      "unitId": "anchorN-3",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    },
+    {
+      "id": "occ-anchorS-3",
+      "name": "Anchor Store South",
+      "unitId": "anchorS-3",
+      "category": "retail",
+      "hours": "Mon–Sat 10–9, Sun 11–6"
+    }
   ]
 };
