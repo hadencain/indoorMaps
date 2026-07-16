@@ -278,7 +278,11 @@ export function bindDrawing(map: maplibregl.Map, deps: DrawDeps): DrawHandle {
       return;
     }
     if (l.drawTool !== "none") return;
-    const hits = map.queryRenderedFeatures(e.point, { layers: ["unit-fill"] });
+    const hits = map.queryRenderedFeatures(e.point, {
+      // In 3D, clicking a unit's extruded wall/roof must select it too — the
+      // flat fill footprint alone misses tall units under tilt.
+      layers: map.getLayer("unit-extrude") ? ["unit-fill", "unit-extrude"] : ["unit-fill"],
+    });
     const id = hits[0]?.properties?.id as string | undefined;
     if (id) {
       e.preventDefault();
@@ -315,7 +319,11 @@ export function bindDrawing(map: maplibregl.Map, deps: DrawDeps): DrawHandle {
         l.onAddPatrolPoint(r.point);
         return;
       }
-      const hits = map.queryRenderedFeatures(e.point, { layers: ["unit-fill"] });
+      const hits = map.queryRenderedFeatures(e.point, {
+      // In 3D, clicking a unit's extruded wall/roof must select it too — the
+      // flat fill footprint alone misses tall units under tilt.
+      layers: map.getLayer("unit-extrude") ? ["unit-fill", "unit-extrude"] : ["unit-fill"],
+    });
       const id = hits[0]?.properties?.id as string | undefined;
       if (!id && l.selectedCameraId) l.onSelectCamera(null);
       if (l.linkMode) {
