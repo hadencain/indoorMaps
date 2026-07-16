@@ -53,3 +53,30 @@ export function doorForRoom(
   if (y0 >= cy1) return [cx, cy1];
   return [cx, cy0];
 }
+
+/**
+ * Retro-fill doors for every doorless space room on a floor, given a building
+ * that already has its corridor unit in place. Used when a corridor is added
+ * AFTER rooms were traced (the from-scratch authoring order) — without this,
+ * those earlier rooms are stranded with no door and no UI to add one.
+ * Pure: returns placements only, caller maps them to Opening objects/ids.
+ */
+export function autoDoorsForRooms(
+  b: Building,
+  ordinal: number,
+): { unit: string; at: MetreXY }[] {
+  const doored = new Set(b.openings.map((o) => o.unit));
+  const doorless = b.units.filter(
+    (u) =>
+      u.ordinal === ordinal &&
+      isSpace(u.category) &&
+      u.category !== "outside" &&
+      !doored.has(u.id),
+  );
+  const placements: { unit: string; at: MetreXY }[] = [];
+  for (const u of doorless) {
+    const at = doorForRoom(b, u.polygon, ordinal);
+    if (at) placements.push({ unit: u.id, at });
+  }
+  return placements;
+}

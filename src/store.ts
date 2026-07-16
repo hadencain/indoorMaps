@@ -16,7 +16,7 @@ import type {
   SiteInfo,
   Occupant,
 } from "./types";
-import { doorForRoom, selectableUnits } from "./building";
+import { autoDoorsForRooms, doorForRoom, selectableUnits } from "./building";
 import { defaultNameFor, isSpace } from "./categories";
 import { parseSvgShapes } from "./svgImport";
 import { buildingToGeoJSON, geoJSONToBuilding } from "./imdf";
@@ -684,12 +684,25 @@ export const useStore = create<State>((set, get) => {
       commit((b) => {
         const name = defaultNameFor(category, b);
         const door = doorForRoom(b, polygon, ord);
-        return {
+        const withUnit: Building = {
           ...b,
           units: [...b.units, { id, ordinal: ord, name, category, polygon }],
           openings: door
             ? [...b.openings, { id: `d-${id}`, unit: id, at: door }]
             : b.openings,
+        };
+        // Adding a corridor to a floor that already has doorless rooms
+        // (from-scratch authoring order) would otherwise strand them with
+        // no door and no UI to add one after the fact.
+        if (category !== "corridor") return withUnit;
+        const retro = autoDoorsForRooms(withUnit, ord);
+        if (retro.length === 0) return withUnit;
+        return {
+          ...withUnit,
+          openings: [
+            ...withUnit.openings,
+            ...retro.map((r) => ({ id: `d-${r.unit}`, unit: r.unit, at: r.at })),
+          ],
         };
       });
     },
