@@ -2827,3 +2827,16 @@ button.wide.ghost {
   color: var(--accent);
   border-color: var(--accent);
 }
+
+.route-steps {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+.route-steps li::marker {
+  color: var(--accent);
+}

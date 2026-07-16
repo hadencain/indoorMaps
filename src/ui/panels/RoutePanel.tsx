@@ -12,7 +12,7 @@ export default function RoutePanel() {
   const setStart = useStore((s) => s.setStart);
   const setGoal = useStore((s) => s.setGoal);
   const setRouteMode = useStore((s) => s.setRouteMode);
-  const { geom, exit } = useRoute();
+  const { geom, exit, steps } = useRoute();
   const rooms = selectableUnits(building);
   const level = (o: number) => building.levels.find((l) => l.ordinal === o)?.name ?? `L${o}`;
   const egress = routeMode === "egress";
@@ -109,6 +109,13 @@ export default function RoutePanel() {
           <div className="warn">{egress ? "no exit reachable" : "no route found"}</div>
         )}
       </div>
+      {steps.length > 0 && (
+        <ol className="route-steps">
+          {steps.map((s, i) => (
+            <li key={i}>{s.text}</li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
