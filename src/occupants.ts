@@ -1,5 +1,16 @@
-import type { Building, MetreXY, Occupant } from "./types";
+import type { Building, MetreXY, Occupant, OccupantCategory } from "./types";
 import { polygonCentroid } from "./geo";
+
+export const OCCUPANT_CATEGORY_LABELS: Record<OccupantCategory, string> = {
+  retail: "Retail",
+  dining: "Food & drink",
+  services: "Services",
+  entertainment: "Entertainment",
+  health: "Health",
+  office: "Office",
+  transit: "Transit",
+  other: "Other",
+};
 
 /** The occupant's label/POI point: explicit anchor, else its unit's centroid,
  *  else [0,0] for a dangling unitId (never persisted — deleteUnit cascades —

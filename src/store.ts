@@ -307,7 +307,6 @@ interface State {
   setSecurity: (id: string, level: SecurityLevel) => void;
   deleteUnit: (id: string) => void;
   moveVertex: (id: string, index: number, at: MetreXY) => void;
-  insertVertex: (id: string, edgeIndex: number) => void;
   deleteVertex: (id: string, index: number) => void;
   /** Replace a unit's whole polygon (edge drag commits through this). */
   setUnitPolygon: (id: string, polygon: MetreXY[]) => void;
@@ -694,20 +693,6 @@ export const useStore = create<State>((set, get) => {
         units: b.units.map((u) =>
           u.id === id ? { ...u, polygon: u.polygon.map((p, i) => (i === index ? at : p)) } : u,
         ),
-      })),
-
-    insertVertex: (id, edgeIndex) =>
-      commit((b) => ({
-        ...b,
-        units: b.units.map((u) => {
-          if (u.id !== id) return u;
-          const a = u.polygon[edgeIndex];
-          const bb = u.polygon[(edgeIndex + 1) % u.polygon.length];
-          const mid: MetreXY = [(a[0] + bb[0]) / 2, (a[1] + bb[1]) / 2];
-          const polygon = [...u.polygon];
-          polygon.splice(edgeIndex + 1, 0, mid);
-          return { ...u, polygon };
-        }),
       })),
 
     deleteVertex: (id, index) =>

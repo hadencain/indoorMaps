@@ -6,21 +6,10 @@ import { CATEGORY_ORDER, CATEGORY_LABELS, isSpace } from "../../categories";
 import { rankCamerasForUnitWithRings } from "../../security/coverage-link";
 import { useVisibility } from "../visibility";
 import { SECURITY_LEVELS, SECURITY_LABELS, SECURITY_COLORS, securityOf } from "../security";
-import { occupantsForUnit } from "../../occupants";
+import { occupantsForUnit, OCCUPANT_CATEGORY_LABELS } from "../../occupants";
 import { selectableUnits } from "../../building";
 import { fileToSmallDataUrl } from "../img";
 import type { Category, SecurityLevel, Occupant, OccupantCategory, Unit } from "../../types";
-
-export const OCCUPANT_CATEGORY_LABELS: Record<OccupantCategory, string> = {
-  retail: "Retail",
-  dining: "Food & drink",
-  services: "Services",
-  entertainment: "Entertainment",
-  health: "Health",
-  office: "Office",
-  transit: "Transit",
-  other: "Other",
-};
 
 export default function PropertiesPanel() {
   const building = useStore((s) => s.building);

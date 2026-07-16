@@ -92,7 +92,6 @@ export default function MapView() {
   const onDelete = useStore((s) => s.deleteUnit);
   const onLinkUnit = useStore((s) => s.linkUnit);
   const onMoveVertex = useStore((s) => s.moveVertex);
-  const onInsertVertex = useStore((s) => s.insertVertex);
   const onDeleteVertex = useStore((s) => s.deleteVertex);
   const onSetUnitPolygon = useStore((s) => s.setUnitPolygon);
   const onInsertVertexAt = useStore((s) => s.insertVertexAt);
@@ -142,7 +141,6 @@ export default function MapView() {
     onLinkUnit,
     vertexEdit,
     onMoveVertex,
-    onInsertVertex,
     onDeleteVertex,
     onSetUnitPolygon,
     onInsertVertexAt,
@@ -186,7 +184,6 @@ export default function MapView() {
     onLinkUnit,
     vertexEdit,
     onMoveVertex,
-    onInsertVertex,
     onDeleteVertex,
     onSetUnitPolygon,
     onInsertVertexAt,

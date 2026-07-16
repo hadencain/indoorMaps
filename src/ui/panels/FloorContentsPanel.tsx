@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useStore } from "../../store";
 import { isSpace } from "../../categories";
-import { occupantNamesByUnit } from "../../occupants";
+import { occupantNamesByUnit, OCCUPANT_CATEGORY_LABELS } from "../../occupants";
 import { polygonCentroid } from "../../geo";
 import type { OccupantCategory } from "../../types";
-import { OCCUPANT_CATEGORY_LABELS } from "./PropertiesPanel";
 import SearchBox from "../SearchBox";
 
 export default function FloorContentsPanel() {
