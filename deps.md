@@ -8,6 +8,7 @@
 - polygon-clipping — Martinez boolean geometry (union/difference/intersection) for
   camera coverage + blind-spot analysis (P6). Runs in metre-space, no network.
 - @fontsource-variable/geist, @fontsource-variable/geist-mono — self-hosted Geist fonts (CSP-safe, offline)
+- dxf-parser (1.1.2) — DXF text → entity tree for CAD import; MIT; parse-only, no DOM
 
 ## Dev
 - vite, @vitejs/plugin-react, typescript, @types/react, @types/react-dom
@@ -15,7 +16,7 @@
 
 ## Notes
 - No network at runtime: fonts bundled, map style empty.
-- Pure logic modules: geo, graph, astar, render, format, svgImport, imdf. `coverage`
+- Pure logic modules: geo, graph, astar, render, format, svgImport, imdf, dxf. `coverage`
   is pure but now imports `polygon-clipping` (P6 boolean geometry).
 - `polygon-clipping` ships its own `.d.ts` (`declare module "polygon-clipping"` with
   named exports) but its ESM build exports only `default`. Bundler module resolution

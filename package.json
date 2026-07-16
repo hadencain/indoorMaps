@@ -12,6 +12,7 @@
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
+    "dxf-parser": "^1.1.2",
     "lucide-react": "^1.23.0",
     "maplibre-gl": "^4.7.1",
     "polygon-clipping": "^0.15.7",
