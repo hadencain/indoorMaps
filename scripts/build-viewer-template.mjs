@@ -58,10 +58,14 @@ const cssPath = join(distViewer, linkHref.replace(/^\.\//, ""));
 const js = readFileSync(jsPath, "utf8");
 const css = readFileSync(cssPath, "utf8");
 
-// Escape `</script>` inside the inlined JS so it can't prematurely close the
-// wrapping <script> tag. This is a textual escape only — it does not touch
-// `/*!`/`@license` comments (MapLibre's BSD-3 notice must survive verbatim).
-const safeJs = js.replace(/<\/script>/gi, "<\\/script>");
+// Escape `</script` inside the inlined JS so it can't prematurely close the
+// wrapping <script> tag. HTML's script-data-end-tag-open state matches on
+// `</script` followed by whitespace/`/`/`>` (not just an exact `</script>`),
+// so the regex is deliberately NOT `>`-strict — anchoring on the trailing
+// `>` would miss e.g. `</script >` or `</script/`. This is a textual escape
+// only — it does not touch `/*!`/`@license` comments (MapLibre's BSD-3
+// notice must survive verbatim).
+const safeJs = js.replace(/<\/script/gi, "<\\/script");
 
 // Function replacers, NOT string replacers: a string replacement value gets
 // `$&`/`$1`/`$$`-style pattern substitution applied even when the search
@@ -83,6 +87,19 @@ if (!sentinelMatch) {
 }
 if (!sentinelMatch[2].includes("/*__BUILDING__*/")) {
   html = html.replace(sentinelRe, `$1/*__BUILDING__*/$3`);
+}
+
+// Insurance against a future sentinel collision: the export step (src/store.ts
+// exportViewer) does a single string-replace on this exact sentinel, so if the
+// inlined JS/CSS ever happens to contain a second literal occurrence, that
+// replace would silently target the wrong one (String.replace only touches
+// the first match). Fail the build loudly instead of shipping a broken template.
+const sentinelCount = (html.match(/\/\*__BUILDING__\*\//g) ?? []).length;
+if (sentinelCount !== 1) {
+  throw new Error(
+    `build-viewer-template: expected exactly 1 occurrence of the /*__BUILDING__*/ sentinel in ` +
+      `the built template, found ${sentinelCount}. Check for a collision in the inlined JS/CSS.`,
+  );
 }
 
 mkdirSync(outDir, { recursive: true });
