@@ -1358,6 +1358,43 @@ button.wide.ghost {
   color: var(--text);
 }
 
+/* Compass overlay (3D): live bearing readout + click-to-reset, shown once the
+   view leaves north-up. Sits below the static north-badge (display mode only)
+   at the same left edge; round button matching the .viewctl cluster. */
+.compass {
+  position: absolute;
+  top: 58px;
+  left: 12px;
+  z-index: 5;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(13, 17, 22, 0.9);
+  border: 1px solid var(--line);
+  color: var(--dim);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.compass:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.compass-arrow {
+  font-size: 10px;
+  color: var(--accent);
+  transition: transform 0.1s linear;
+}
+.compass-n {
+  font-size: 10px;
+  font-weight: 600;
+  margin-top: 1px;
+}
+
 .map-legend {
   position: absolute;
   right: 12px;

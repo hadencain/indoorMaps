@@ -52,6 +52,7 @@ export default function MapView() {
   const patrolDraft = useStore((s) => s.patrolDraft);
   const probe = useStore((s) => s.probe);
   const mode = useStore((s) => s.mode);
+  const view3d = useStore((s) => s.view3d);
   const searchQuery = useStore((s) => s.searchQuery);
   const unit = useStore((s) => s.unit);
   const showDims = useStore((s) => s.showDims);
@@ -122,8 +123,13 @@ export default function MapView() {
   // effect so the main marker-rebuild effect can't wipe it out of sync.
   const probeMarkerRef = useRef<maplibregl.Marker | null>(null);
   const drawHandleRef = useRef<DrawHandle | null>(null);
+  // Timestamp of the last camera rotate/pitch tick — a rotate-drag's trailing
+  // contextmenu (right mouse button used to orbit) would otherwise open the
+  // properties popup; the setMenu wrapper passed to bindDrawing checks this.
+  const lastRotateRef = useRef(0);
   const [ready, setReady] = useState(false);
   const [menu, setMenu] = useState<{ unitId: string; x: number; y: number } | null>(null);
+  const [bearingDeg, setBearingDeg] = useState(0);
 
   const live = useRef({
     building,
@@ -538,11 +544,43 @@ export default function MapView() {
         "coverage-fill",
       );
 
+      // 3D extrusions (Phase A): heights from the synthesized heightM property.
+      // Hidden until view3d; join the floor filter + glass policy effects.
+      map.addLayer({
+        id: "unit-extrude",
+        type: "fill-extrusion",
+        source: "units",
+        layout: { visibility: "none" },
+        paint: {
+          "fill-extrusion-color": functionFillExpression() as maplibregl.ExpressionSpecification,
+          "fill-extrusion-height": ["get", "heightM"],
+          "fill-extrusion-opacity": 0.85,
+        },
+      });
+      map.addLayer({
+        id: "fixture-extrude",
+        type: "fill-extrusion",
+        source: "fixtures",
+        layout: { visibility: "none" },
+        paint: {
+          "fill-extrusion-color": "#39424d",
+          "fill-extrusion-height": ["get", "heightM"],
+          "fill-extrusion-opacity": 0.85,
+        },
+      });
+
       frameBuilding(map, building);
 
       drawHandleRef.current = bindDrawing(map, {
         live: () => live.current,
-        setMenu,
+        // A rotate-drag (right mouse button orbiting the camera) fires a
+        // trailing contextmenu on release — swallow the properties popup for
+        // 300ms after any camera rotation so it doesn't pop up mid-orbit.
+        // Plain right-clicks (no camera movement) pass straight through.
+        setMenu: (m) => {
+          if (m && Date.now() - lastRotateRef.current < 300) return;
+          setMenu(m);
+        },
         onInspectClick: (pt) => {
           const l = live.current;
           const ringById = new Map(l.visPolys.map((v) => [v.cameraId, v.ring]));
@@ -552,6 +590,14 @@ export default function MapView() {
           l.onSelectCamera(ranked[0]?.cameraId ?? null);
         },
       });
+      // Camera-rotation bookkeeping (3D): track the last rotate/pitch tick (for
+      // the popup guard above) and mirror the live bearing into React state for
+      // the compass overlay.
+      map.on("rotate", () => {
+        lastRotateRef.current = Date.now();
+        setBearingDeg(Math.round(map.getBearing()));
+      });
+      map.on("pitch", () => (lastRotateRef.current = Date.now()));
       map.on("zoom", updateZoomDeclutter);
       setReady(true);
     });
@@ -723,7 +769,37 @@ export default function MapView() {
     vis("fixture-fill", layers.fixtures);
     vis("fixture-line", layers.fixtures);
     vis("grid-line", showGrid);
-  }, [ready, layers, showGrid]);
+    // 3D extrusions (Phase A): hidden until view3d; fixtures join Layers'
+    // fixtures toggle same as their flat counterpart.
+    vis("unit-extrude", view3d);
+    vis("fixture-extrude", view3d && layers.fixtures);
+  }, [ready, layers, showGrid, view3d]);
+
+  // 3D camera + rotate control: entering 3D enables drag-rotate and tilts the
+  // camera; leaving it snaps back to the locked north-up plan view (dragRotate
+  // off matches the scale-bar/north-badge invariant documented at map init).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (view3d) {
+      map.dragRotate.enable();
+      map.easeTo({ pitch: 55, duration: 600 });
+    } else {
+      map.dragRotate.disable();
+      map.easeTo({ pitch: 0, bearing: 0, duration: 600 });
+    }
+  }, [ready, view3d]);
+
+  // Glass walls: extrusions must never hide what's being edited or analyzed.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !map.getLayer("unit-extrude")) return;
+    const editing = ["rect", "polygon", "vertex", "link", "camera", "incident", "patrol"].includes(activeTool);
+    const glass = view3d && (editing || layers.coverage || layers.blindSpots);
+    const op = glass ? 0.25 : 0.85;
+    map.setPaintProperty("unit-extrude", "fill-extrusion-opacity", op);
+    map.setPaintProperty("fixture-extrude", "fill-extrusion-opacity", op);
+  }, [ready, view3d, activeTool, layers.coverage, layers.blindSpots]);
 
   // Search dim (P12): when the search box is non-empty, dim units on the floor
   // whose name/category doesn't match (case-insensitive substring); matches keep
@@ -735,6 +811,13 @@ export default function MapView() {
     const q = searchQuery.trim().toLowerCase();
     if (!q) {
       map.setPaintProperty("unit-fill", "fill-opacity", 0.9);
+      if (map.getLayer("unit-extrude")) {
+        map.setPaintProperty(
+          "unit-extrude",
+          "fill-extrusion-color",
+          functionFillExpression() as maplibregl.ExpressionSpecification,
+        );
+      }
       return;
     }
     const match: maplibregl.ExpressionSpecification = [
@@ -749,6 +832,15 @@ export default function MapView() {
       0.9,
       0.12,
     ] as maplibregl.ExpressionSpecification);
+    if (map.getLayer("unit-extrude")) {
+      const fillExpr = functionFillExpression() as maplibregl.ExpressionSpecification;
+      map.setPaintProperty("unit-extrude", "fill-extrusion-color", [
+        "case",
+        match,
+        fillExpr,
+        "#131a22",
+      ] as maplibregl.ExpressionSpecification);
+    }
   }, [ready, searchQuery]);
 
   // Sidebar-initiated camera moves. Cross-floor: switch the floor first, then
@@ -803,11 +895,13 @@ export default function MapView() {
     const floorFilter: maplibregl.FilterSpecification = ["==", ["get", "ordinal"], ordinal];
     map.setFilter("unit-fill", floorFilter);
     map.setFilter("unit-outline", floorFilter);
+    map.setFilter("unit-extrude", floorFilter);
     map.setFilter("footprint-fill", floorFilter);
     map.setFilter("footprint-wall-casing", floorFilter);
     map.setFilter("footprint-wall", floorFilter);
     map.setFilter("fixture-fill", floorFilter);
     map.setFilter("fixture-line", floorFilter);
+    map.setFilter("fixture-extrude", floorFilter);
     map.setFilter("route-line", floorFilter);
     map.setFilter("patrol-line", floorFilter);
     map.setFilter("unit-selected", [
@@ -1350,6 +1444,25 @@ export default function MapView() {
   return (
     <div className="map-wrap">
       <div ref={containerRef} className="map" />
+
+      {(view3d || bearingDeg !== 0) && (
+        <button
+          className="compass"
+          title="Reset to north-up"
+          onClick={() => {
+            mapRef.current?.easeTo({
+              bearing: 0,
+              ...(view3d ? {} : { pitch: 0 }),
+              duration: 400,
+            });
+          }}
+        >
+          <span className="compass-arrow" style={{ transform: `rotate(${-bearingDeg}deg)` }}>
+            ▲
+          </span>
+          <span className="compass-n">N</span>
+        </button>
+      )}
 
       {drawTool === "polygon" && (
         <div className="shortcuts">
