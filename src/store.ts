@@ -396,6 +396,7 @@ interface State {
   deleteCameraView: (id: string) => void;
   addCameraToView: (viewId: string, camId: string) => void;
   removeCameraFromView: (viewId: string, camId: string) => void;
+  moveCameraInView: (viewId: string, camId: string, dir: -1 | 1) => void;
   exportIMDFArchive: () => void;
   exportSecurityReport: () => void;
   exportCameraIndex: () => void;
@@ -1254,6 +1255,20 @@ export const useStore = create<State>((set, get) => {
         cameraViews: (b.cameraViews ?? []).map((x) =>
           x.id === viewId ? { ...x, cameraIds: x.cameraIds.filter((c) => c !== camId) } : x,
         ),
+      })),
+
+    moveCameraInView: (viewId, camId, dir) =>
+      commit((b) => ({
+        ...b,
+        cameraViews: (b.cameraViews ?? []).map((v) => {
+          if (v.id !== viewId) return v;
+          const i = v.cameraIds.indexOf(camId);
+          const j = i + dir;
+          if (i < 0 || j < 0 || j >= v.cameraIds.length) return v;
+          const ids = [...v.cameraIds];
+          [ids[i], ids[j]] = [ids[j], ids[i]];
+          return { ...v, cameraIds: ids };
+        }),
       })),
 
     // ---- P11 exports ----

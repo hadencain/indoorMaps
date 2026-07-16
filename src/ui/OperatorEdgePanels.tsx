@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import { ChevronLeft, ChevronRight, Crosshair, ImagePlus, LayoutGrid, Pencil, Plus, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Crosshair,
+  ImagePlus,
+  LayoutGrid,
+  Pencil,
+  Plus,
+  X,
+} from "lucide-react";
 import FeedPlaceholder from "./panels/FeedPlaceholder";
 import { useStore, ALL_AMENITY_KINDS } from "../store";
 import { m2ll } from "../geo";
@@ -45,6 +56,7 @@ function CameraFinder({ map, onOpenWall }: { map: maplibregl.Map; onOpenWall: (v
   const deleteCameraView = useStore((s) => s.deleteCameraView);
   const addCameraToView = useStore((s) => s.addCameraToView);
   const removeCameraFromView = useStore((s) => s.removeCameraFromView);
+  const moveCameraInView = useStore((s) => s.moveCameraInView);
   const [editingViewId, setEditingViewId] = useState<string | null>(null);
   const [naming, setNaming] = useState(false);
   const [newName, setNewName] = useState("");
@@ -239,11 +251,27 @@ function CameraFinder({ map, onOpenWall }: { map: maplibregl.Map; onOpenWall: (v
             <div className="edge-dropzone-hint">
               Drag cameras here (or use +) — <strong>{editingView.name}</strong>
             </div>
-            {editingView.cameraIds.map((cid) => {
+            {editingView.cameraIds.map((cid, idx) => {
               const c = building.cameras.find((x) => x.id === cid);
               return (
                 <div className="edge-viewcam" key={cid}>
                   <span className="vlabel">{c?.name ?? cid}</span>
+                  <button
+                    className="edge-mini-add"
+                    title="Move up"
+                    disabled={idx === 0}
+                    onClick={() => moveCameraInView(editingView.id, cid, -1)}
+                  >
+                    <ChevronUp size={11} />
+                  </button>
+                  <button
+                    className="edge-mini-add"
+                    title="Move down"
+                    disabled={idx === editingView.cameraIds.length - 1}
+                    onClick={() => moveCameraInView(editingView.id, cid, 1)}
+                  >
+                    <ChevronDown size={11} />
+                  </button>
                   <button
                     className="edge-mini-add danger"
                     title="Remove from view"
