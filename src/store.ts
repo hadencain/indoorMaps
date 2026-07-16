@@ -544,6 +544,7 @@ export const useStore = create<State>((set, get) => {
     // snapshot, so "Reset this property" restores the traced-over floorplan,
     // not a blank page. Switches to the new property in the same update.
     createProperty: (name, underlay) => {
+      breakCoalesce();
       const s = get();
       flushPendingPersist();
       const trimmed = name.trim() || "Untitled property";
