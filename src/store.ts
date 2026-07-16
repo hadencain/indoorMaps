@@ -59,7 +59,8 @@ export type Tool =
   | "camera"
   | "incident"
   | "patrol"
-  | "inspect";
+  | "inspect"
+  | "review";
 
 /** The two top-level surfaces. `edit` is the authoring tool (draw/place/wire);
  *  `display` is the read-only operator console the security team runs on routine

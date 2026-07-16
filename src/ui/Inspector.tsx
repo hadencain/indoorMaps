@@ -10,6 +10,7 @@ import InspectPanel from "./panels/InspectPanel";
 import IncidentPanel from "./panels/IncidentPanel";
 import PatrolPanel from "./panels/PatrolPanel";
 import BulkPanel from "./panels/BulkPanel";
+import ReviewPanel from "./panels/ReviewPanel";
 
 export default function Inspector() {
   const activeTool = useStore((s) => s.activeTool);
@@ -23,6 +24,10 @@ export default function Inspector() {
   // camera under the hood, the click-to-camera preview (not the camera editor)
   // is the surface here. So it wins over the selected-camera fallback below.
   if (activeTool === "inspect") body = <InspectPanel />;
+  // The review checklist wins over selection routing too — clicking an offender
+  // in the worklist selects it (and may select a camera via unitId), but the
+  // panel itself must stay open, not flip to Properties/CameraPanel.
+  else if (activeTool === "review") body = <ReviewPanel />;
   // A selected camera wins over tool/unit routing (mutually exclusive with unit
   // selection), so clicking a camera in any tool shows its panel.
   else if (selectedCameraId) body = <CameraPanel />;

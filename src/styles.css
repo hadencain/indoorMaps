@@ -2628,3 +2628,61 @@ button.wide.ghost {
   position: absolute;
   inset: -7px;
 }
+
+/* Rail groups: tiny uppercase captions + thin separators between tool families. */
+.rail-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  align-items: center;
+}
+.rail-group-label {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 2px 0 1px;
+  user-select: none;
+}
+.rail-sep {
+  width: 24px;
+  height: 1px;
+  background: var(--line);
+  margin: 4px 0;
+}
+
+/* Review worklist rows */
+.review-row {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #10161e;
+  border: 1px solid var(--line);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+}
+.review-row:hover {
+  border-color: var(--accent);
+}
+.review-row .vlabel {
+  white-space: normal;
+}
+.review-glyph {
+  width: 14px;
+  flex: none;
+  text-align: center;
+  font-weight: 700;
+}
+.review-row.sev-error .review-glyph {
+  color: #ff5c5c;
+}
+.review-row.sev-warn .review-glyph {
+  color: #f2c14e;
+}
+.review-row.sev-info .review-glyph {
+  color: var(--dim);
+}
