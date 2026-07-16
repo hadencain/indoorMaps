@@ -6,6 +6,7 @@ import { useStore, ALL_AMENITY_KINDS } from "../store";
 import { m2ll } from "../geo";
 import { panStep, zoomStep, tiltStep } from "../security/ptz";
 import { HoldButton } from "./CameraWindow";
+import { fileToSmallDataUrl } from "./img";
 import type { AmenityKind, Camera, CameraKind } from "../types";
 
 /**
@@ -28,30 +29,6 @@ const KIND_CHIPS: { id: CameraKind | "all"; label: string }[] = [
 ];
 
 import { AmenityIcon, AMENITY_LABELS as AMENITY_LABEL } from "./amenity-icons";
-
-/** Downscale an image file to a small data URL (longest side <= 640px) so a
- *  handful of site photos can't blow the localStorage quota. */
-async function fileToSmallDataUrl(file: File): Promise<string> {
-  const raw = await new Promise<string>((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result as string);
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(file);
-  });
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const el = new Image();
-    el.onload = () => resolve(el);
-    el.onerror = () => reject(new Error("bad image"));
-    el.src = raw;
-  });
-  const scale = Math.min(1, 640 / Math.max(img.naturalWidth, img.naturalHeight));
-  if (scale >= 1) return raw;
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(img.naturalWidth * scale);
-  canvas.height = Math.round(img.naturalHeight * scale);
-  canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.82);
-}
 
 function CameraFinder({ map, onOpenWall }: { map: maplibregl.Map; onOpenWall: (viewId: string) => void }) {
   const building = useStore((s) => s.building);
