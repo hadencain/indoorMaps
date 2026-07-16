@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore } from "../../store";
 import { useRoute } from "../route";
 import { selectableUnits } from "../../building";
+import { WALK_MPS } from "../../route-smooth";
 
 export default function RoutePanel() {
   const building = useStore((s) => s.building);
@@ -99,7 +100,8 @@ export default function RoutePanel() {
               <span className="k">floors</span> {geom.floors.map(level).join(" → ") || "—"}
             </div>
             <div>
-              <span className="k">{egress ? "nearest exit" : "walk"}</span> ~{geom.metres.toFixed(0)} m
+              <span className="k">{egress ? "nearest exit" : "walk"}</span> ~{geom.metres.toFixed(0)} m ·{" "}
+              ~{Math.max(1, Math.ceil(geom.metres / WALK_MPS / 60))} min
               {geom.floors.length > 1 && " + elevator"}
             </div>
           </>

@@ -2,10 +2,9 @@ import { useEffect, useMemo, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import { useStore } from "../store";
 import { m2ll, distM } from "../geo";
+import { WALK_MPS } from "../route-smooth";
 import type { MetreXY } from "../types";
 
-/** Guard walking speed at 1× (m/s). */
-const WALK_MPS = 1.4;
 /** Push a new probe (camera-window handoff check) every this many metres. */
 const PROBE_STEP_M = 1.2;
 

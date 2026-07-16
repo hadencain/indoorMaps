@@ -1,7 +1,9 @@
-import type { Building, Graph, LngLat } from "./types";
+import type { Building, Graph, LngLat, MetreXY } from "./types";
 import { polygonRing, distM, m2ll, bbox, pointsToLL } from "./geo";
 import { functionBucket } from "./categories";
 import { occupantNamesByUnit } from "./occupants";
+import { collectWalls } from "./coverage";
+import { losShortcut, roundCorners } from "./route-smooth";
 
 export type FC = GeoJSON.FeatureCollection;
 
@@ -119,8 +121,11 @@ export interface RouteGeometry {
   floors: number[];
 }
 
-/** Turn an ordered node path into per-floor line segments + marker points. */
-export function routeToGeometry(graph: Graph, path: string[]): RouteGeometry {
+/** Turn an ordered node path into per-floor line segments + marker points.
+ *  Consecutive same-ordinal node runs are line-of-sight shortcut + corner
+ *  rounded before being projected, so the rendered path cuts corners instead
+ *  of hugging every nav-graph hub point. */
+export function routeToGeometry(graph: Graph, path: string[], building: Building): RouteGeometry {
   const { nodes } = graph;
   const lines: FC = { type: "FeatureCollection", features: [] };
   const points: RoutePoint[] = [];
@@ -131,24 +136,47 @@ export function routeToGeometry(graph: Graph, path: string[]): RouteGeometry {
     if (!floors.includes(o)) floors.push(o);
   };
 
-  for (let i = 0; i < path.length - 1; i++) {
-    const a = nodes.get(path[i])!;
-    const b = nodes.get(path[i + 1])!;
-    noteFloor(a.ordinal);
-    noteFloor(b.ordinal);
+  const wallsByOrdinal = new Map<number, ReturnType<typeof collectWalls>>();
+  const wallsFor = (ordinal: number) => {
+    let w = wallsByOrdinal.get(ordinal);
+    if (!w) {
+      w = collectWalls(building, ordinal);
+      wallsByOrdinal.set(ordinal, w);
+    }
+    return w;
+  };
 
-    if (a.ordinal === b.ordinal) {
-      metres += distM(a.xy, b.xy);
+  // Split the path into maximal same-ordinal runs; runs are separated wherever
+  // consecutive nodes sit on different floors (a vertical transition edge).
+  let i = 0;
+  while (i < path.length) {
+    let j = i;
+    const ordinal = nodes.get(path[i])!.ordinal;
+    while (j + 1 < path.length && nodes.get(path[j + 1])!.ordinal === ordinal) j++;
+    noteFloor(ordinal);
+
+    if (j > i) {
+      const runPts: MetreXY[] = [];
+      for (let k = i; k <= j; k++) runPts.push(nodes.get(path[k])!.xy);
+      const shortcut = losShortcut(runPts, wallsFor(ordinal));
+      for (let k = 1; k < shortcut.length; k++) metres += distM(shortcut[k - 1], shortcut[k]);
+      const smoothed = roundCorners(shortcut);
       lines.features.push({
         type: "Feature",
-        properties: { ordinal: a.ordinal },
-        geometry: { type: "LineString", coordinates: [a.lnglat, b.lnglat] },
+        properties: { ordinal },
+        geometry: { type: "LineString", coordinates: pointsToLL(building.origin, smoothed) },
       });
-    } else {
+    }
+
+    if (j + 1 < path.length) {
       // Vertical transition (elevator/stairs): mark it on both floors.
+      const a = nodes.get(path[j])!;
+      const b = nodes.get(path[j + 1])!;
       points.push({ ordinal: a.ordinal, lnglat: a.lnglat, kind: "transition", label: "↕" });
       points.push({ ordinal: b.ordinal, lnglat: b.lnglat, kind: "transition", label: "↕" });
     }
+
+    i = j + 1;
   }
 
   if (path.length > 0) {

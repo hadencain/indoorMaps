@@ -34,13 +34,13 @@ export function useRoute(): RouteInfo {
         const op = building.openings.find((o) => o.id === openingId);
         const owner = op && building.units.find((u) => u.id === op.unit);
         return {
-          geom: routeToGeometry(graph, route.path),
+          geom: routeToGeometry(graph, route.path, building),
           exit: { nodeId: route.goalId, name: owner?.name ?? "Exit" },
         };
       }
 
       const route = findRoute(graph, startId, goalId);
-      return { geom: route ? routeToGeometry(graph, route.path) : null, exit: null };
+      return { geom: route ? routeToGeometry(graph, route.path, building) : null, exit: null };
     } catch {
       // Authoring can transiently leave a floor with a door but no corridor
       // (mid-edit, or a corridor deleted while other rooms still have doors) —
