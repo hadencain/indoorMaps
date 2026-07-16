@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { doorAdjacency, floorHealth } from "./health";
+import { doorAdjacency, floorHealth, reviewFloor } from "./health";
 import type { Building, Unit, Opening } from "../types";
 
 // Two rooms sharing the wall x=10, plus a corridor strip above both.
@@ -128,5 +128,49 @@ describe("floorHealth", () => {
     };
     const b = makeBuilding([roomA, outside], [outsideDoor]);
     expect(floorHealth(b, 0).missingCorridor).toBe(false);
+  });
+});
+
+describe("reviewFloor", () => {
+  it("orders errors before warns before infos", () => {
+    // roomA + unnamed roomB-shaped unit with sharedDoor but NO corridor ->
+    // missing-corridor error; unnamed unit is also doorless/unnamed/vacant.
+    const unnamed: Unit = { ...roomB, id: "un", name: "  " };
+    const b = makeBuilding([roomA, unnamed], [sharedDoor]);
+    (b as { occupants?: unknown[] }).occupants = [
+      { id: "o1", name: "T", unitId: "a", category: "retail" },
+    ];
+    const issues = reviewFloor(b, 0);
+    const order: Record<string, number> = { error: 0, warn: 1, info: 2 };
+    const sevs = issues.map((i) => i.severity);
+    expect(sevs).toEqual([...sevs].sort((x, y) => order[x] - order[y]));
+    expect(issues.some((i) => i.id === "missing-corridor")).toBe(true);
+    expect(issues.some((i) => i.id.startsWith("unnamed:"))).toBe(true);
+    expect(issues.some((i) => i.id === "vacant:un")).toBe(true); // unnamed unit is also vacant
+  });
+
+  it("flags dangling and flat verticals", () => {
+    const up: Unit = { ...roomA, id: "up", ordinal: 1 };
+    const b = makeBuilding([roomA, roomB, corridor, up], [sharedDoor, hallDoor]);
+    b.verticals = [
+      { a: "a", b: "ghost", name: "Elevator A" }, // dangling
+      { a: "a", b: "b", name: "Flat Link" }, // same ordinal
+      { a: "a", b: "up", name: "Stair OK" }, // fine
+    ];
+    const issues = reviewFloor(b, 0);
+    expect(issues.find((i) => i.id === "dangling-vertical:Elevator A")?.severity).toBe("error");
+    expect(issues.find((i) => i.id === "flat-vertical:Flat Link")?.severity).toBe("warn");
+    expect(issues.some((i) => i.message.includes("Stair OK"))).toBe(false);
+  });
+
+  it("emits no vacant issues for an occupant-free building", () => {
+    const b = makeBuilding([roomA, corridor], [hallDoor]);
+    expect(reviewFloor(b, 0).some((i) => i.severity === "info")).toBe(false);
+  });
+
+  it("a healthy floor reviews clean", () => {
+    const b = makeBuilding([roomA, roomB, corridor], [sharedDoor, hallDoor]);
+    // roomA has sharedDoor; roomB has hallDoor; corridor present; no verticals/occupants.
+    expect(reviewFloor(b, 0)).toEqual([]);
   });
 });
