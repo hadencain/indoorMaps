@@ -399,10 +399,27 @@ export const useStore = create<State>((set, get) => {
   // invalidates the redo stack). No-op guard: a recipe returning the same
   // reference takes no snapshot. UI-state side effects stay OUT of here — each
   // action does its own `set({...})` for those (see e.g. addCamera, deleteUnit).
-  const commit = (recipe: (b: Building) => Building) =>
+  // Coalescing: keystroke-driven mutations pass a key ("rename-unit:<id>") so a
+  // typing burst becomes ONE undo entry — a keyed commit within 1s of the
+  // previous commit with the SAME key reuses its snapshot instead of pushing a
+  // new one. Anything else (unkeyed commit, different key, undo/redo, property
+  // switch) breaks the chain.
+  let lastCommitKey: string | null = null;
+  let lastCommitAt = 0;
+  const breakCoalesce = () => {
+    lastCommitKey = null;
+  };
+  const commit = (recipe: (b: Building) => Building, coalesceKey?: string) =>
     set((s) => {
       const next = recipe(s.building);
       if (next === s.building) return {};
+      const fold =
+        coalesceKey !== undefined &&
+        coalesceKey === lastCommitKey &&
+        Date.now() - lastCommitAt < 1000;
+      lastCommitKey = coalesceKey ?? null;
+      lastCommitAt = Date.now();
+      if (fold) return { building: next, future: [] };
       const past = [...s.past, s.building].slice(-HISTORY_LIMIT);
       return { building: next, past, future: [] };
     });
@@ -495,6 +512,7 @@ export const useStore = create<State>((set, get) => {
     // are derived from the NEW building in the SAME set() — never left stale
     // for a render waiting on AppShell's self-heal effect.
     setProperty: (id) => {
+      breakCoalesce();
       const s = get();
       if (id === s.propertyId) return;
       flushPendingPersist();
@@ -657,10 +675,13 @@ export const useStore = create<State>((set, get) => {
       })),
 
     renameUnit: (id, name) =>
-      commit((b) => ({
-        ...b,
-        units: b.units.map((u) => (u.id === id ? { ...u, name } : u)),
-      })),
+      commit(
+        (b) => ({
+          ...b,
+          units: b.units.map((u) => (u.id === id ? { ...u, name } : u)),
+        }),
+        `rename-unit:${id}`,
+      ),
 
     setCategory: (id, category) =>
       commit((b) => ({
@@ -730,10 +751,13 @@ export const useStore = create<State>((set, get) => {
     },
 
     updateOccupant: (id, patch) =>
-      commit((b) => ({
-        ...b,
-        occupants: (b.occupants ?? []).map((o) => (o.id === id ? { ...o, ...patch } : o)),
-      })),
+      commit(
+        (b) => ({
+          ...b,
+          occupants: (b.occupants ?? []).map((o) => (o.id === id ? { ...o, ...patch } : o)),
+        }),
+        `occ:${id}:${Object.keys(patch).sort().join(",")}`,
+      ),
 
     deleteOccupant: (id) =>
       commit((b) => ({
@@ -924,12 +948,15 @@ export const useStore = create<State>((set, get) => {
       })),
 
     updateIncident: (id, patch) =>
-      commit((b) => ({
-        ...b,
-        incidents: (b.incidents ?? []).map((i) =>
-          i.id === id ? { ...i, ...patch } : i,
-        ),
-      })),
+      commit(
+        (b) => ({
+          ...b,
+          incidents: (b.incidents ?? []).map((i) =>
+            i.id === id ? { ...i, ...patch } : i,
+          ),
+        }),
+        `incident:${id}:${Object.keys(patch).sort().join(",")}`,
+      ),
 
     deleteIncident: (id) => {
       commit((b) => ({
@@ -1038,10 +1065,13 @@ export const useStore = create<State>((set, get) => {
     },
 
     renamePatrol: (id, name) =>
-      commit((b) => ({
-        ...b,
-        patrols: (b.patrols ?? []).map((p) => (p.id === id ? { ...p, name } : p)),
-      })),
+      commit(
+        (b) => ({
+          ...b,
+          patrols: (b.patrols ?? []).map((p) => (p.id === id ? { ...p, name } : p)),
+        }),
+        `rename-patrol:${id}`,
+      ),
 
     deletePatrol: (id) => {
       commit((b) => ({
@@ -1089,10 +1119,13 @@ export const useStore = create<State>((set, get) => {
     // Site metadata (operator edge panel): photos + hours. Undoable and part of
     // the building blob, so it persists and exports with everything else.
     updateSiteInfo: (patch) =>
-      commit((b) => ({
-        ...b,
-        siteInfo: { photos: [], hours: "", ...b.siteInfo, ...patch },
-      })),
+      commit(
+        (b) => ({
+          ...b,
+          siteInfo: { photos: [], hours: "", ...b.siteInfo, ...patch },
+        }),
+        `siteinfo:${Object.keys(patch).sort().join(",")}`,
+      ),
 
     // ---- Operator camera presets (feed walls) ----
     // Part of the building blob like siteInfo: undoable, persisted, exported.
@@ -1396,7 +1429,8 @@ export const useStore = create<State>((set, get) => {
     // Move a snapshot between past/future and swap it in as `building`. Both
     // clear ALL selections: reverted geometry may drop ids the current selection
     // references (a deleted-then-undone unit, a redone delete, etc.).
-    undo: () =>
+    undo: () => {
+      breakCoalesce();
       set((s) => {
         if (s.past.length === 0) return {};
         const prev = s.past[s.past.length - 1];
@@ -1409,9 +1443,11 @@ export const useStore = create<State>((set, get) => {
           selectedCameraId: null,
           selectedIncidentId: null,
         };
-      }),
+      });
+    },
 
-    redo: () =>
+    redo: () => {
+      breakCoalesce();
       set((s) => {
         if (s.future.length === 0) return {};
         const next = s.future[0];
@@ -1424,7 +1460,8 @@ export const useStore = create<State>((set, get) => {
           selectedCameraId: null,
           selectedIncidentId: null,
         };
-      }),
+      });
+    },
 
     // ---- P12 multi-select + bulk ----
     // Shift-click toggle: add/remove `id` from the multi-selection. Keeps
