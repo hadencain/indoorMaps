@@ -1,4 +1,5 @@
 import { FUNCTION_LABELS, FUNCTION_COLORS } from "../categories";
+import { useStore } from "../store";
 
 /**
  * Display-mode map chrome: a north arrow + a legend keyed to the functional room
@@ -10,12 +11,16 @@ import { FUNCTION_LABELS, FUNCTION_COLORS } from "../categories";
 const FILL_KEYS = ["gaming", "circ", "premium", "fnb", "show", "sport", "cage", "boh"];
 
 export default function MapChrome() {
+  const view3d = useStore((s) => s.view3d);
+
   return (
     <>
-      <div className="north-badge" title="Plan is north-up">
-        <span className="north-arrow">▲</span>
-        <span className="north-n">N</span>
-      </div>
+      {!view3d && (
+        <div className="north-badge" title="Plan is north-up">
+          <span className="north-arrow">▲</span>
+          <span className="north-n">N</span>
+        </div>
+      )}
       <div className="map-legend">
         <div className="legend-title">Legend</div>
         <div className="legend-grid">
