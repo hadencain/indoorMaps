@@ -12,6 +12,8 @@ export default function RoutePanel() {
   const setStart = useStore((s) => s.setStart);
   const setGoal = useStore((s) => s.setGoal);
   const setRouteMode = useStore((s) => s.setRouteMode);
+  const stepFree = useStore((s) => s.stepFree);
+  const setStepFree = useStore((s) => s.setStepFree);
   const { geom, exit, steps } = useRoute();
   const rooms = selectableUnits(building);
   const level = (o: number) => building.levels.find((l) => l.ordinal === o)?.name ?? `L${o}`;
@@ -52,6 +54,10 @@ export default function RoutePanel() {
           Egress
         </button>
       </div>
+      <label className="stepfree-row">
+        <input type="checkbox" checked={stepFree} onChange={(e) => setStepFree(e.target.checked)} />
+        Step-free (avoid stairs)
+      </label>
       <label>From</label>
       <select value={fromValue} onChange={(e) => onPick(e.target.value, "from")}>
         {rooms.map((r) => (
@@ -106,7 +112,13 @@ export default function RoutePanel() {
             </div>
           </>
         ) : (
-          <div className="warn">{egress ? "no exit reachable" : "no route found"}</div>
+          <div className="warn">
+            {stepFree
+              ? "No step-free route"
+              : egress
+                ? "no exit reachable"
+                : "no route found"}
+          </div>
         )}
       </div>
       {steps.length > 0 && (

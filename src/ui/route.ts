@@ -20,12 +20,12 @@ export function useRoute(): RouteInfo {
   const startId = useStore((s) => s.startId);
   const goalId = useStore((s) => s.goalId);
   const routeMode = useStore((s) => s.routeMode);
+  const stepFree = useStore((s) => s.stepFree);
 
   return useMemo<RouteInfo>(() => {
     try {
-      const graph = buildGraph(building);
-
       if (routeMode === "egress") {
+        const graph = buildGraph(building, { stepFree });
         const exitNodes = [...graph.nodes.values()].filter((n) => n.kind === "entrance");
         const route = findNearestRoute(
           graph,
@@ -44,6 +44,7 @@ export function useRoute(): RouteInfo {
         };
       }
 
+      const graph = buildGraph(building, { stepFree });
       const route = findRoute(graph, startId, goalId);
       return {
         geom: route ? routeToGeometry(graph, route.path, building) : null,
@@ -57,5 +58,5 @@ export function useRoute(): RouteInfo {
       // white-screening the whole app.
       return { geom: null, exit: null, steps: [] };
     }
-  }, [building, startId, goalId, routeMode]);
+  }, [building, startId, goalId, routeMode, stepFree]);
 }

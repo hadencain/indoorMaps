@@ -322,6 +322,11 @@ interface State {
   startId: string;
   goalId: string;
   routeMode: "direct" | "egress";
+  /** Accessibility toggle: when true, routing skips stairs/escalator verticals
+   *  (buildGraph's stepFree option) in both direct and egress modes. Session
+   *  UI state, parallel to routeMode — not persisted, not reset on property
+   *  switch (routeMode isn't either). */
+  stepFree: boolean;
   planWidth: number;
   importMsg: string | null;
   draftCategory: Category;
@@ -351,6 +356,7 @@ interface State {
   setStart: (id: string) => void;
   setGoal: (id: string) => void;
   setRouteMode: (m: "direct" | "egress") => void;
+  setStepFree: (on: boolean) => void;
   setPlanWidth: (n: number) => void;
 
   addRoom: (polygon: MetreXY[], ordinal: number) => void;
@@ -537,6 +543,7 @@ export const useStore = create<State>((set, get) => {
     startId: "lobby",
     goalId: "lab",
     routeMode: "direct",
+    stepFree: false,
     planWidth: 40,
     importMsg: null,
     draftCategory: "room",
@@ -730,6 +737,7 @@ export const useStore = create<State>((set, get) => {
     setStart: (id) => set({ startId: id }),
     setGoal: (id) => set({ goalId: id }),
     setRouteMode: (m) => set({ routeMode: m }),
+    setStepFree: (on) => set({ stepFree: on }),
     setPlanWidth: (n) => set({ planWidth: Math.max(1, n || 1) }),
 
     addRoom: (polygon, ord) => {
@@ -928,7 +936,7 @@ export const useStore = create<State>((set, get) => {
       }
       const a = s.pendingLink.id;
       const b = id;
-      const cat: Category = s.linkKind === "Stairs" ? "stairs" : "elevator";
+      const cat: Category = (s.linkKind === "Stairs" || s.linkKind === "Escalator") ? "stairs" : "elevator";
       const linkKind = s.linkKind;
       const exists = s.building.verticals.some(
         (v) => (v.a === a && v.b === b) || (v.a === b && v.b === a),

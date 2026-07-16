@@ -599,6 +599,22 @@ button.wide.ghost {
   border-color: var(--accent);
 }
 
+/* Step-free (avoid stairs) route toggle (RoutePanel / viewer RouteFinder) */
+.stepfree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.stepfree-row input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 /* Status bar */
 .statusbar {
   grid-area: statusbar;
