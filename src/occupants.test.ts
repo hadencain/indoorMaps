@@ -81,5 +81,14 @@ describe("demo occupant seeding", () => {
       for (const o of occs) expect(unitIds.has(o.unitId)).toBe(true);
       expect(new Set(occs.map((o) => o.id)).size).toBe(occs.length);
     });
+
+    it(`${label}: tenanted units carry space labels, occupants keep business names`, () => {
+      const occs = b.occupants ?? [];
+      const tenanted = new Set(occs.map((o) => o.unitId));
+      for (const u of b.units.filter((x) => tenanted.has(x.id))) {
+        expect(u.name).toMatch(/^Unit \d{3,}$/);
+      }
+      for (const o of occs) expect(o.name).not.toMatch(/^Unit \d{3,}$/);
+    });
   }
 });

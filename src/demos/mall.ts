@@ -51,7 +51,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorW-0",
       "ordinal": 0,
-      "name": "Anchor Store West",
+      "name": "Unit 101",
       "category": "retail",
       "polygon": [
         [
@@ -75,7 +75,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorE-0",
       "ordinal": 0,
-      "name": "Anchor Store East",
+      "name": "Unit 102",
       "category": "retail",
       "polygon": [
         [
@@ -99,7 +99,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorN-0",
       "ordinal": 0,
-      "name": "Anchor Store North",
+      "name": "Unit 103",
       "category": "retail",
       "polygon": [
         [
@@ -123,7 +123,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorS-0",
       "ordinal": 0,
-      "name": "Anchor Store South",
+      "name": "Unit 104",
       "category": "retail",
       "polygon": [
         [
@@ -435,7 +435,7 @@ export const mallBuilding: Building = {
     {
       "id": "swn-0-0",
       "ordinal": 0,
-      "name": "Marbled Home Goods 0-swn0",
+      "name": "Unit 105",
       "category": "retail",
       "polygon": [
         [
@@ -459,7 +459,7 @@ export const mallBuilding: Building = {
     {
       "id": "swn-0-1",
       "ordinal": 0,
-      "name": "Quill Stationery 0-swn1",
+      "name": "Unit 106",
       "category": "retail",
       "polygon": [
         [
@@ -483,7 +483,7 @@ export const mallBuilding: Building = {
     {
       "id": "swn-0-2",
       "ordinal": 0,
-      "name": "Foundry Games 0-swn2",
+      "name": "Unit 107",
       "category": "retail",
       "polygon": [
         [
@@ -507,7 +507,7 @@ export const mallBuilding: Building = {
     {
       "id": "sws-0-0",
       "ordinal": 0,
-      "name": "Ampersand Coffee 0-sws0",
+      "name": "Unit 108",
       "category": "retail",
       "polygon": [
         [
@@ -531,7 +531,7 @@ export const mallBuilding: Building = {
     {
       "id": "sws-0-1",
       "ordinal": 0,
-      "name": "Halcyon Fragrance 0-sws1",
+      "name": "Unit 109",
       "category": "retail",
       "polygon": [
         [
@@ -555,7 +555,7 @@ export const mallBuilding: Building = {
     {
       "id": "sws-0-2",
       "ordinal": 0,
-      "name": "Wren & Co Kids 0-sws2",
+      "name": "Unit 110",
       "category": "retail",
       "polygon": [
         [
@@ -579,7 +579,7 @@ export const mallBuilding: Building = {
     {
       "id": "sen-0-0",
       "ordinal": 0,
-      "name": "Marbled Home Goods 0-sen0",
+      "name": "Unit 111",
       "category": "retail",
       "polygon": [
         [
@@ -603,7 +603,7 @@ export const mallBuilding: Building = {
     {
       "id": "sen-0-1",
       "ordinal": 0,
-      "name": "Quill Stationery 0-sen1",
+      "name": "Unit 112",
       "category": "retail",
       "polygon": [
         [
@@ -627,7 +627,7 @@ export const mallBuilding: Building = {
     {
       "id": "ses-0-0",
       "ordinal": 0,
-      "name": "Ampersand Coffee 0-ses0",
+      "name": "Unit 113",
       "category": "retail",
       "polygon": [
         [
@@ -651,7 +651,7 @@ export const mallBuilding: Building = {
     {
       "id": "ses-0-1",
       "ordinal": 0,
-      "name": "Halcyon Fragrance 0-ses1",
+      "name": "Unit 114",
       "category": "retail",
       "polygon": [
         [
@@ -971,7 +971,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorW-1",
       "ordinal": 1,
-      "name": "Anchor Store West",
+      "name": "Unit 201",
       "category": "retail",
       "polygon": [
         [
@@ -995,7 +995,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorE-1",
       "ordinal": 1,
-      "name": "Anchor Store East",
+      "name": "Unit 202",
       "category": "retail",
       "polygon": [
         [
@@ -1019,7 +1019,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorN-1",
       "ordinal": 1,
-      "name": "Anchor Store North",
+      "name": "Unit 203",
       "category": "retail",
       "polygon": [
         [
@@ -1043,7 +1043,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorS-1",
       "ordinal": 1,
-      "name": "Anchor Store South",
+      "name": "Unit 204",
       "category": "retail",
       "polygon": [
         [
@@ -1307,7 +1307,7 @@ export const mallBuilding: Building = {
     {
       "id": "swn-1-0",
       "ordinal": 1,
-      "name": "Marbled Home Goods 1-swn0",
+      "name": "Unit 205",
       "category": "retail",
       "polygon": [
         [
@@ -1331,7 +1331,7 @@ export const mallBuilding: Building = {
     {
       "id": "swn-1-1",
       "ordinal": 1,
-      "name": "Quill Stationery 1-swn1",
+      "name": "Unit 206",
       "category": "retail",
       "polygon": [
         [
@@ -1355,7 +1355,7 @@ export const mallBuilding: Building = {
     {
       "id": "swn-1-2",
       "ordinal": 1,
-      "name": "Foundry Games 1-swn2",
+      "name": "Unit 207",
       "category": "retail",
       "polygon": [
         [
@@ -1379,7 +1379,7 @@ export const mallBuilding: Building = {
     {
       "id": "sws-1-0",
       "ordinal": 1,
-      "name": "Ampersand Coffee 1-sws0",
+      "name": "Unit 208",
       "category": "retail",
       "polygon": [
         [
@@ -1403,7 +1403,7 @@ export const mallBuilding: Building = {
     {
       "id": "sws-1-1",
       "ordinal": 1,
-      "name": "Halcyon Fragrance 1-sws1",
+      "name": "Unit 209",
       "category": "retail",
       "polygon": [
         [
@@ -1427,7 +1427,7 @@ export const mallBuilding: Building = {
     {
       "id": "sws-1-2",
       "ordinal": 1,
-      "name": "Wren & Co Kids 1-sws2",
+      "name": "Unit 210",
       "category": "retail",
       "polygon": [
         [
@@ -1451,7 +1451,7 @@ export const mallBuilding: Building = {
     {
       "id": "sen-1-0",
       "ordinal": 1,
-      "name": "Marbled Home Goods 1-sen0",
+      "name": "Unit 211",
       "category": "retail",
       "polygon": [
         [
@@ -1475,7 +1475,7 @@ export const mallBuilding: Building = {
     {
       "id": "sen-1-1",
       "ordinal": 1,
-      "name": "Quill Stationery 1-sen1",
+      "name": "Unit 212",
       "category": "retail",
       "polygon": [
         [
@@ -1499,7 +1499,7 @@ export const mallBuilding: Building = {
     {
       "id": "ses-1-0",
       "ordinal": 1,
-      "name": "Ampersand Coffee 1-ses0",
+      "name": "Unit 213",
       "category": "retail",
       "polygon": [
         [
@@ -1523,7 +1523,7 @@ export const mallBuilding: Building = {
     {
       "id": "ses-1-1",
       "ordinal": 1,
-      "name": "Halcyon Fragrance 1-ses1",
+      "name": "Unit 214",
       "category": "retail",
       "polygon": [
         [
@@ -1739,7 +1739,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorW-2",
       "ordinal": 2,
-      "name": "Anchor Store West",
+      "name": "Unit 301",
       "category": "retail",
       "polygon": [
         [
@@ -1763,7 +1763,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorE-2",
       "ordinal": 2,
-      "name": "Anchor Store East",
+      "name": "Unit 302",
       "category": "retail",
       "polygon": [
         [
@@ -1787,7 +1787,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorN-2",
       "ordinal": 2,
-      "name": "Anchor Store North",
+      "name": "Unit 303",
       "category": "retail",
       "polygon": [
         [
@@ -1811,7 +1811,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorS-2",
       "ordinal": 2,
-      "name": "Anchor Store South",
+      "name": "Unit 304",
       "category": "retail",
       "polygon": [
         [
@@ -2075,7 +2075,7 @@ export const mallBuilding: Building = {
     {
       "id": "swn-2-0",
       "ordinal": 2,
-      "name": "Marbled Home Goods 2-swn0",
+      "name": "Unit 305",
       "category": "retail",
       "polygon": [
         [
@@ -2099,7 +2099,7 @@ export const mallBuilding: Building = {
     {
       "id": "swn-2-1",
       "ordinal": 2,
-      "name": "Quill Stationery 2-swn1",
+      "name": "Unit 306",
       "category": "retail",
       "polygon": [
         [
@@ -2123,7 +2123,7 @@ export const mallBuilding: Building = {
     {
       "id": "swn-2-2",
       "ordinal": 2,
-      "name": "Foundry Games 2-swn2",
+      "name": "Unit 307",
       "category": "retail",
       "polygon": [
         [
@@ -2147,7 +2147,7 @@ export const mallBuilding: Building = {
     {
       "id": "sws-2-0",
       "ordinal": 2,
-      "name": "Ampersand Coffee 2-sws0",
+      "name": "Unit 308",
       "category": "retail",
       "polygon": [
         [
@@ -2171,7 +2171,7 @@ export const mallBuilding: Building = {
     {
       "id": "sws-2-1",
       "ordinal": 2,
-      "name": "Halcyon Fragrance 2-sws1",
+      "name": "Unit 309",
       "category": "retail",
       "polygon": [
         [
@@ -2195,7 +2195,7 @@ export const mallBuilding: Building = {
     {
       "id": "sws-2-2",
       "ordinal": 2,
-      "name": "Wren & Co Kids 2-sws2",
+      "name": "Unit 310",
       "category": "retail",
       "polygon": [
         [
@@ -2219,7 +2219,7 @@ export const mallBuilding: Building = {
     {
       "id": "sen-2-0",
       "ordinal": 2,
-      "name": "Marbled Home Goods 2-sen0",
+      "name": "Unit 311",
       "category": "retail",
       "polygon": [
         [
@@ -2243,7 +2243,7 @@ export const mallBuilding: Building = {
     {
       "id": "sen-2-1",
       "ordinal": 2,
-      "name": "Quill Stationery 2-sen1",
+      "name": "Unit 312",
       "category": "retail",
       "polygon": [
         [
@@ -2267,7 +2267,7 @@ export const mallBuilding: Building = {
     {
       "id": "ses-2-0",
       "ordinal": 2,
-      "name": "Ampersand Coffee 2-ses0",
+      "name": "Unit 313",
       "category": "retail",
       "polygon": [
         [
@@ -2291,7 +2291,7 @@ export const mallBuilding: Building = {
     {
       "id": "ses-2-1",
       "ordinal": 2,
-      "name": "Halcyon Fragrance 2-ses1",
+      "name": "Unit 314",
       "category": "retail",
       "polygon": [
         [
@@ -2657,7 +2657,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorW-3",
       "ordinal": 3,
-      "name": "Anchor Store West",
+      "name": "Unit 401",
       "category": "retail",
       "polygon": [
         [
@@ -2681,7 +2681,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorE-3",
       "ordinal": 3,
-      "name": "Anchor Store East",
+      "name": "Unit 402",
       "category": "retail",
       "polygon": [
         [
@@ -2705,7 +2705,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorN-3",
       "ordinal": 3,
-      "name": "Anchor Store North",
+      "name": "Unit 403",
       "category": "retail",
       "polygon": [
         [
@@ -2729,7 +2729,7 @@ export const mallBuilding: Building = {
     {
       "id": "anchorS-3",
       "ordinal": 3,
-      "name": "Anchor Store South",
+      "name": "Unit 404",
       "category": "retail",
       "polygon": [
         [
