@@ -60,6 +60,7 @@ export default function MapView() {
   const layers = useStore((s) => s.layers);
   const amenityFilter = useStore((s) => s.amenityFilter);
   const highlightedPatrolId = useStore((s) => s.highlightedPatrolId);
+  const flyTarget = useStore((s) => s.flyTarget);
   // Occlusion-clipped visibility polygons for the active floor's cameras (P5) +
   // coverage/blind analysis (P6, null unless the coverage/blind layer is on). Recomputed off
   // the render path by the hook's memo (per-camera cache) — a camera drag/param
@@ -744,6 +745,16 @@ export default function MapView() {
       0.12,
     ] as maplibregl.ExpressionSpecification);
   }, [ready, searchQuery]);
+
+  // Sidebar-initiated camera moves (directory rows). One-shot: ease, clear.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !flyTarget) return;
+    if (flyTarget.ordinal === ordinal) {
+      map.easeTo({ center: m2ll(building.origin, flyTarget.center[0], flyTarget.center[1]), duration: 450 });
+    }
+    useStore.setState({ flyTarget: null });
+  }, [ready, flyTarget, ordinal, building.origin]);
 
   // Rebuild the snap grid when toggled / resized / building extent changes.
   useEffect(() => {

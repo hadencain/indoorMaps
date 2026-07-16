@@ -248,6 +248,9 @@ interface State {
   patrolDraft: MetreXY[] | null;
   // Transient click-to-camera probe (inspect tool). Session-only; never persisted.
   probe: Probe | null;
+  // One-shot camera request from a sidebar panel (no map ref exists outside
+  // MapView). MapView consumes it: eases to the point, then clears it.
+  flyTarget: { center: MetreXY; ordinal: number } | null;
   // Ghost camera placements from "Suggest cameras" (camera tool). Session-only,
   // never persisted, never in undo history — only ACCEPTING one commits a
   // camera. Cleared on any context change (tool/floor/property/mode).
@@ -386,6 +389,8 @@ interface State {
   bulkSetSecurity: (ids: string[], sec: Unit["security"]) => void;
   // P12 search
   setSearch: (q: string) => void;
+  // P3 places UI: one-shot fly-to request
+  requestFly: (center: MetreXY, ordinal: number) => void;
 }
 
 export const useStore = create<State>((set, get) => {
@@ -437,6 +442,7 @@ export const useStore = create<State>((set, get) => {
     importMsg: null,
     draftCategory: "room",
     searchQuery: "",
+    flyTarget: null,
 
     setTool: (t) =>
       set((s) => ({
@@ -510,6 +516,7 @@ export const useStore = create<State>((set, get) => {
         pendingLink: null,
         highlightedPatrolId: null,
         searchQuery: "",
+        flyTarget: null,
         past: [],
         future: [],
       });
@@ -1480,6 +1487,9 @@ export const useStore = create<State>((set, get) => {
 
     // ---- P12 search ----
     setSearch: (q) => set({ searchQuery: q }),
+
+    // ---- P3 places UI: fly-to ----
+    requestFly: (center, ordinal) => set({ flyTarget: { center, ordinal } }),
   };
 });
 
