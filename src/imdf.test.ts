@@ -78,6 +78,19 @@ describe("occupant single-file round-trip", () => {
     const back = geoJSONToBuilding(JSON.stringify(buildingToGeoJSON(b)));
     expect(back!.occupants).toEqual([]);
   });
+
+  it("drops imported occupants whose unit does not exist", () => {
+    const fcObj = JSON.parse(JSON.stringify(buildingToGeoJSON(base)));
+    const ghost = {
+      type: "Feature",
+      id: "o-ghost",
+      properties: { "indoormaps:type": "occupant", unit: "no-such-unit", name: "Ghost", category: "retail" },
+      geometry: { type: "Point", coordinates: [-73.99, 40.75] },
+    };
+    fcObj.features.push(ghost);
+    const back = geoJSONToBuilding(JSON.stringify(fcObj));
+    expect(back!.occupants!.map((o) => o.id)).toEqual(["o1", "o2"]);
+  });
 });
 
 describe("IMDF archive occupant + anchor files", () => {

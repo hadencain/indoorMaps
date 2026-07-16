@@ -186,6 +186,10 @@ export function geoJSONToBuilding(text: string): Building | null {
     }
   }
   if (units.length === 0) return null;
+  // An imported file can reference units it doesn't contain (hand-edited or
+  // foreign GeoJSON). Dangling occupants would persist and surface as
+  // nowhere-pointing directory rows — drop them at the door.
+  const unitIds = new Set(units.map((u) => u.id));
   return {
     origin,
     levels: meta.levels ?? [],
@@ -193,7 +197,7 @@ export function geoJSONToBuilding(text: string): Building | null {
     openings,
     verticals: meta.verticals ?? [],
     cameras,
-    occupants,
+    occupants: occupants.filter((o) => unitIds.has(o.unitId)),
   };
 }
 
