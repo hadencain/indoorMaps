@@ -223,6 +223,34 @@ export function buildingToIMDFArchive(b: Building): ZipFile[] {
   }
   files.push(file("zone.geojson", fc(zoneFeatures)));
 
+  // structure.geojson — app extension (columns / obstacles). IMDF has no
+  // occlusion concept, so like camera.geojson this rides the "indoormaps:type"
+  // marker convention rather than a native `feature_type`. heightM is passed
+  // through UNCLAMPED and null when unset: this is an interchange file, not a
+  // MapLibre expression consumer, so null legitimately means "full ceiling
+  // height" and preserves the authored "unset" (render-time clamping lives in
+  // structuresToGeoJSON, not here). Emitted even with zero structures, matching
+  // camera.geojson — always a FeatureCollection, possibly with an empty list.
+  files.push(
+    file(
+      "structure.geojson",
+      fc(
+        (b.structures ?? []).map((s) => ({
+          type: "Feature",
+          id: s.id,
+          properties: {
+            "indoormaps:type": "structure",
+            ordinal: s.ordinal,
+            kind: s.kind,
+            heightM: s.heightM ?? null,
+            baseM: s.baseM ?? 0,
+          },
+          geometry: { type: "Polygon", coordinates: [polygonRing(b.origin, s.polygon)] },
+        })),
+      ),
+    ),
+  );
+
   // manifest.json — foreign member carrying origin/levels/verticals so the
   // archive can be reassembled into a Building (re-import is a fast-follow).
   files.push(

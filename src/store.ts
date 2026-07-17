@@ -293,6 +293,10 @@ interface State {
   // 3D view preference (tilt + rotate + category-height extrusions). Persisted
   // alongside mode/amenityFilter in the DISPLAY_KEY payload.
   view3d: boolean;
+  /** First-person walk editor overlay (src/editor3d). SESSION-ONLY: deliberately
+   *  NOT in the persisted DISPLAY_KEY payload — reopening the app never drops
+   *  you into the 3D walk view. Available in both edit and display modes. */
+  walkMode: boolean;
   // The patrol route currently emphasized on the map (others dimmed). Session-only.
   highlightedPatrolId: string | null;
   selectedId: string | null;
@@ -352,6 +356,9 @@ interface State {
   toggleAmenityKind: (k: AmenityKind) => void;
   setAllAmenityKinds: (on: boolean) => void;
   setView3d: (on: boolean) => void;
+  /** Toggle the first-person walk editor. Entering also clears the transient
+   *  inspect probe (it has no 3D representation and would be stale on return). */
+  setWalkMode: (on: boolean) => void;
   setHighlightedPatrol: (id: string | null) => void;
   setDraftCategory: (c: Category) => void;
   setOrdinal: (o: number) => void;
@@ -370,6 +377,10 @@ interface State {
   addRoom: (polygon: MetreXY[], ordinal: number) => void;
   /** Append a new level (next ordinal, default name), then switch to it. */
   addLevel: () => void;
+  /** Set a level's authored ceiling height, metres (Level.ceilingM; absent ⇒
+   *  3.2 default). Clamped to [2.2, 8]. Coalesced per-ordinal so a spinner/slider
+   *  burst is one undo entry — used by the 3D walk editor's ceiling control. */
+  setLevelCeiling: (ordinal: number, ceilingM: number) => void;
   moveDoor: (doorId: string, at: MetreXY) => void;
   setOpeningKind: (openingId: string, kind: "door" | "entrance") => void;
   toggleOpeningKind: (openingId: string) => void;
@@ -539,6 +550,7 @@ export const useStore = create<State>((set, get) => {
     mode: DISPLAY0.mode,
     amenityFilter: DISPLAY0.amenityFilter,
     view3d: DISPLAY0.view3d,
+    walkMode: false,
     highlightedPatrolId: null,
     selectedId: null,
     selectedIds: [],
@@ -730,6 +742,10 @@ export const useStore = create<State>((set, get) => {
     toggleAmenityKind: (k) => set((s) => ({ amenityFilter: { ...s.amenityFilter, [k]: !s.amenityFilter[k] } })),
     setAllAmenityKinds: (on) => set({ amenityFilter: allAmenities(on) }),
     setView3d: (on) => set({ view3d: on }),
+    // Session-only (never persisted). Entering clears the transient probe — a
+    // click-to-camera overlay has no representation in the 3D walk view and
+    // would be stale on return. UI side effect stays a plain set (no commit).
+    setWalkMode: (on) => set(on ? { walkMode: true, probe: null } : { walkMode: false }),
     setHighlightedPatrol: (id) => set((s) => ({ highlightedPatrolId: s.highlightedPatrolId === id ? null : id })),
     setDraftCategory: (c) => set({ draftCategory: c }),
     // Floor change clears floor-scoped transient state: a probe/selected camera
@@ -806,6 +822,22 @@ export const useStore = create<State>((set, get) => {
       }));
       get().setOrdinal(next);
     },
+
+    // Authored per-floor ceiling (Level.ceilingM). Clamped to a plausible built
+    // range [2.2, 8] m at the action boundary; absent stays 3.2 (DEFAULT_CEILING_M)
+    // downstream. Coalesced per-ordinal: a drag/spinner burst folds into one
+    // undo entry, same pattern as updateStructure/renameUnit.
+    setLevelCeiling: (ordinal, ceilingM) =>
+      commit(
+        (b) => {
+          const clamped = Math.min(8, Math.max(2.2, ceilingM));
+          return {
+            ...b,
+            levels: b.levels.map((l) => (l.ordinal === ordinal ? { ...l, ceilingM: clamped } : l)),
+          };
+        },
+        `ceiling:${ordinal}`,
+      ),
 
     moveDoor: (doorId, at) =>
       commit((b) => ({
