@@ -41,6 +41,23 @@ export function levelCeilingM(b: Building, ordinal: number): number {
   return Math.max(0, b.levels.find((l) => l.ordinal === ordinal)?.ceilingM ?? DEFAULT_CEILING_M);
 }
 
+/** Resolve a structure's rendered vertical extent, given the level's ceiling.
+ *  SINGLE SOURCE for the base/top clamp so the 2D MapLibre extrusion
+ *  (`structuresToGeoJSON`) and the 3D walk-view prism (`build3dScene`) can never
+ *  disagree on a structure's height. heightM absent ⇒ full ceiling height;
+ *  authored heightM is floored at 0 and ceiling-capped (clamp at render, keep
+ *  the authored value in the data — the user may raise the ceiling next); baseM
+ *  clamped into [0, top] so MapLibre's `0 <= base <= height` contract holds and
+ *  a hand-edited soffit can't sink below the slab. */
+export function resolveStructureExtent(
+  heightM: number | undefined,
+  baseM: number | undefined,
+  ceilingM: number,
+): { baseM: number; topM: number } {
+  const topM = Math.max(0, Math.min(heightM ?? Infinity, ceilingM));
+  return { topM, baseM: Math.min(Math.max(baseM ?? 0, 0), topM) };
+}
+
 // Fixture extrusion heights by kind (display-only synthesis, same rationale
 // as UNIT_HEIGHT_M). Kinds not listed here fall back to DEFAULT_FIXTURE_HEIGHT_M.
 export const FIXTURE_HEIGHT_M: Record<string, number> = {
@@ -139,15 +156,15 @@ export function structuresToGeoJSON(b: Building): FC {
   return {
     type: "FeatureCollection",
     features: (b.structures ?? []).map((s) => {
-      const heightM = Math.max(0, Math.min(s.heightM ?? Infinity, levelCeilingM(b, s.ordinal)));
+      const { topM, baseM } = resolveStructureExtent(s.heightM, s.baseM, levelCeilingM(b, s.ordinal));
       return {
         type: "Feature" as const,
         properties: {
           id: s.id,
           ordinal: s.ordinal,
           kind: s.kind,
-          heightM,
-          baseM: Math.min(Math.max(s.baseM ?? 0, 0), heightM),
+          heightM: topM,
+          baseM,
         },
         geometry: { type: "Polygon" as const, coordinates: [polygonRing(b.origin, s.polygon)] },
       };

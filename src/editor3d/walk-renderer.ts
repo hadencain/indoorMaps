@@ -159,6 +159,12 @@ export class WalkRenderer {
   private cameraSig: string | null = null;
   private lastCoverageAt = 0;
   private readonly lastCoveragePos = new THREE.Vector3();
+  // Live coverage spotlights keyed by camera id, so a pose edit that leaves the
+  // SET of lit cameras unchanged updates each light IN PLACE rather than
+  // disposing + re-creating it — the latter frees and re-allocates a 2048²
+  // shadow render target per frame during a routine slider drag (VRAM churn on
+  // the GTX 1650 target). Kept in sync with coverageGroup's children.
+  private readonly coverageLights = new Map<string, THREE.SpotLight>();
   private raf: number | null = null;
 
   constructor(container: HTMLElement, opts: WalkRendererOpts) {
@@ -284,6 +290,7 @@ export class WalkRenderer {
     this.clearGroup(this.camBodyGroup);
     this.clearGroup(this.frustumGroup);
     this.clearGroup(this.coverageGroup);
+    this.coverageLights.clear();
     this.renderer.dispose();
     // dispose() frees three's internal caches but does NOT release the GL
     // context — that's forceContextLoss()'s job. Without it, every walk-mode
@@ -513,54 +520,76 @@ export class WalkRenderer {
 
   // ---- coverage cones ------------------------------------------------------
 
-  private recomputeCoverage(): void {
-    this.clearGroup(this.coverageGroup);
-    this.lastCoverageAt = performance.now();
-    this.lastCoveragePos.copy(this.camera.position);
-    if (this.coverageMode === "off" || !this.sceneData) return;
-
+  /** The cameras that should currently be lit, ≤ MAX_SHADOW_LIGHTS. */
+  private chooseCoverageCameras(): SceneCameraPose[] {
+    if (this.coverageMode === "off" || !this.sceneData) return [];
     const poses = this.sceneData.cameras;
     const selected = this.selectedId ? poses.find((p) => p.id === this.selectedId) ?? null : null;
-
-    let chosen: SceneCameraPose[];
-    if (this.coverageMode === "selected") {
-      chosen = selected ? [selected] : [];
-    } else {
-      // nearby: selected + up to 8 cameras nearest the player, deduped, ≤ 9.
-      const px = this.camera.position.x;
-      const py = -this.camera.position.z;
-      const nearest = [...poses]
-        .sort((a, b) => dist2(a.at, px, py) - dist2(b.at, px, py))
-        .slice(0, 8);
-      const set = new Map<string, SceneCameraPose>();
-      if (selected) set.set(selected.id, selected);
-      for (const p of nearest) {
-        if (set.size >= MAX_SHADOW_LIGHTS) break;
-        set.set(p.id, p);
-      }
-      chosen = [...set.values()];
+    if (this.coverageMode === "selected") return selected ? [selected] : [];
+    // nearby: selected + up to 8 cameras nearest the player, deduped, ≤ 9.
+    const px = this.camera.position.x;
+    const py = -this.camera.position.z;
+    const nearest = [...poses]
+      .sort((a, b) => dist2(a.at, px, py) - dist2(b.at, px, py))
+      .slice(0, 8);
+    const set = new Map<string, SceneCameraPose>();
+    if (selected) set.set(selected.id, selected);
+    for (const p of nearest) {
+      if (set.size >= MAX_SHADOW_LIGHTS) break;
+      set.set(p.id, p);
     }
+    return [...set.values()].slice(0, MAX_SHADOW_LIGHTS);
+  }
 
-    for (const pose of chosen.slice(0, MAX_SHADOW_LIGHTS)) this.addCoverageLight(pose);
+  private recomputeCoverage(): void {
+    this.lastCoverageAt = performance.now();
+    this.lastCoveragePos.copy(this.camera.position);
+
+    const chosen = this.chooseCoverageCameras();
+    const chosenIds = new Set(chosen.map((p) => p.id));
+    // Same lit-camera SET as last time (the pose-drag case: one camera moved but
+    // the set is identical): re-aim each existing spotlight in place, keeping its
+    // shadow render target. Disposing + re-creating would realloc a 2048² target
+    // per frame during the drag. A set change (mode/floor/nearby drift) still
+    // does a full teardown so removed lights free their targets.
+    const sameSet =
+      chosenIds.size === this.coverageLights.size &&
+      [...chosenIds].every((id) => this.coverageLights.has(id));
+    if (sameSet) {
+      for (const pose of chosen) this.updateCoverageLight(this.coverageLights.get(pose.id)!, pose);
+      return;
+    }
+    this.clearGroup(this.coverageGroup);
+    this.coverageLights.clear();
+    for (const pose of chosen) this.addCoverageLight(pose);
   }
 
   private addCoverageLight(pose: SceneCameraPose): void {
-    const pos = v3(pose.at[0], pose.at[1], pose.mountM);
-    const isDome = pose.kind === "dome";
-    const angle = isDome ? 1.2 : Math.min((pose.fovDeg / 2) * DEG, 1.05);
-    const spot = new THREE.SpotLight(0x39ff88, 60, pose.rangeM, angle, 0.3, 0);
-    spot.position.copy(pos);
+    const spot = new THREE.SpotLight(0x39ff88, 60, pose.rangeM, 0.5, 0.3, 0);
     spot.castShadow = true;
     spot.shadow.mapSize.set(2048, 2048);
     spot.shadow.camera.near = 0.2;
-    spot.shadow.camera.far = pose.rangeM + 2;
     spot.shadow.bias = -0.0004;
     spot.shadow.normalBias = 0.03;
+    this.updateCoverageLight(spot, pose);
+    this.coverageGroup.add(spot, spot.target);
+    this.coverageLights.set(pose.id, spot);
+  }
+
+  /** Re-aim/re-scale an existing spotlight to a pose without recreating it (so
+   *  its shadow render target survives). Covers everything a pose edit can move:
+   *  position, cone angle, range, and aim. */
+  private updateCoverageLight(spot: THREE.SpotLight, pose: SceneCameraPose): void {
+    const pos = v3(pose.at[0], pose.at[1], pose.mountM);
+    const isDome = pose.kind === "dome";
+    spot.position.copy(pos);
+    spot.angle = isDome ? 1.2 : Math.min((pose.fovDeg / 2) * DEG, 1.05);
+    spot.distance = pose.rangeM;
+    spot.shadow.camera.far = pose.rangeM + 2;
     // Untilted cams still paint the floor: aim 15° down when tilt is 0.
     const effTilt = isDome ? 90 : pose.tiltDeg > 0 ? pose.tiltDeg : 15;
     const dir = camDir3(pose.headingDeg, effTilt).multiplyScalar(Math.min(pose.rangeM, 10));
     spot.target.position.copy(pos.clone().add(dir));
-    this.coverageGroup.add(spot, spot.target);
   }
 
   // ---- loop + input --------------------------------------------------------

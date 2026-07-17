@@ -153,6 +153,20 @@ function fixture(): Building {
           [11, 2],
         ],
       },
+      {
+        // Straddles the restricted vault ([0,0]-[4,4]) boundary: inner half is
+        // inside, but its centroid (4.5, 2) is OUTSIDE the vault — the old
+        // centroid cull kept it, leaking the vault footprint. Must drop.
+        id: "st-straddle",
+        ordinal: 0,
+        kind: "obstacle",
+        polygon: [
+          [3, 1],
+          [6, 1],
+          [6, 3],
+          [3, 3],
+        ],
+      },
     ],
     footprints: [
       {
@@ -253,9 +267,13 @@ describe("toVisitorBuilding", () => {
     expect(result.amenities?.find((x) => x.id === "am1")).toBeUndefined();
   });
 
-  it("keeps structures in public space but culls those inside a dropped restricted unit", () => {
+  it("keeps public structures but drops those inside OR straddling a dropped restricted unit", () => {
     const result = toVisitorBuilding(fixture());
+    // st-vault (fully inside) and st-straddle (overlaps the boundary, centroid
+    // outside) both drop; only the fully-public column survives — no part of the
+    // vault footprint is paintable in the export.
     expect(result.structures?.map((s) => s.id)).toEqual(["st-public"]);
+    expect(result.structures?.some((s) => s.id === "st-straddle")).toBe(false);
   });
 
   it("does not cull any fixture/structure/amenity when no unit is restricted", () => {
@@ -264,7 +282,7 @@ describe("toVisitorBuilding", () => {
     const result = toVisitorBuilding(f);
     expect(result.fixtures?.map((x) => x.id).sort()).toEqual(["fix-public", "fix1"]);
     expect(result.amenities?.map((x) => x.id).sort()).toEqual(["am-public", "am1"]);
-    expect(result.structures?.map((x) => x.id).sort()).toEqual(["st-public", "st-vault"]);
+    expect(result.structures?.map((x) => x.id).sort()).toEqual(["st-public", "st-straddle", "st-vault"]);
   });
 
   it("carries no streamRef / camera data anywhere in the result", () => {

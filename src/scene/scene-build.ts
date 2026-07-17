@@ -15,6 +15,7 @@ import {
   FIXTURE_HEIGHT_M,
   UNIT_HEIGHT_M,
   levelCeilingM,
+  resolveStructureExtent,
 } from "../render";
 import { MOUNT_H } from "../coverage";
 import { polygonArea } from "../geo";
@@ -176,11 +177,10 @@ export function build3dScene(b: Building, ordinal: number): Scene3D {
   const structurePrisms: ScenePrism[] = [];
   for (const s of b.structures ?? []) {
     if (s.ordinal !== ordinal || degenerate(s.polygon)) continue;
-    // Same clamp discipline as structuresToGeoJSON (render.ts): heightM floored
-    // at 0 and ceiling-capped, baseM clamped into [0, topM] — a hand-edited
-    // negative value must not sink a prism below the floor slab in 3D only.
-    const topM = Math.max(0, Math.min(s.heightM ?? ceilingM, ceilingM));
-    const baseM = Math.min(Math.max(s.baseM ?? 0, 0), topM);
+    // resolveStructureExtent is the SINGLE source shared with structuresToGeoJSON
+    // (render.ts), so the 2D extrusion and this 3D prism can never disagree on a
+    // structure's height (heightM ceiling-capped, baseM clamped into [0, topM]).
+    const { baseM, topM } = resolveStructureExtent(s.heightM, s.baseM, ceilingM);
     structurePrisms.push({ id: s.id, kind: s.kind, ring: s.polygon, baseM, topM });
   }
 
