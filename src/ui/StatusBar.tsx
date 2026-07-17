@@ -8,6 +8,7 @@ const HINTS: Record<string, string> = {
   polygon: "Click to add vertices · Enter/first-point to close · Esc to cancel",
   vertex: "Drag handles · + to insert · right-click a handle to delete",
   link: "Click a unit, switch floor, click its counterpart",
+  column: "click to place a column — columns block camera sightlines",
   route: "Pick From and To in the inspector",
   camera: "Click to place a camera · drag to move · drag the handle to aim · sightlines clip to walls",
   inspect: "Click any point to see which camera covers it · click a camera for its feed",
