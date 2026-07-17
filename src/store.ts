@@ -157,6 +157,7 @@ export const DEFAULT_LAYERS: LayerVisibility = {
   incidents: true,
   patrols: true,
   fixtures: true,
+  structures: true,
   amenities: true,
 };
 

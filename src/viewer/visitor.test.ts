@@ -130,6 +130,30 @@ function fixture(): Building {
         ],
       },
     ],
+    structures: [
+      {
+        id: "st-vault",
+        ordinal: 0,
+        kind: "column",
+        polygon: [
+          [1, 1],
+          [2, 1],
+          [2, 2],
+          [1, 2],
+        ],
+      },
+      {
+        id: "st-public",
+        ordinal: 0,
+        kind: "column",
+        polygon: [
+          [11, 1],
+          [12, 1],
+          [12, 2],
+          [11, 2],
+        ],
+      },
+    ],
     footprints: [
       {
         ordinal: 0,
@@ -229,12 +253,18 @@ describe("toVisitorBuilding", () => {
     expect(result.amenities?.find((x) => x.id === "am1")).toBeUndefined();
   });
 
-  it("does not cull any fixture/amenity when no unit is restricted", () => {
+  it("keeps structures in public space but culls those inside a dropped restricted unit", () => {
+    const result = toVisitorBuilding(fixture());
+    expect(result.structures?.map((s) => s.id)).toEqual(["st-public"]);
+  });
+
+  it("does not cull any fixture/structure/amenity when no unit is restricted", () => {
     const f = fixture();
     f.units = f.units.map((u) => (u.security === "restricted" ? { ...u, security: "secure" } : u));
     const result = toVisitorBuilding(f);
     expect(result.fixtures?.map((x) => x.id).sort()).toEqual(["fix-public", "fix1"]);
     expect(result.amenities?.map((x) => x.id).sort()).toEqual(["am-public", "am1"]);
+    expect(result.structures?.map((x) => x.id).sort()).toEqual(["st-public", "st-vault"]);
   });
 
   it("carries no streamRef / camera data anywhere in the result", () => {

@@ -13,10 +13,13 @@ import { pointInRing } from "../coverage";
  * themselves come out. Surviving units — including `secure` ones, since only
  * `restricted` is dropped — have `security` cleared (all become public).
  *
- * Also culls any fixture or amenity that physically sits inside a dropped
- * unit's footprint (same floor) — otherwise a counter or restroom badge
- * inside a dropped vault would still render, leaking the vault's location
- * even though the unit polygon itself is gone.
+ * Also culls any fixture, structure, or amenity that physically sits inside
+ * a dropped unit's footprint (same floor) — otherwise a counter, column, or
+ * restroom badge inside a dropped vault would still render, leaking the
+ * vault's location even though the unit polygon itself is gone. Structures
+ * in public space survive (spec success criterion 5): the viewer needs them
+ * for extrusion and so routeToGeometry's line-of-sight shortcut cannot cut
+ * routes through columns.
  *
  * Result carries NO cameras/incidents/patrols/cameraViews/underlays/
  * vectorUnderlays (camera `streamRef` goes with them) and satisfies
@@ -60,6 +63,11 @@ export function toVisitorBuilding(b: Building): Building {
         (f) => dropped.size === 0 || !insideDroppedUnit(f.ordinal, polygonCentroid(f.polygon)),
       )
       .map((f) => ({ ...f, polygon: f.polygon.map((p) => [...p] as typeof p) })),
+    structures: (b.structures ?? [])
+      .filter(
+        (s) => dropped.size === 0 || !insideDroppedUnit(s.ordinal, polygonCentroid(s.polygon)),
+      )
+      .map((s) => ({ ...s, polygon: s.polygon.map((p) => [...p] as typeof p) })),
     footprints: (b.footprints ?? []).map((f) => ({ ...f, polygon: f.polygon.map((p) => [...p] as typeof p) })),
     siteInfo: b.siteInfo ? { ...b.siteInfo, photos: [...b.siteInfo.photos] } : undefined,
     // incidents/patrols/cameraViews/underlays/vectorUnderlays: intentionally
