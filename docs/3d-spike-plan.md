@@ -3,6 +3,8 @@
 Date: 2026-07-17
 Status: not started. Companion to `docs/3d-editor-spec.md` — the spec defines what we'd build; this spike decides whether we build it. **Everything here is disposable**: lives in `scratch/_scratch-3d-spike/`, never merged, never imported by app code, deleted (or archived as screenshots + verdict notes) when done.
 
+**Product register (added at approval, 2026-07-17):** the target feel is a **video game** — as if a game developer built a tool for a security company to operate a site off-site. The operator *inhabits* the building remotely. This raises the feel bar in step 5 and the verdict: the question is not "is first-person a gimmick?" but "does this reach game-quality navigation and presence?" Lighting/atmosphere and movement feel count as signal, not polish.
+
 ## Purpose
 
 Answer two questions with running pixels, before any data-model or editor work:
@@ -68,6 +70,20 @@ Render the scene to a `DepthTexture` from a `PerspectiveCamera` at the CCTV pose
 6. The spike directory is deleted or clearly quarantined; `three` removed from deps unless the verdict is GO.
 
 **No-go conditions, stated in advance:** Stage B required AND estimated > 1 week; or 8-camera perf unrecoverable below 30 fps even with obvious knobs (1024² maps, static shadow caching); or the walk feel verdict is "gimmick." Any of these → the 3D editor drops to backlog and the spec stays a document.
+
+## Spike results — 2026-07-17 (steps 1–7 Stage A run; awaiting the walk-feel verdict)
+
+Built same-day in `scratch/_scratch-3d-spike/` (index.html + one main.ts, ~350 lines), driven headless via puppeteer on the dev GTX 1650. Steps 1–6 plus Stage A of the coverage PoC are DONE. Findings:
+
+- **Stage A works — no Stage B needed so far.** Shadow-mapped spotlights (8 × 2048², bias −0.0004 / normalBias 0.03) produce clean coverage: for a pit-mounted camera (`cam-0-p29`, 100° FOV, 50 m), the lit floor region and the 2D engine's `computeVisibility` polygon (drawn in-scene as a yellow fill) **agree at every wall boundary** — P1 pass. No acne or peter-panning visible at building scale in stills.
+- **P2 pass, and it's the money shot:** the test column and the roulette-table fixtures carve hard occlusion shadows inside the wedge that the yellow 2D polygon paints right over — the 2D/3D delta is *visible in one frame*. This is the demo argument for `Structure` and for camera-height-aware coverage.
+- **Perf green:** full main floor (247 wall boxes instanced, ~103 k tris, all fixtures merged per kind) + 8 shadow-casting coverage cams: 99–144 fps, observed min 48 (during ortho top view) at 1600×900 on the GTX 1650. Way above the 30 fps bar; naive per-frame shadow updates are affordable at 8 cams.
+- **Divergence finding (new spec OQ):** 2D `collectWalls` occludes on **corridor/lobby edges** too, but those are 0.15 m slabs in 3D — a promenade-mounted camera's 2D polygon is a sliver trapped in the corridor band while the 3D light correctly spills across the open floor. Decision needed: should 2D coverage skip low-slab category edges (behavior change to shipped coverage), or is the corridor band treated as walled? Logged as spec OQ-6.
+- **Data-model confirmation:** coverage.ts `MOUNT_H = 4` exceeds the synthesized 3.2 m ceiling — in 3D the camera would hang above its own ceiling (spike mounts lights at 3.0 m). `Camera.mountM` + `Level.ceilingM` from the spec resolve this exactly as designed.
+- **P3 partial:** demo cameras carry no `tiltDeg`; the spike injects an 18° default so lights paint floor (near blind hole visible under mounts, consistent with the tilt-band model). A real tilted-camera check needs authored tilt — trivial in the live page, not blocking.
+- Minor: three r1xx renamed PCFSoftShadowMap behavior (deprecation warning, falls back to PCF — fine); pointer-lock + WASD works even headless.
+
+**Remaining before GO/NO-GO:** the walk-feel verdict (user, live at `/scratch/_scratch-3d-spike/` off `npm run dev`) and the P4 edge-stability check while moving. Everything mechanical passed.
 
 ## Open questions to settle before starting (30 minutes, not days)
 
