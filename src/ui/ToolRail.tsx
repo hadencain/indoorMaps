@@ -4,6 +4,7 @@ import {
   Hexagon,
   Spline,
   ArrowUpDown,
+  Cylinder,
   Route,
   Cctv,
   MapPin,
@@ -26,6 +27,7 @@ const GROUPS: {
       { id: "polygon", label: "Polygon", Icon: Hexagon },
       { id: "vertex", label: "Edit vertices", Icon: Spline, needsSelection: true },
       { id: "link", label: "Vertical link", Icon: ArrowUpDown },
+      { id: "column", label: "Column", Icon: Cylinder },
     ],
   },
   {

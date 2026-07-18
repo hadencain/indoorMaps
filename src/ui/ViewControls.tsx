@@ -1,4 +1,4 @@
-import { Box, Grid3x3, Ruler } from "lucide-react";
+import { Box, Footprints, Grid3x3, Ruler } from "lucide-react";
 import { useStore } from "../store";
 import LayersControl from "./LayersControl";
 
@@ -13,6 +13,8 @@ export default function ViewControls() {
   const setUnit = useStore((s) => s.setUnit);
   const view3d = useStore((s) => s.view3d);
   const setView3d = useStore((s) => s.setView3d);
+  const walkMode = useStore((s) => s.walkMode);
+  const setWalkMode = useStore((s) => s.setWalkMode);
 
   return (
     <div className="viewctl">
@@ -40,6 +42,13 @@ export default function ViewControls() {
         onClick={() => setView3d(!view3d)}
       >
         <Box size={15} />
+      </button>
+      <button
+        className={walkMode ? "active" : ""}
+        title="Walk the floor (first person)"
+        onClick={() => setWalkMode(!walkMode)}
+      >
+        <Footprints size={15} />
       </button>
       <div className="unittoggle">
         <button className={unit === "m" ? "active" : ""} onClick={() => setUnit("m")}>

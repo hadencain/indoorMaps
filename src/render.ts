@@ -11,19 +11,52 @@ export type FC = GeoJSON.FeatureCollection;
 // per-unit custom heights are a future additive field). Structural/enclosed
 // categories stand full height; corridor/lobby are low circulation slabs;
 // outside is flat (never extruded).
+
+/** Default ceiling height, metres — the value UNIT_HEIGHT_M has always
+ *  synthesized for full-height categories. Level.ceilingM overrides it per
+ *  floor; one constant, one place (spec architecture note). */
+export const DEFAULT_CEILING_M = 3.2;
+
 export const UNIT_HEIGHT_M: Record<Category, number> = {
-  room: 3.2,
-  office: 3.2,
-  retail: 3.2,
-  restroom: 3.2,
-  storage: 3.2,
-  mechanical: 3.2,
-  stairs: 3.2,
-  elevator: 3.2,
+  room: DEFAULT_CEILING_M,
+  office: DEFAULT_CEILING_M,
+  retail: DEFAULT_CEILING_M,
+  restroom: DEFAULT_CEILING_M,
+  storage: DEFAULT_CEILING_M,
+  mechanical: DEFAULT_CEILING_M,
+  stairs: DEFAULT_CEILING_M,
+  elevator: DEFAULT_CEILING_M,
   corridor: 0.15,
   lobby: 0.15,
   outside: 0,
 };
+
+/** Ceiling height of the level at `ordinal`: the authored Level.ceilingM,
+ *  absent ⇒ DEFAULT_CEILING_M (legacy renders identically). Floored at 0:
+ *  `??` only catches absent, and parseBuildingFileText does no field
+ *  validation, so a hand-edited ceilingM of -1 would otherwise flow into the
+ *  live unit fill-extrusion layer (MapLibre fill-extrusion-height minimum is
+ *  0) — same boundary-clamp discipline as mountM in tiltBand (coverage.ts). */
+export function levelCeilingM(b: Building, ordinal: number): number {
+  return Math.max(0, b.levels.find((l) => l.ordinal === ordinal)?.ceilingM ?? DEFAULT_CEILING_M);
+}
+
+/** Resolve a structure's rendered vertical extent, given the level's ceiling.
+ *  SINGLE SOURCE for the base/top clamp so the 2D MapLibre extrusion
+ *  (`structuresToGeoJSON`) and the 3D walk-view prism (`build3dScene`) can never
+ *  disagree on a structure's height. heightM absent ⇒ full ceiling height;
+ *  authored heightM is floored at 0 and ceiling-capped (clamp at render, keep
+ *  the authored value in the data — the user may raise the ceiling next); baseM
+ *  clamped into [0, top] so MapLibre's `0 <= base <= height` contract holds and
+ *  a hand-edited soffit can't sink below the slab. */
+export function resolveStructureExtent(
+  heightM: number | undefined,
+  baseM: number | undefined,
+  ceilingM: number,
+): { baseM: number; topM: number } {
+  const topM = Math.max(0, Math.min(heightM ?? Infinity, ceilingM));
+  return { topM, baseM: Math.min(Math.max(baseM ?? 0, 0), topM) };
+}
 
 // Fixture extrusion heights by kind (display-only synthesis, same rationale
 // as UNIT_HEIGHT_M). Kinds not listed here fall back to DEFAULT_FIXTURE_HEIGHT_M.
@@ -108,6 +141,37 @@ export function fixturesToGeoJSON(b: Building): FC {
   };
 }
 
+/** Structure polygons (columns, large obstacles), tagged with ordinal + kind.
+ *  Every property is non-null — heightM defaults to the level's ceiling, baseM
+ *  to 0 — because MapLibre fill-extrusion expressions must never see null
+ *  (same constraint as the `occupant` property in unitsToGeoJSON). An authored
+ *  heightM above the level ceiling is clamped at render time (spec failure-mode
+ *  rule: clamp, log nothing, keep the authored value in the data — the user may
+ *  raise the ceiling next). The emitted heightM is floored at 0 and baseM is
+ *  clamped into [0, emitted heightM]: MapLibre's fill-extrusion contract is
+ *  0 <= base <= height, the ceiling clamp itself can invert a valid authored
+ *  soffit (heightM 5 / baseM 4 under a 3.2 ceiling), and hand-edited saves
+ *  reach here unvalidated (isValidBuildingShape checks only structural shape). */
+export function structuresToGeoJSON(b: Building): FC {
+  return {
+    type: "FeatureCollection",
+    features: (b.structures ?? []).map((s) => {
+      const { topM, baseM } = resolveStructureExtent(s.heightM, s.baseM, levelCeilingM(b, s.ordinal));
+      return {
+        type: "Feature" as const,
+        properties: {
+          id: s.id,
+          ordinal: s.ordinal,
+          kind: s.kind,
+          heightM: topM,
+          baseM,
+        },
+        geometry: { type: "Polygon" as const, coordinates: [polygonRing(b.origin, s.polygon)] },
+      };
+    }),
+  };
+}
+
 /** CAD linework (DXF vector underlays), one LineString feature per polyline,
  *  tagged with ordinal for the floor filter. Pure — mirrors patrolsToGeoJSON. */
 export function vectorUnderlaysToGeoJSON(b: Building): FC {
@@ -158,7 +222,13 @@ export function unitsToGeoJSON(b: Building): FC {
         // Default "public" so the filter has a value on every feature.
         security: u.security ?? "public",
         // Extrusion height for the 3D view's fill-extrusion layer (Phase A).
-        heightM: UNIT_HEIGHT_M[u.category],
+        // Full-height categories rise to Level.ceilingM — the authored ceiling
+        // of the unit's floor (absent ⇒ identical 3.2 via DEFAULT_CEILING_M);
+        // low circulation slabs / outside keep their fixed synthesized height.
+        heightM:
+          UNIT_HEIGHT_M[u.category] >= 3
+            ? levelCeilingM(b, u.ordinal)
+            : UNIT_HEIGHT_M[u.category],
       },
       geometry: { type: "Polygon", coordinates: [polygonRing(b.origin, u.polygon)] },
     })),

@@ -26,6 +26,11 @@ export type Category =
 export interface Level {
   ordinal: number;
   name: string;
+  /** Authored ceiling height of this floor, metres. Absent ⇒ 3.2
+   *  (DEFAULT_CEILING_M in render.ts — the value UNIT_HEIGHT_M has always
+   *  synthesized for full-height categories), so a legacy building renders
+   *  identically. Optional + additive: persistence stays v3. */
+  ceilingM?: number;
 }
 
 /** Access-control classification for a unit. Absent ⇒ treated as "public". */
@@ -126,6 +131,25 @@ export interface Camera {
    *  which keeps every existing demo and save rendering unchanged. Ignored for
    *  domes (overhead 360° view). */
   tiltDeg?: number;
+  /** Lens height above the floor slab, metres. Absent ⇒ MOUNT_H (4) — the
+   *  constant `tiltBand` (coverage.ts) has always assumed — so legacy coverage
+   *  is bit-identical. Optional + additive: persistence stays v3. */
+  mountM?: number;
+  /** Roll about the optical axis, degrees CW looking along the view direction.
+   *  Absent ⇒ 0. NEVER affects the 2D coverage footprint (decision OQ-1 in
+   *  docs/3d-editor-spec.md) — it exists for the 3D walk view only. Optional +
+   *  additive: persistence stays v3. */
+  rollDeg?: number;
+  /** Mount surface hint. Absent ⇒ "ceiling". Drives the 3D gizmo/snap
+   *  behaviour only — never geometry. Optional + additive: persistence
+   *  stays v3. */
+  mount?: "ceiling" | "wall" | "column";
+  /** Vertical field of view in degrees. Present ⇒ overrides the derivation
+   *  (tiltBand in coverage.ts consumes it for the 2D tilt band, the 3D frustum
+   *  will too); absent ⇒ derived from `fovDeg` at a 16:9 sensor aspect (see
+   *  vfovHalfRad in coverage.ts). Ignored for domes. Optional + additive:
+   *  persistence stays v3. */
+  vfovDeg?: number;
 }
 
 /** What an incident annotation records. Drives the pin color + kind dropdown. */
@@ -237,6 +261,26 @@ export interface Occupant {
   anchor?: MetreXY;
 }
 
+/** Structure kinds: interior columns vs larger free-form obstacles. */
+export type StructureKind = "column" | "obstacle";
+
+/** A solid structural element on one floor — the anti-Fixture: structures
+ *  ALWAYS occlude (fixtures never do). `polygon` is the canonical outline in
+ *  local metres, open ring (Unit.polygon convention). `heightM` absent ⇒ the
+ *  level's ceiling (levelCeilingM in render.ts). `baseM` absent ⇒ 0; baseM > 0
+ *  models soffits/ducts you can walk under. `round` is an authoring hint only
+ *  (lets the column tool re-edit centre/radius) — renderers ignore it and use
+ *  `polygon`. Additive: persistence stays v3. */
+export interface Structure {
+  id: string;
+  ordinal: number;
+  kind: StructureKind;
+  polygon: MetreXY[];
+  heightM?: number;
+  baseM?: number;
+  round?: { center: MetreXY; radiusM: number };
+}
+
 /** The building outline for one floor — a floor-slab base + thick exterior wall,
  *  drawn beneath everything so the plan reads as an enclosed building. Visual
  *  only; coverage still measures the units. */
@@ -285,6 +329,9 @@ export interface Building {
   patrols?: PatrolPath[];
   /** Furniture/equipment for realism (tables, machines, bars…). Additive; visual. */
   fixtures?: Fixture[];
+  /** Solid structural elements (columns, obstacles) — always occlude, unlike
+   *  fixtures. Additive; defaults to [] in withBuildingDefaults. */
+  structures?: Structure[];
   /** Per-floor building outline (floor slab + exterior wall). Additive; visual. */
   footprints?: Footprint[];
   /** Point-of-interest markers (restrooms, ATMs, exits…). Additive; visual. */
@@ -309,6 +356,7 @@ export interface LayerVisibility {
   incidents: boolean; // incident markers (Phase E)
   patrols: boolean; // patrol path lines (Phase E)
   fixtures: boolean; // furniture/equipment (tables, machines, bars…)
+  structures: boolean; // columns/large obstacles
   amenities: boolean; // POI markers (restrooms, ATMs, exits…)
 }
 

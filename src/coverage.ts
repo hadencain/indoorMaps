@@ -114,6 +114,12 @@ const ARC_RAD = (ARC_STEP_DEG * Math.PI) / 180;
  *  the fan lands on whatever wall is behind — the "peek around the corner". */
 const EPS_RAD = 1e-4;
 
+/** A structure occludes 2D sightlines iff (baseM ?? 0) < WALK_UNDER_M — a
+ *  soffit/duct you can walk under is treated as see-under too. Approximation:
+ *  a camera lens usually sits above head height, so a raised structure may in
+ *  reality still clip its view; accepted (spec OQ-3). */
+export const WALK_UNDER_M = 1.8;
+
 /**
  * All wall segments a camera on `ordinal` can be occluded by: every edge of
  * every unit polygon on that floor. Degenerate rings (near-zero area) are
@@ -122,6 +128,11 @@ const EPS_RAD = 1e-4;
  * Doors are NOT punched out — a unit outline is a closed ring, so a camera does
  * not see through an open doorway. This makes coverage conservatively
  * *under*-reported (the safe direction for a security tool). Accepted v1 limit.
+ *
+ * Structures (columns, obstacles) are first-class occluders — the anti-Fixture:
+ * fixtures never block sightlines, structures always do, EXCEPT when the
+ * structure floats above walk-under height ((baseM ?? 0) >= WALK_UNDER_M), in
+ * which case a camera sees under it and its edges are skipped.
  */
 export function collectWalls(building: Building, ordinal: number): Segment[] {
   const segs: Segment[] = [];
@@ -141,6 +152,15 @@ export function collectWalls(building: Building, ordinal: number): Segment[] {
   if (fp) {
     const p = fp.polygon;
     for (let i = 0; i < p.length; i++) segs.push({ a: p[i], b: p[(i + 1) % p.length] });
+  }
+  for (const s of building.structures ?? []) {
+    if (s.ordinal !== ordinal) continue;
+    if ((s.baseM ?? 0) >= WALK_UNDER_M) continue; // camera sees under it
+    const p = s.polygon;
+    if (p.length < 3 || polygonArea(p) < 1e-6) continue;
+    for (let i = 0; i < p.length; i++) {
+      segs.push({ a: p[i], b: p[(i + 1) % p.length] });
+    }
   }
   return segs;
 }
@@ -188,14 +208,20 @@ function wrapPi(a: number): number {
  * Heading convention: degrees from +x axis, CCW positive (atan2-native).
  * Returns an open ring (no repeated last point), matching Unit.polygon.
  */
-/** Camera mount height for the tilt model (metres). One constant for the whole
- *  demo world — a per-camera field is a knob nobody has needed yet. */
+/** Default camera mount height for the tilt model (metres). Used when
+ *  Camera.mountM is absent, so legacy coverage stays bit-identical. */
 export const MOUNT_H = 4;
 
-/** Vertical half-FOV in radians, derived from the horizontal FOV via a 16:9
- *  sensor aspect, clamped to a plausible optics window. */
-function vfovHalfRad(fovDeg: number): number {
-  const vfov = Math.min(60, Math.max(15, fovDeg * (9 / 16)));
+/** Vertical half-FOV in radians. An authored Camera.vfovDeg overrides the
+ *  derivation (unusual sensor formats — spec OQ-2), clamped only to a sane
+ *  (0°, 180°) window since hand-edited files reach here unvalidated; absent ⇒
+ *  derived from the horizontal FOV via a 16:9 sensor aspect, clamped to a
+ *  plausible optics window. */
+function vfovHalfRad(fovDeg: number, vfovDeg?: number): number {
+  const vfov =
+    vfovDeg != null
+      ? Math.min(179, Math.max(1, vfovDeg))
+      : Math.min(60, Math.max(15, fovDeg * (9 / 16)));
   return (vfov * Math.PI) / 360;
 }
 
@@ -209,12 +235,20 @@ function vfovHalfRad(fovDeg: number): number {
  *  (tiltDeg undefined) — those keep the full wedge from the camera. */
 export function tiltBand(cam: Camera): { nearM: number; farM: number } | null {
   if (cam.tiltDeg == null || cam.kind === "dome" || cam.fovDeg >= 360) return null;
-  const vhalf = vfovHalfRad(cam.fovDeg);
+  const vhalf = vfovHalfRad(cam.fovDeg, cam.vfovDeg);
   const tilt = (cam.tiltDeg * Math.PI) / 180;
   const lower = tilt + vhalf;
   const upper = tilt - vhalf;
-  const nearM = lower >= Math.PI / 2 ? 0 : MOUNT_H / Math.tan(lower);
-  const farM = upper <= 0.035 ? Infinity : MOUNT_H / Math.tan(upper); // ~2° horizon guard
+  // Clamp H at 0: the action boundary clamps mountM too, but a hand-edited
+  // file reaches here unvalidated, and a negative H would flip farM's sign —
+  // projecting the band BEHIND the camera. H = 0 degrades gracefully (band
+  // collapses onto the mount), per the spec's failure-mode rule.
+  const H = Math.max(cam.mountM ?? MOUNT_H, 0);
+  // lower <= 0 (edge at/above the horizon): tan(lower) <= 0, so the raw
+  // division is negative (clamped to 0 below) or, at lower === 0 with H = 0,
+  // 0/0 = NaN — which Math.max passes through. Pin the near edge to the mount.
+  const nearM = lower <= 0 || lower >= Math.PI / 2 ? 0 : H / Math.tan(lower);
+  const farM = upper <= 0.035 ? Infinity : H / Math.tan(upper); // ~2° horizon guard
   return { nearM: Math.max(0, nearM), farM: Math.max(nearM, farM) };
 }
 

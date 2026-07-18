@@ -7,6 +7,7 @@ import {
   patrolsToGeoJSON,
   fixturesToGeoJSON,
   footprintsToGeoJSON,
+  structuresToGeoJSON,
   vectorUnderlaysToGeoJSON,
 } from "./render";
 import { INCIDENT_COLORS } from "./ui/panels/IncidentPanel";
@@ -85,6 +86,7 @@ export default function MapView() {
   const incidentMode = activeTool === "incident";
   const patrolMode = activeTool === "patrol";
   const inspectMode = activeTool === "inspect";
+  const structureMode = activeTool === "column";
   const selectTool = activeTool === "select";
   const routeLines = geom?.lines ?? EMPTY;
   const routePoints = geom?.points ?? [];
@@ -107,6 +109,9 @@ export default function MapView() {
   const onMoveCamera = useStore((s) => s.moveCamera);
   const onRotateCamera = useStore((s) => s.rotateCamera);
   const onSelectCamera = useStore((s) => s.setSelectedCamera);
+  const selectedStructureId = useStore((s) => s.selectedStructureId);
+  const onAddStructure = useStore((s) => s.addStructure);
+  const onSelectStructure = useStore((s) => s.setSelectedStructure);
   const onAddIncident = useStore((s) => s.addIncident);
   const onMoveIncident = useStore((s) => s.moveIncident);
   const onSelectIncident = useStore((s) => s.setSelectedIncident);
@@ -163,6 +168,10 @@ export default function MapView() {
     onMoveCamera,
     onRotateCamera,
     onSelectCamera,
+    structureMode,
+    selectedStructureId,
+    onAddStructure,
+    onSelectStructure,
     incidentMode,
     patrolMode,
     patrolDraft,
@@ -206,6 +215,10 @@ export default function MapView() {
     onMoveCamera,
     onRotateCamera,
     onSelectCamera,
+    structureMode,
+    selectedStructureId,
+    onAddStructure,
+    onSelectStructure,
     incidentMode,
     patrolMode,
     patrolDraft,
@@ -267,6 +280,9 @@ export default function MapView() {
       // Building footprint (floor slab + exterior wall) + fixtures (furniture).
       map.addSource("footprint", { type: "geojson", data: footprintsToGeoJSON(building) });
       map.addSource("fixtures", { type: "geojson", data: fixturesToGeoJSON(building) });
+      // Solid structures (columns/obstacles) — filled by the building-change
+      // setData effect like every other geojson source.
+      map.addSource("structures", { type: "geojson", data: EMPTY });
       map.addSource("units", { type: "geojson", data: unitsToGeoJSON(building) });
       // Coverage (P6): green covered union + red blind = floor − covered. Fed by
       // the coverage effect; per-overlay visibility gated by the layers effect.
@@ -564,6 +580,38 @@ export default function MapView() {
         { id: "footprint-wall", type: "line", source: "footprint", paint: { "line-color": "#7c8898", "line-width": 2.4 } },
         "coverage-fill",
       );
+      // Structures (columns/obstacles): solid dark fill + light outline, above
+      // fixtures (later insertion at the same beforeId), below coverage — a
+      // column must read as MASS the coverage overlay flows around. Selection
+      // ring mirrors unit-selected (gold), driven by the floor-filter effect.
+      map.addLayer(
+        {
+          id: "structure-fill",
+          type: "fill",
+          source: "structures",
+          paint: { "fill-color": "#3a4149", "fill-opacity": 0.92 },
+        },
+        "coverage-fill",
+      );
+      map.addLayer(
+        {
+          id: "structure-line",
+          type: "line",
+          source: "structures",
+          paint: { "line-color": "#98a2b3", "line-width": 1.4 },
+        },
+        "coverage-fill",
+      );
+      map.addLayer(
+        {
+          id: "structure-selected",
+          type: "line",
+          source: "structures",
+          paint: { "line-color": "#f2c14e", "line-width": 2.6 },
+          filter: ["==", ["get", "id"], "__none__"],
+        },
+        "coverage-fill",
+      );
 
       // 3D extrusions (Phase A): heights from the synthesized heightM property.
       // Hidden until view3d; join the floor filter + glass policy effects.
@@ -586,6 +634,21 @@ export default function MapView() {
         paint: {
           "fill-extrusion-color": "#39424d",
           "fill-extrusion-height": ["get", "heightM"],
+          "fill-extrusion-opacity": 0.85,
+        },
+      });
+      // Structure prisms for the Phase-A 3D view: base/height come straight
+      // from structuresToGeoJSON's non-null, ceiling-clamped properties (a
+      // soffit's baseM > 0 floats it off the slab).
+      map.addLayer({
+        id: "structure-extrude",
+        type: "fill-extrusion",
+        source: "structures",
+        layout: { visibility: "none" },
+        paint: {
+          "fill-extrusion-color": "#6b7280",
+          "fill-extrusion-height": ["get", "heightM"],
+          "fill-extrusion-base": ["get", "baseM"],
           "fill-extrusion-opacity": 0.85,
         },
       });
@@ -664,6 +727,9 @@ export default function MapView() {
     );
     (map.getSource("fixtures") as maplibregl.GeoJSONSource | undefined)?.setData(
       fixturesToGeoJSON(building),
+    );
+    (map.getSource("structures") as maplibregl.GeoJSONSource | undefined)?.setData(
+      structuresToGeoJSON(building),
     );
     (map.getSource("vector-underlay") as maplibregl.GeoJSONSource | undefined)?.setData(
       vectorUnderlaysToGeoJSON(building),
@@ -792,11 +858,15 @@ export default function MapView() {
     vis("patrol-line", layers.patrols);
     vis("fixture-fill", layers.fixtures);
     vis("fixture-line", layers.fixtures);
+    vis("structure-fill", layers.structures);
+    vis("structure-line", layers.structures);
+    vis("structure-selected", layers.structures);
     vis("grid-line", showGrid);
-    // 3D extrusions (Phase A): hidden until view3d; fixtures join Layers'
-    // fixtures toggle same as their flat counterpart.
+    // 3D extrusions (Phase A): hidden until view3d; fixtures/structures join
+    // Layers' own toggles same as their flat counterparts.
     vis("unit-extrude", view3d);
     vis("fixture-extrude", view3d && layers.fixtures);
+    vis("structure-extrude", view3d && layers.structures);
   }, [ready, layers, showGrid, view3d]);
 
   // 3D camera + rotate control: entering 3D enables drag-rotate and tilts the
@@ -818,11 +888,12 @@ export default function MapView() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || !map.getLayer("unit-extrude")) return;
-    const editing = ["rect", "polygon", "vertex", "link", "camera", "incident", "patrol"].includes(activeTool);
+    const editing = ["rect", "polygon", "vertex", "link", "column", "camera", "incident", "patrol"].includes(activeTool);
     const glass = view3d && (editing || layers.coverage || layers.blindSpots);
     const op = glass ? 0.25 : 0.85;
     map.setPaintProperty("unit-extrude", "fill-extrusion-opacity", op);
     map.setPaintProperty("fixture-extrude", "fill-extrusion-opacity", op);
+    map.setPaintProperty("structure-extrude", "fill-extrusion-opacity", op);
   }, [ready, view3d, activeTool, layers.coverage, layers.blindSpots]);
 
   // Search dim (P12): when the search box is non-empty, dim units on the floor
@@ -934,6 +1005,14 @@ export default function MapView() {
     map.setFilter("fixture-fill", floorFilter);
     map.setFilter("fixture-line", floorFilter);
     map.setFilter("fixture-extrude", floorFilter);
+    map.setFilter("structure-fill", floorFilter);
+    map.setFilter("structure-line", floorFilter);
+    map.setFilter("structure-extrude", floorFilter);
+    map.setFilter("structure-selected", [
+      "all",
+      floorFilter,
+      ["==", ["get", "id"], selectedStructureId ?? "__none__"],
+    ]);
     map.setFilter("route-line", floorFilter);
     map.setFilter("patrol-line", floorFilter);
     map.setFilter("unit-selected", [
@@ -1410,7 +1489,7 @@ export default function MapView() {
     // Freshly-rebuilt markers need their zoom-dependent state applied now —
     // the zoom listener alone only covers zoom changes, not rebuilds.
     updateZoomDeclutter();
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter, suggestions, onAcceptSuggestion, onRejectSuggestion, mode, selectTool, health]);
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, selectedStructureId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter, suggestions, onAcceptSuggestion, onRejectSuggestion, mode, selectTool, health]);
 
   // Patrol highlight (display mode): emphasize the selected route, dim the rest.
   // Data-driven paint keyed on the feature `id` (patrolsToGeoJSON tags each line).
@@ -1428,7 +1507,7 @@ export default function MapView() {
     const map = mapRef.current;
     if (!map || !ready) return;
     map.getCanvas().style.cursor =
-      drawTool !== "none" || cameraMode || incidentMode || patrolMode || inspectMode
+      drawTool !== "none" || cameraMode || incidentMode || patrolMode || inspectMode || structureMode
         ? "crosshair"
         : linkMode
           ? "pointer"
@@ -1441,7 +1520,7 @@ export default function MapView() {
     } else {
       map.doubleClickZoom.disable();
     }
-  }, [ready, drawTool, linkMode, cameraMode, incidentMode, patrolMode, inspectMode]);
+  }, [ready, drawTool, linkMode, cameraMode, incidentMode, patrolMode, inspectMode, structureMode]);
 
   // Patrol tool keyboard: Enter commits the draft, Escape cancels it.
   useEffect(() => {
@@ -1460,6 +1539,7 @@ export default function MapView() {
       if (e.key !== "Escape") return;
       setMenu(null);
       if (live.current.selectedCameraId) live.current.onSelectCamera(null);
+      if (live.current.selectedStructureId) live.current.onSelectStructure(null);
       // Clear any inspect-mode probe (dot + sightline) without leaving the tool.
       if (live.current.probe) live.current.onSetProbe(null);
     };

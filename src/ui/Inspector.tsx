@@ -11,6 +11,7 @@ import IncidentPanel from "./panels/IncidentPanel";
 import PatrolPanel from "./panels/PatrolPanel";
 import BulkPanel from "./panels/BulkPanel";
 import ReviewPanel from "./panels/ReviewPanel";
+import StructurePanel from "./panels/StructurePanel";
 
 export default function Inspector() {
   const activeTool = useStore((s) => s.activeTool);
@@ -18,6 +19,7 @@ export default function Inspector() {
   const selectedIds = useStore((s) => s.selectedIds);
   const selectedCameraId = useStore((s) => s.selectedCameraId);
   const selectedIncidentId = useStore((s) => s.selectedIncidentId);
+  const selectedStructureId = useStore((s) => s.selectedStructureId);
 
   let body: ReactNode;
   // The inspect tool always shows its own panel — even though a probe selects a
@@ -31,6 +33,10 @@ export default function Inspector() {
   // A selected camera wins over tool/unit routing (mutually exclusive with unit
   // selection), so clicking a camera in any tool shows its panel.
   else if (selectedCameraId) body = <CameraPanel />;
+  // A selected structure (clicked under the select tool) or the column tool
+  // itself (placement hint) routes to the structure editor — behind cameras,
+  // ahead of the draw panels and unit Properties.
+  else if (selectedStructureId || activeTool === "column") body = <StructurePanel />;
   else if (activeTool === "rect" || activeTool === "polygon") body = <DrawPanel />;
   else if (activeTool === "link") body = <LinkPanel />;
   else if (activeTool === "route") body = <RoutePanel />;
@@ -46,7 +52,7 @@ export default function Inspector() {
   return (
     <aside
       className="inspector"
-      key={activeTool + (selectedCameraId ?? selectedIncidentId ?? selectedId ?? "")}
+      key={activeTool + (selectedCameraId ?? selectedStructureId ?? selectedIncidentId ?? selectedId ?? "")}
     >
       {body}
     </aside>

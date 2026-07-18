@@ -34,6 +34,8 @@ export interface DrawLive {
   inspectMode: boolean;
   linkMode: boolean;
   vertexEdit: boolean;
+  /** Column placement tool (activeTool === "column"). */
+  structureMode: boolean;
   selectedId: string | null;
   selectedCameraId: string | null;
   onAddRoom: (polygon: MetreXY[], ordinal: number) => void;
@@ -41,6 +43,8 @@ export interface DrawLive {
   onToggleSelected: (id: string) => void;
   onLinkUnit: (id: string) => void;
   onAddCamera: (at: MetreXY, ordinal: number) => void;
+  onAddStructure: (at: MetreXY, ordinal: number) => void;
+  onSelectStructure: (id: string | null) => void;
   onAddIncident: (at: MetreXY, ordinal: number) => void;
   onAddPatrolPoint: (at: MetreXY) => void;
   onCommitPatrol: () => void;
@@ -303,6 +307,11 @@ export function bindDrawing(map: maplibregl.Map, deps: DrawDeps): DrawHandle {
         l.onAddCamera(r.point, l.ordinal);
         return;
       }
+      if (l.structureMode) {
+        const r = toSnapped(e.lngLat, null);
+        l.onAddStructure(r.point, l.ordinal);
+        return;
+      }
       if (l.incidentMode) {
         const r = toSnapped(e.lngLat, null);
         l.onAddIncident(r.point, l.ordinal);
@@ -318,6 +327,26 @@ export function bindDrawing(map: maplibregl.Map, deps: DrawDeps): DrawHandle {
         const r = toSnapped(e.lngLat, null);
         l.onAddPatrolPoint(r.point);
         return;
+      }
+      // Structures render above units, so hit-test them FIRST: under the
+      // select tool a click on a column selects the structure, not the unit
+      // beneath it. Layer guarded — bindDrawing can run against a map without
+      // the structure layers. Link/vertex tools keep their unit-only clicks.
+      if (!l.linkMode && !l.vertexEdit && map.getLayer("structure-fill")) {
+        // In 3D, clicking a column's extruded prism must select it too — a
+        // default column rises floor-to-ceiling, so under tilt its flat fill
+        // footprint is mostly hidden behind its own prism (same recipe as the
+        // unit hit-test below; structure-extrude is visibility:none in 2D, so
+        // it contributes no hits there).
+        const sLayers = map.getLayer("structure-extrude")
+          ? ["structure-fill", "structure-extrude"]
+          : ["structure-fill"];
+        const sid = map.queryRenderedFeatures(e.point, { layers: sLayers })[0]
+          ?.properties?.id as string | undefined;
+        if (sid) {
+          l.onSelectStructure(sid);
+          return;
+        }
       }
       const hits = map.queryRenderedFeatures(e.point, {
       // In 3D, clicking a unit's extruded wall/roof must select it too — the

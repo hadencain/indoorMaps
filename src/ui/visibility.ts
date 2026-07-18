@@ -4,9 +4,11 @@ import { collectWalls, computeVisibility, computeCoverage } from "../coverage";
 import type { Segment, VisibilityPolygon, CoverageResult } from "../coverage";
 import type { Camera } from "../types";
 
-/** Cheap per-camera signature: changes iff the camera's geometry inputs change. */
+/** Cheap per-camera signature: changes iff the camera's geometry inputs change.
+ *  mountM and vfovDeg are geometry inputs — tiltBand derives the visibility
+ *  band from both (vfovDeg overrides the 16:9 derivation when present). */
 function camSig(c: Camera): string {
-  return `${c.at[0]},${c.at[1]}:${c.heading}:${c.fovDeg}:${c.rangeM}:${c.kind}:${c.tiltDeg ?? ""}`;
+  return `${c.at[0]},${c.at[1]}:${c.heading}:${c.fovDeg}:${c.rangeM}:${c.kind}:${c.tiltDeg ?? ""}:${c.mountM ?? ""}:${c.vfovDeg ?? ""}`;
 }
 
 interface CacheEntry {
@@ -19,11 +21,12 @@ interface CacheEntry {
  * Active floor's occlusion-clipped visibility polygons, one per camera.
  *
  * Memoization (exact, off the render path — not the spec's version-counter):
- *  - `walls` is memoized on `[building.units, ordinal]`. Camera-only mutations
- *    (`moveCamera`, `rotateCamera`, …) do `{ ...building, cameras: [...] }`,
- *    preserving the `building.units` array *reference*, so `walls` stays stable
- *    and identity-equal. Any unit-geometry edit produces a *new* `units` array,
- *    invalidating `walls`.
+ *  - `walls` is memoized on `[building.units, building.footprints,
+ *    building.structures, ordinal]` — every occluder input collectWalls reads.
+ *    Camera-only mutations (`moveCamera`, `rotateCamera`, …) do
+ *    `{ ...building, cameras: [...] }`, preserving those array *references*, so
+ *    `walls` stays stable and identity-equal. Any occluder-geometry edit
+ *    produces a *new* array, invalidating `walls`.
  *  - Per-camera results are cached by id in a ref. A camera recomputes only when
  *    its own signature changes OR the `walls` reference changes. So moving one
  *    camera recomputes only that camera; moving a wall recomputes every camera
@@ -47,10 +50,10 @@ export function useVisibility(): VisibilityInfo {
 
   const walls = useMemo(
     () => collectWalls(building, ordinal),
-    // footprints joins units as an occluder input (see collectWalls); include it
-    // so editing the envelope invalidates the wall cache.
+    // footprints and structures join units as occluder inputs (see collectWalls);
+    // include them so editing the envelope or a column invalidates the wall cache.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [building.units, building.footprints, ordinal],
+    [building.units, building.footprints, building.structures, ordinal],
   );
 
   const cacheRef = useRef<Map<string, CacheEntry>>(new Map());

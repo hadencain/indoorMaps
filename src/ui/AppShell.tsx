@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import MapView from "../MapView";
 import TopBar from "./TopBar";
 import ToolRail from "./ToolRail";
@@ -10,9 +10,17 @@ import StatusBar from "./StatusBar";
 import { useStore } from "../store";
 import { selectableUnits } from "../building";
 
+// Lazy so three.js (imported only under src/editor3d) code-splits out of the
+// initial chunk — the main vite config has no manualChunks, so a dynamic import
+// is what creates the boundary. Never render this in place of MapView: MapView's
+// init-effect cleanup calls map.remove(), destroying the MapLibre instance. The
+// walk view mounts as an absolutely-positioned sibling OVER the (still-mounted) map.
+const WalkView = lazy(() => import("../editor3d/WalkView"));
+
 export default function AppShell() {
   const building = useStore((s) => s.building);
   const mode = useStore((s) => s.mode);
+  const walkMode = useStore((s) => s.walkMode);
   const selectedId = useStore((s) => s.selectedId);
   const startId = useStore((s) => s.startId);
   const goalId = useStore((s) => s.goalId);
@@ -84,6 +92,11 @@ export default function AppShell() {
         <MapView />
         <ViewControls />
         {display && <MapChrome />}
+        {walkMode && (
+          <Suspense fallback={null}>
+            <WalkView />
+          </Suspense>
+        )}
       </div>
       {display ? <OperatorPanel /> : <Inspector />}
       <StatusBar />

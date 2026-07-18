@@ -24,11 +24,13 @@ import type {
   SiteInfo,
   Occupant,
   Opening,
+  Structure,
 } from "./types";
 import type { DxfParseResult } from "./dxf";
 import { autoDoorsForRooms, doorForRoom, selectableUnits } from "./building";
 import { defaultNameFor, isSpace } from "./categories";
 import { parseSvgShapes } from "./svgImport";
+import { columnPolygon } from "./interaction/structures";
 import { buildingToGeoJSON, geoJSONToBuilding } from "./imdf";
 import { buildingToIMDFArchive } from "./imdfArchive";
 import { zipStore } from "./zip";
@@ -66,6 +68,7 @@ export type Tool =
   | "polygon"
   | "vertex"
   | "link"
+  | "column"
   | "route"
   | "camera"
   | "incident"
@@ -157,6 +160,7 @@ export const DEFAULT_LAYERS: LayerVisibility = {
   incidents: true,
   patrols: true,
   fixtures: true,
+  structures: true,
   amenities: true,
 };
 
@@ -253,6 +257,7 @@ function routeEndpointsFor(b: Building): { startId: string; goalId: string } {
 const CAM_DEFAULTS = { heading: 0, fovDeg: 90, rangeM: 8, kind: "fixed" as CameraKind };
 let camSeq = 0;
 let roomSeq = 0;
+let structSeq = 0;
 let incSeq = 0;
 let patSeq = 0;
 let viewSeq = 0;
@@ -288,12 +293,19 @@ interface State {
   // 3D view preference (tilt + rotate + category-height extrusions). Persisted
   // alongside mode/amenityFilter in the DISPLAY_KEY payload.
   view3d: boolean;
+  /** First-person walk editor overlay (src/editor3d). SESSION-ONLY: deliberately
+   *  NOT in the persisted DISPLAY_KEY payload — reopening the app never drops
+   *  you into the 3D walk view. Available in both edit and display modes. */
+  walkMode: boolean;
   // The patrol route currently emphasized on the map (others dimmed). Session-only.
   highlightedPatrolId: string | null;
   selectedId: string | null;
   selectedIds: string[];
   selectedCameraId: string | null;
   selectedIncidentId: string | null;
+  /** Selected Structure (column/obstacle). Mutually exclusive with unit /
+   *  camera / incident selection — session UI state, never persisted. */
+  selectedStructureId: string | null;
   incidentKind: IncidentKind;
   patrolDraft: MetreXY[] | null;
   // Transient click-to-camera probe (inspect tool). Session-only; never persisted.
@@ -344,6 +356,9 @@ interface State {
   toggleAmenityKind: (k: AmenityKind) => void;
   setAllAmenityKinds: (on: boolean) => void;
   setView3d: (on: boolean) => void;
+  /** Toggle the first-person walk editor. Entering also clears the transient
+   *  inspect probe (it has no 3D representation and would be stale on return). */
+  setWalkMode: (on: boolean) => void;
   setHighlightedPatrol: (id: string | null) => void;
   setDraftCategory: (c: Category) => void;
   setOrdinal: (o: number) => void;
@@ -362,6 +377,10 @@ interface State {
   addRoom: (polygon: MetreXY[], ordinal: number) => void;
   /** Append a new level (next ordinal, default name), then switch to it. */
   addLevel: () => void;
+  /** Set a level's authored ceiling height, metres (Level.ceilingM; absent ⇒
+   *  3.2 default). Clamped to [2.2, 8]. Coalesced per-ordinal so a spinner/slider
+   *  burst is one undo entry — used by the 3D walk editor's ceiling control. */
+  setLevelCeiling: (ordinal: number, ceilingM: number) => void;
   moveDoor: (doorId: string, at: MetreXY) => void;
   setOpeningKind: (openingId: string, kind: "door" | "entrance") => void;
   toggleOpeningKind: (openingId: string) => void;
@@ -400,6 +419,16 @@ interface State {
   updateCameraLive: (id: string, patch: Partial<Omit<Camera, "id">>) => void;
   deleteCamera: (id: string) => void;
   setSelectedCamera: (id: string | null) => void;
+  /** Place a round column: columnPolygon(at, 0.4) 12-gon footprint with the
+   *  `round` hint kept so the radius stays re-editable. Selects it after. */
+  addStructure: (at: MetreXY, ordinal: number) => void;
+  /** Patch a structure. When `patch.round` is present the canonical polygon is
+   *  regenerated from the new center/radius in the SAME commit (two-geometry
+   *  rule: polygon canonical, round a hint). Coalesced per-structure so a
+   *  spinner burst is one undo entry. */
+  updateStructure: (id: string, patch: Partial<Omit<Structure, "id" | "ordinal">>) => void;
+  deleteStructure: (id: string) => void;
+  setSelectedStructure: (id: string | null) => void;
   runSuggestCameras: (targetPct: number, maxNew: number) => void;
   acceptSuggestion: (id: string) => void;
   rejectSuggestion: (id: string) => void;
@@ -521,11 +550,13 @@ export const useStore = create<State>((set, get) => {
     mode: DISPLAY0.mode,
     amenityFilter: DISPLAY0.amenityFilter,
     view3d: DISPLAY0.view3d,
+    walkMode: false,
     highlightedPatrolId: null,
     selectedId: null,
     selectedIds: [],
     selectedCameraId: null,
     selectedIncidentId: null,
+    selectedStructureId: null,
     incidentKind: "trespass",
     patrolDraft: null,
     probe: null,
@@ -557,6 +588,7 @@ export const useStore = create<State>((set, get) => {
         pendingLink: null,
         selectedCameraId: null,
         selectedIncidentId: null,
+        selectedStructureId: null,
         // Entering the patrol tool arms an empty draft so a click starts drawing
         // immediately (no separate "Draw patrol" step); any other tool switch
         // abandons an in-progress draft.
@@ -579,6 +611,7 @@ export const useStore = create<State>((set, get) => {
               selectedId: null,
               selectedIds: [],
               selectedIncidentId: null,
+              selectedStructureId: null,
               patrolDraft: null,
               pendingLink: null,
               probe: null,
@@ -591,6 +624,7 @@ export const useStore = create<State>((set, get) => {
               activeTool: "select",
               probe: null,
               selectedCameraId: null,
+              selectedStructureId: null,
               highlightedPatrolId: null,
             },
       ),
@@ -620,6 +654,7 @@ export const useStore = create<State>((set, get) => {
         selectedId: null,
         selectedIds: [],
         selectedIncidentId: null,
+        selectedStructureId: null,
         patrolDraft: null,
         pendingLink: null,
         highlightedPatrolId: null,
@@ -664,6 +699,7 @@ export const useStore = create<State>((set, get) => {
         selectedId: null,
         selectedIds: [],
         selectedIncidentId: null,
+        selectedStructureId: null,
         patrolDraft: null,
         pendingLink: null,
         highlightedPatrolId: null,
@@ -706,6 +742,10 @@ export const useStore = create<State>((set, get) => {
     toggleAmenityKind: (k) => set((s) => ({ amenityFilter: { ...s.amenityFilter, [k]: !s.amenityFilter[k] } })),
     setAllAmenityKinds: (on) => set({ amenityFilter: allAmenities(on) }),
     setView3d: (on) => set({ view3d: on }),
+    // Session-only (never persisted). Entering clears the transient probe — a
+    // click-to-camera overlay has no representation in the 3D walk view and
+    // would be stale on return. UI side effect stays a plain set (no commit).
+    setWalkMode: (on) => set(on ? { walkMode: true, probe: null } : { walkMode: false }),
     setHighlightedPatrol: (id) => set((s) => ({ highlightedPatrolId: s.highlightedPatrolId === id ? null : id })),
     setDraftCategory: (c) => set({ draftCategory: c }),
     // Floor change clears floor-scoped transient state: a probe/selected camera
@@ -717,6 +757,8 @@ export const useStore = create<State>((set, get) => {
         probe: null,
         selectedCameraId: null,
         selectedIncidentId: null,
+        // A structure selected on the old floor is floor-scoped like a camera.
+        selectedStructureId: null,
         // Suggestions are floor-scoped ghosts; a floor change orphans them.
         suggestions: null,
         suggestStats: null,
@@ -728,6 +770,9 @@ export const useStore = create<State>((set, get) => {
         selectedIds: id ? [id] : [],
         selectedCameraId: null,
         selectedIncidentId: null,
+        // Selections are mutually exclusive — an empty-map click (onSelect(null))
+        // clears a selected structure too.
+        selectedStructureId: null,
       }),
     setUnit: (u) => set({ unit: u }),
     toggleDims: () => set((s) => ({ showDims: !s.showDims })),
@@ -777,6 +822,22 @@ export const useStore = create<State>((set, get) => {
       }));
       get().setOrdinal(next);
     },
+
+    // Authored per-floor ceiling (Level.ceilingM). Clamped to a plausible built
+    // range [2.2, 8] m at the action boundary; absent stays 3.2 (DEFAULT_CEILING_M)
+    // downstream. Coalesced per-ordinal: a drag/spinner burst folds into one
+    // undo entry, same pattern as updateStructure/renameUnit.
+    setLevelCeiling: (ordinal, ceilingM) =>
+      commit(
+        (b) => {
+          const clamped = Math.min(8, Math.max(2.2, ceilingM));
+          return {
+            ...b,
+            levels: b.levels.map((l) => (l.ordinal === ordinal ? { ...l, ceilingM: clamped } : l)),
+          };
+        },
+        `ceiling:${ordinal}`,
+      ),
 
     moveDoor: (doorId, at) =>
       commit((b) => ({
@@ -1025,8 +1086,68 @@ export const useStore = create<State>((set, get) => {
     setSelectedCamera: (id) =>
       set(
         id
-          ? { selectedCameraId: id, selectedId: null, selectedIds: [], selectedIncidentId: null }
+          ? {
+              selectedCameraId: id,
+              selectedId: null,
+              selectedIds: [],
+              selectedIncidentId: null,
+              selectedStructureId: null,
+            }
           : { selectedCameraId: null },
+      ),
+
+    // ---- Structures (P3: 2D column tool) ----
+    addStructure: (at, ord) => {
+      const id = `st-${Date.now()}-${structSeq++}`;
+      const radiusM = 0.4;
+      const st: Structure = {
+        id,
+        ordinal: ord,
+        kind: "column",
+        polygon: columnPolygon(at, radiusM),
+        round: { center: at, radiusM },
+      };
+      commit((b) => ({ ...b, structures: [...(b.structures ?? []), st] }));
+      set({ selectedStructureId: id });
+    },
+
+    updateStructure: (id, patch) =>
+      commit(
+        (b) => ({
+          ...b,
+          structures: (b.structures ?? []).map((s) => {
+            if (s.id !== id) return s;
+            const next: Structure = { ...s, ...patch };
+            // Two-geometry rule: `round` is the authoring hint, `polygon` the
+            // canonical footprint — a round edit regenerates the polygon in the
+            // same commit so downstream (coverage, render, export) never sees
+            // the two disagree.
+            if (patch.round) next.polygon = columnPolygon(patch.round.center, patch.round.radiusM);
+            return next;
+          }),
+        }),
+        `structure:${id}`,
+      ),
+
+    deleteStructure: (id) => {
+      commit((b) => ({
+        ...b,
+        structures: (b.structures ?? []).filter((s) => s.id !== id),
+      }));
+      set((s) => (s.selectedStructureId === id ? { selectedStructureId: null } : {}));
+    },
+
+    setSelectedStructure: (id) =>
+      set(
+        id
+          ? {
+              selectedStructureId: id,
+              selectedId: null,
+              selectedIds: [],
+              selectedCameraId: null,
+              selectedIncidentId: null,
+            }
+          : { selectedStructureId: null },
       ),
 
     // Transient — never routed through commit/undo, never persisted.
@@ -1078,7 +1199,13 @@ export const useStore = create<State>((set, get) => {
       const kind = get().incidentKind;
       const incident: Incident = { id, ordinal, at, kind, note: "" };
       commit((b) => ({ ...b, incidents: [...(b.incidents ?? []), incident] }));
-      set({ selectedIncidentId: id, selectedId: null, selectedIds: [], selectedCameraId: null });
+      set({
+        selectedIncidentId: id,
+        selectedId: null,
+        selectedIds: [],
+        selectedCameraId: null,
+        selectedStructureId: null,
+      });
     },
 
     moveIncident: (id, at) =>
@@ -1110,7 +1237,13 @@ export const useStore = create<State>((set, get) => {
     setSelectedIncident: (id) =>
       set(
         id
-          ? { selectedIncidentId: id, selectedId: null, selectedIds: [], selectedCameraId: null }
+          ? {
+              selectedIncidentId: id,
+              selectedId: null,
+              selectedIds: [],
+              selectedCameraId: null,
+              selectedStructureId: null,
+            }
           : { selectedIncidentId: null },
       ),
 
@@ -1580,6 +1713,7 @@ export const useStore = create<State>((set, get) => {
         selectedIds: [],
         selectedCameraId: null,
         selectedIncidentId: null,
+        selectedStructureId: null,
         patrolDraft: null,
         importMsg: `Loaded ${loaded.units.length} units.`,
       });
@@ -1645,6 +1779,7 @@ export const useStore = create<State>((set, get) => {
         selectedIds: [],
         selectedCameraId: null,
         selectedIncidentId: null,
+        selectedStructureId: null,
         patrolDraft: null,
         pendingLink: null,
         highlightedPatrolId: null,
@@ -1668,6 +1803,7 @@ export const useStore = create<State>((set, get) => {
         selectedIds: [],
         selectedCameraId: null,
         selectedIncidentId: null,
+        selectedStructureId: null,
         patrolDraft: null,
         suggestions: null,
         suggestStats: null,
@@ -1693,6 +1829,7 @@ export const useStore = create<State>((set, get) => {
           selectedIds: [],
           selectedCameraId: null,
           selectedIncidentId: null,
+          selectedStructureId: null,
         };
         // Clamp ordinal to an existing level if the current one was deleted.
         if (!prev.levels.some((l) => l.ordinal === s.ordinal)) {
@@ -1719,6 +1856,7 @@ export const useStore = create<State>((set, get) => {
           selectedIds: [],
           selectedCameraId: null,
           selectedIncidentId: null,
+          selectedStructureId: null,
         };
         // Clamp ordinal to an existing level if the current one was deleted.
         if (!next.levels.some((l) => l.ordinal === s.ordinal)) {
@@ -1748,6 +1886,7 @@ export const useStore = create<State>((set, get) => {
             : id,
           selectedCameraId: null,
           selectedIncidentId: null,
+          selectedStructureId: null,
         };
       }),
 
@@ -1757,6 +1896,7 @@ export const useStore = create<State>((set, get) => {
         selectedId: ids[ids.length - 1] ?? null,
         selectedCameraId: null,
         selectedIncidentId: null,
+        selectedStructureId: null,
       }),
 
     clearSelection: () => set({ selectedId: null, selectedIds: [] }),

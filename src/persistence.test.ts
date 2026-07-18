@@ -108,7 +108,7 @@ const validBuilding = () => ({
 describe("withBuildingDefaults", () => {
   it("defaults every additive collection missing from a legacy blob", () => {
     const b = withBuildingDefaults(validBuilding() as Record<string, unknown>);
-    for (const k of ["cameras", "incidents", "patrols", "amenities", "fixtures", "footprints", "underlays", "occupants", "vectorUnderlays"])
+    for (const k of ["cameras", "incidents", "patrols", "amenities", "fixtures", "footprints", "underlays", "occupants", "vectorUnderlays", "structures"])
       expect(b[k]).toEqual([]);
   });
   it("leaves present collections untouched", () => {
@@ -157,5 +157,43 @@ describe("building file round-trip", () => {
     expect(parseBuildingFileText("not json {")).toBeNull();
     expect(parseBuildingFileText('{"hello":"world"}')).toBeNull();
     expect(parseBuildingFileText('"just a string"')).toBeNull();
+  });
+});
+
+describe("3D-walk additive fields (forward-compat retention)", () => {
+  const building3d = () => ({
+    ...validBuilding(),
+    levels: [{ ordinal: 0, name: "G", ceilingM: 4.2 }],
+    cameras: [
+      {
+        id: "c1", ordinal: 0, at: [1, 1], heading: 0, fovDeg: 70, rangeM: 12,
+        kind: "fixed", name: "Cam 1",
+        mountM: 2.6, rollDeg: 12, mount: "wall", vfovDeg: 40,
+      },
+    ],
+    structures: [
+      {
+        id: "s1", ordinal: 0, kind: "column",
+        polygon: [[0, 0], [1, 0], [1, 1], [0, 1]],
+        heightM: 2.8, baseM: 0.2,
+        round: { center: [0.5, 0.5], radiusM: 0.5 },
+      },
+    ],
+  });
+
+  it("parseBuildingFileText keeps camera mountM/rollDeg/mount/vfovDeg, Level.ceilingM, and structures intact", () => {
+    const parsed = parseBuildingFileText(buildingFileText(building3d(), "casino"));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.building.cameras).toEqual(building3d().cameras);
+    expect(parsed!.building.levels).toEqual(building3d().levels);
+    expect(parsed!.building.structures).toEqual(building3d().structures);
+  });
+
+  it("survives a full file round-trip unchanged", () => {
+    const first = parseBuildingFileText(buildingFileText(building3d(), "casino"))!;
+    const again = parseBuildingFileText(buildingFileText(first.building, "casino"))!;
+    expect(again.building.cameras).toEqual(building3d().cameras);
+    expect(again.building.levels).toEqual(building3d().levels);
+    expect(again.building.structures).toEqual(building3d().structures);
   });
 });

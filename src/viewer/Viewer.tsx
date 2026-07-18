@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import type { Building, MetreXY, Occupant } from "../types";
 import type { FC } from "../render";
-import { unitsToGeoJSON, fixturesToGeoJSON, footprintsToGeoJSON } from "../render";
+import { unitsToGeoJSON, fixturesToGeoJSON, footprintsToGeoJSON, structuresToGeoJSON } from "../render";
 import { m2ll, bbox } from "../geo";
 import { functionFillExpression } from "../categories";
 import { occupantAnchor } from "../occupants";
@@ -29,6 +29,7 @@ export default function Viewer({ building, propertyName }: { building: Building;
   const unitsFC = useMemo(() => unitsToGeoJSON(building), [building]);
   const footprintFC = useMemo(() => footprintsToGeoJSON(building), [building]);
   const fixturesFC = useMemo(() => fixturesToGeoJSON(building), [building]);
+  const structuresFC = useMemo(() => structuresToGeoJSON(building), [building]);
 
   const [ordinal, setOrdinal] = useState<number>(levels[0]?.ordinal ?? 0);
   const [startId, setStartId] = useState<string>(rooms[0]?.id ?? "");
@@ -74,6 +75,7 @@ export default function Viewer({ building, propertyName }: { building: Building;
     map.on("load", () => {
       map.addSource("footprint", { type: "geojson", data: footprintFC });
       map.addSource("fixtures", { type: "geojson", data: fixturesFC });
+      map.addSource("structures", { type: "geojson", data: structuresFC });
       map.addSource("units", { type: "geojson", data: unitsFC });
       map.addSource("route", { type: "geojson", data: EMPTY });
 
@@ -111,6 +113,21 @@ export default function Viewer({ building, propertyName }: { building: Building;
         type: "line",
         source: "units",
         paint: { "line-color": "#31435c", "line-width": 1.5 },
+      });
+
+      // Structures (columns/obstacles) — solid masses above unit fills, below
+      // fixtures. Paint order here is code order (no beforeId in this file).
+      map.addLayer({
+        id: "structure-fill",
+        type: "fill",
+        source: "structures",
+        paint: { "fill-color": "#3a4149", "fill-opacity": 0.92 },
+      });
+      map.addLayer({
+        id: "structure-line",
+        type: "line",
+        source: "structures",
+        paint: { "line-color": "#98a2b3", "line-width": 1.4 },
       });
 
       // Fixtures (tables/machines/bars) above unit fills.
@@ -180,6 +197,18 @@ export default function Viewer({ building, propertyName }: { building: Building;
           "fill-extrusion-opacity": 0.85,
         },
       });
+      map.addLayer({
+        id: "structure-extrude",
+        type: "fill-extrusion",
+        source: "structures",
+        layout: { visibility: "none" },
+        paint: {
+          "fill-extrusion-color": "#6b7280",
+          "fill-extrusion-height": ["get", "heightM"],
+          "fill-extrusion-base": ["get", "baseM"],
+          "fill-extrusion-opacity": 0.85,
+        },
+      });
 
       frameBuilding(map, building);
       map.on("rotate", () => setBearingDeg(Math.round(map.getBearing())));
@@ -202,6 +231,8 @@ export default function Viewer({ building, propertyName }: { building: Building;
       map.setLayoutProperty("unit-extrude", "visibility", view3d ? "visible" : "none");
     if (map.getLayer("fixture-extrude"))
       map.setLayoutProperty("fixture-extrude", "visibility", view3d ? "visible" : "none");
+    if (map.getLayer("structure-extrude"))
+      map.setLayoutProperty("structure-extrude", "visibility", view3d ? "visible" : "none");
     if (view3d) {
       map.dragRotate.enable();
       map.easeTo({ pitch: 55, duration: 600 });
@@ -262,6 +293,9 @@ export default function Viewer({ building, propertyName }: { building: Building;
     map.setFilter("fixture-fill", floorFilter);
     map.setFilter("fixture-line", floorFilter);
     map.setFilter("fixture-extrude", floorFilter);
+    map.setFilter("structure-fill", floorFilter);
+    map.setFilter("structure-line", floorFilter);
+    map.setFilter("structure-extrude", floorFilter);
     map.setFilter("route-line", floorFilter);
 
     (map.getSource("route") as maplibregl.GeoJSONSource | undefined)?.setData(routeLines);
