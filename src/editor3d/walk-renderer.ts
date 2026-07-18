@@ -12,8 +12,8 @@ import { PointerLockControls } from "three/examples/jsm/controls/PointerLockCont
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { MetreXY } from "../types";
 import type { Category } from "../types";
-import { CATEGORY_COLORS } from "../categories";
 import { pointInRing } from "../coverage";
+import { disposeMaterials, getMaterial, materialForCategory } from "./materials";
 import {
   EYE_M,
   WALL_THICKNESS_M,
@@ -45,16 +45,9 @@ const RUN_SPEED = 8.5; // m/s (Shift)
 const MAX_HOUSE_LIGHTS = 12; // forward-rendering fill-rate budget for warm downlights
 const HOUSE_LIGHT_STEP_M = 22; // MINIMUM downlight grid spacing (widened per-floor to stay under the budget)
 const MAX_SHADOW_LIGHTS = 9; // hard cap on shadow-casting coverage spotlights
-const STRUCTURE_COLOR = "#9a9aa0"; // structures render as neutral concrete grey
-const SLAB_FALLBACK = "#3a4150"; // low circulation slabs when no category colour
-
-// Fixture kind → base colour (ported verbatim from the spike's palette so the
-// walk view reads the same as the proven noir spike).
-const FIX_COLOR: Record<string, number> = {
-  blackjack: 0x1d5c3a, roulette: 0x1d5c3a, poker: 0x1d5c3a, baccarat: 0x1d5c3a,
-  craps: 0x1d5c3a, wheel: 0x1d5c3a, slot: 0x5a3a6e, bar: 0x6e4a2a, counter: 0x6e4a2a,
-  seating: 0x44484f, stage: 0x333640, planter: 0x2f4a2f, car: 0x4a5058, parking: 0x22252c,
-};
+const BASEBOARD_H = 0.12; // baseboard trim height, metres (spec R1)
+const CEILING_PANEL_STEP_M = 7; // recessed-light panel grid spacing, metres
+const MAX_CEILING_PANELS = 24; // cap on emissive ceiling panels (look-only, no lights)
 
 // model metre-space [x, y] (x-east, y-north) -> three (x, h, -y), Y-up.
 const v3 = (x: number, y: number, h: number): THREE.Vector3 => new THREE.Vector3(x, h, -y);
@@ -179,9 +172,15 @@ function disposeObject(o: THREE.Object3D): void {
     if (mesh.geometry) mesh.geometry.dispose();
     const mat = (child as THREE.Mesh).material;
     if (mat) {
-      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-      else mat.dispose();
+      const mats = Array.isArray(mat) ? mat : [mat];
+      // Skip materials shared from materials.ts (tagged userData.shared) — they
+      // outlive any single rebuild and are freed only in disposeMaterials(). The
+      // per-rebuild geometry above is always disposed.
+      for (const m of mats) if (!m.userData?.shared) m.dispose();
     }
+    // An InstancedMesh (walls, baseboards) owns GPU instance buffers beyond its
+    // geometry — free them too.
+    if ((child as THREE.InstancedMesh).isInstancedMesh) (child as THREE.InstancedMesh).dispose();
     const asLight = child as THREE.Light;
     if (typeof asLight.dispose === "function" && (child as THREE.Light).isLight) asLight.dispose();
   });
@@ -230,6 +229,18 @@ export class WalkRenderer {
     emissiveIntensity: 0.85,
   });
 
+  // Emissive recessed-light panels on the ceiling — a look-only "the ceiling is
+  // lit" read (the actual light objects arrive in R3). Shared across every panel
+  // in the merged mesh; tagged so clearGroup skips it and it's freed only in
+  // dispose().
+  private readonly panelMat = new THREE.MeshStandardMaterial({
+    color: 0x0b0b0d,
+    emissive: new THREE.Color(0xffe6c2),
+    emissiveIntensity: 2.2,
+    roughness: 1,
+    metalness: 0,
+  });
+
   private readonly raycaster = new THREE.Raycaster();
   private readonly reticle = new THREE.Vector2(0, 0);
   private readonly keys = new Set<string>();
@@ -261,11 +272,20 @@ export class WalkRenderer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // R1 pipeline: ACES tone mapping compresses the warm-downlight + green-cone
+    // highlights into a filmic range; sRGB output so the procedural albedo
+    // textures (tagged SRGBColorSpace) decode correctly.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.3;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
+    this.panelMat.userData.shared = true;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0a0c10);
-    this.scene.fog = new THREE.FogExp2(0x0a0c10, 0.006);
+    // Slightly thinner than the pre-realism 0.006 so the new procedural surfaces
+    // read, while the world still recedes into cool haze behind the cones.
+    this.scene.fog = new THREE.FogExp2(0x0a0c10, 0.005);
     this.scene.add(this.worldGroup, this.camBodyGroup, this.frustumGroup, this.coverageGroup);
 
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.05, 600);
@@ -389,6 +409,11 @@ export class WalkRenderer {
     this.domeCamGeo.dispose();
     this.camMat.dispose();
     this.camSelMat.dispose();
+    // Free the shared procedural materials/textures + the emissive panel material
+    // exactly once. clearGroup skips shared materials by design (they survive
+    // every rebuild), so this is the only place they're released.
+    this.panelMat.dispose();
+    disposeMaterials();
     this.renderer.dispose();
     // dispose() frees three's internal caches but does NOT release the GL
     // context — that's forceContextLoss()'s job. Without it, every walk-mode
@@ -408,65 +433,109 @@ export class WalkRenderer {
     this.clearGroup(this.worldGroup);
     const g = this.worldGroup;
 
-    // Dark ground plane under everything (spike recipe).
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(2400, 2400),
-      new THREE.MeshStandardMaterial({ color: 0x101218, roughness: 1 }),
-    );
+    // Troweled-concrete ground under everything. PlaneGeometry UVs are 0..1;
+    // rescale them to metres so the shared concrete texture tiles at real-world
+    // scale like the metre-UV floor/prism geometry.
+    const groundGeo = new THREE.PlaneGeometry(2400, 2400);
+    const guv = groundGeo.attributes.uv;
+    for (let i = 0; i < guv.count; i++) guv.setXY(i, guv.getX(i) * 2400, guv.getY(i) * 2400);
+    guv.needsUpdate = true;
+    const ground = new THREE.Mesh(groundGeo, getMaterial("concrete"));
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.04;
     ground.receiveShadow = true;
     g.add(ground);
 
-    // Footprint slab.
+    // Footprint slab (concrete beneath the unit floors).
     if (scene.footprintRing) {
-      const slab = new THREE.Mesh(
-        flatGeo(scene.footprintRing, 0),
-        new THREE.MeshStandardMaterial({ color: 0x23262e, roughness: 0.95 }),
-      );
+      const slab = new THREE.Mesh(flatGeo(scene.footprintRing, 0), getMaterial("concrete"));
       slab.receiveShadow = true;
       g.add(slab);
     }
 
-    // Per-unit floor patches, coloured by category (readability at eye level).
+    // Per-unit floor patches — the main floor read. Materialed by category, plus
+    // the unit id-prefix bucket so the casino's category-"room" spaces still split
+    // into gaming-carpet / F&B-wood / BOH-concrete.
     for (const patch of scene.floorPatches) {
       if (patch.ring.length < 3) continue;
-      const mesh = new THREE.Mesh(
-        flatGeo(patch.ring, 0.02),
-        new THREE.MeshStandardMaterial({ color: categoryColor(patch.category), roughness: 0.9 }),
-      );
+      const mesh = new THREE.Mesh(flatGeo(patch.ring, 0.02), materialForCategory(patch.category, patch.id));
       mesh.receiveShadow = true;
       g.add(mesh);
     }
 
-    // Walls as ONE InstancedMesh of unit boxes scaled per segment.
+    // Walls (wall paint) + baseboard trim, both instanced.
     this.addWalls(scene, g);
 
-    // Extruded prisms, merged per material kind.
-    this.addPrismGroup(scene.slabPrisms, (k) => slabColor(k), g);
-    this.addPrismGroup(scene.structurePrisms, () => STRUCTURE_COLOR, g);
-    this.addPrismGroup(scene.fixturePrisms, (k) => FIX_COLOR[k] ?? 0x555555, g);
+    // Extruded prisms, merged per kind, each drawn with a shared material:
+    //  · circulation/lobby low slabs → the category's stone/carpet floor material
+    //  · structural columns/obstacles → concrete
+    //  · fixtures → brushed metal so they read as objects (R2 gives them models)
+    this.addPrismGroup(scene.slabPrisms, (k) => materialForCategory(k as Category), g);
+    this.addPrismGroup(scene.structurePrisms, () => getMaterial("concrete"), g);
+    this.addPrismGroup(scene.fixturePrisms, () => getMaterial("brushedMetal"), g);
 
-    // Ceiling — castShadow OFF so coverage lights aren't killed by the plane
-    // they hang from (spike-proven).
+    // Ceiling — acoustic tile (DoubleSide baked into the material). castShadow OFF
+    // so coverage lights aren't killed by the plane they hang from (spike-proven).
     if (scene.footprintRing) {
-      const ceil = new THREE.Mesh(
-        flatGeo(scene.footprintRing, scene.ceilingM + 0.02),
-        new THREE.MeshStandardMaterial({ color: 0x191b22, roughness: 1, side: THREE.DoubleSide }),
-      );
+      const ceil = new THREE.Mesh(flatGeo(scene.footprintRing, scene.ceilingM + 0.02), getMaterial("ceilingTile"));
       ceil.castShadow = false;
       g.add(ceil);
+      this.addCeilingPanels(scene, g);
     }
 
     this.addHouseLights(scene, g);
   }
 
+  /** Sparse grid of small emissive quads on the ceiling so it reads as lit — no
+   *  light objects (that's R3), just bright geometry. Merged into one mesh under
+   *  the shared emissive panel material; capped at MAX_CEILING_PANELS. */
+  private addCeilingPanels(scene: Scene3D, group: THREE.Group): void {
+    const ring = scene.footprintRing;
+    if (!ring) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const [x, y] of ring) {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+    const spanX = Math.max(maxX - minX, 1);
+    const spanY = Math.max(maxY - minY, 1);
+    const step = Math.max(CEILING_PANEL_STEP_M, Math.sqrt((spanX * spanY) / MAX_CEILING_PANELS));
+    const hy = scene.ceilingM - 0.03;
+    const quads: THREE.BufferGeometry[] = [];
+    for (let x = minX + step / 2; x <= maxX && quads.length < MAX_CEILING_PANELS; x += step) {
+      for (let y = minY + step / 2; y <= maxY && quads.length < MAX_CEILING_PANELS; y += step) {
+        if (!pointInRing([x, y], ring)) continue;
+        const q = new THREE.PlaneGeometry(0.7, 1.3);
+        q.rotateX(Math.PI / 2); // face down (−Y)
+        q.translate(x, hy, -y); // model (x,y) → three (x, ·, −y)
+        quads.push(q);
+      }
+    }
+    if (quads.length === 0) return;
+    const merged = mergeGeometries(quads, false);
+    quads.forEach((q) => q.dispose());
+    if (!merged) return;
+    const mesh = new THREE.Mesh(merged, this.panelMat);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    group.add(mesh);
+  }
+
   private addWalls(scene: Scene3D, group: THREE.Group): void {
     const segs = scene.wallSegs;
     if (segs.length === 0) return;
-    const proto = new THREE.BoxGeometry(1, 1, WALL_THICKNESS_M);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x8a8578, roughness: 0.85 });
-    const inst = new THREE.InstancedMesh(proto, mat, segs.length);
+    // Wall boxes (unit box scaled to len × height × thickness) and a matching
+    // baseboard box (short, slightly proud of the wall face) share one per-segment
+    // transform — one InstancedMesh each, both with shared materials.
+    const wallProto = new THREE.BoxGeometry(1, 1, WALL_THICKNESS_M);
+    const baseProto = new THREE.BoxGeometry(1, 1, WALL_THICKNESS_M * 1.15);
+    const walls = new THREE.InstancedMesh(wallProto, getMaterial("wallPaint"), segs.length);
+    const bases = new THREE.InstancedMesh(baseProto, getMaterial("woodPanel"), segs.length);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
@@ -477,22 +546,30 @@ export class WalkRenderer {
       const len = Math.hypot(dx, dy);
       if (len < 1e-6) continue;
       const top = s.topM;
-      const mid = v3((s.a[0] + s.b[0]) / 2, (s.a[1] + s.b[1]) / 2, top / 2);
+      const cx = (s.a[0] + s.b[0]) / 2;
+      const cy = (s.a[1] + s.b[1]) / 2;
       // model heading atan2(dy,dx); in three (-y) space the yaw about +Y matches.
       q.setFromAxisAngle(up, Math.atan2(dy, dx));
-      m.compose(mid, q, new THREE.Vector3(len, top, 1));
-      inst.setMatrixAt(n++, m);
+      m.compose(v3(cx, cy, top / 2), q, new THREE.Vector3(len, top, 1));
+      walls.setMatrixAt(n, m);
+      m.compose(v3(cx, cy, BASEBOARD_H / 2), q, new THREE.Vector3(len, BASEBOARD_H, 1));
+      bases.setMatrixAt(n, m);
+      n++;
     }
-    inst.count = n;
-    inst.instanceMatrix.needsUpdate = true;
-    inst.castShadow = true;
-    inst.receiveShadow = true;
-    group.add(inst);
+    walls.count = n;
+    bases.count = n;
+    walls.instanceMatrix.needsUpdate = true;
+    bases.instanceMatrix.needsUpdate = true;
+    walls.castShadow = true;
+    walls.receiveShadow = true;
+    bases.castShadow = true;
+    bases.receiveShadow = true;
+    group.add(walls, bases);
   }
 
   private addPrismGroup(
     prisms: ScenePrism[],
-    colorFor: (kind: string) => THREE.ColorRepresentation,
+    matFor: (kind: string) => THREE.MeshStandardMaterial,
     group: THREE.Group,
   ): void {
     const byKind = new Map<string, THREE.BufferGeometry[]>();
@@ -506,10 +583,7 @@ export class WalkRenderer {
       const merged = mergeGeometries(geos);
       geos.forEach((geo) => geo.dispose());
       if (!merged) continue;
-      const mesh = new THREE.Mesh(
-        merged,
-        new THREE.MeshStandardMaterial({ color: colorFor(kind), roughness: 0.82 }),
-      );
+      const mesh = new THREE.Mesh(merged, matFor(kind));
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       group.add(mesh);
@@ -517,8 +591,21 @@ export class WalkRenderer {
   }
 
   private addHouseLights(scene: Scene3D, group: THREE.Group): void {
-    group.add(new THREE.AmbientLight(0x8090b0, 0.8));
-    group.add(new THREE.HemisphereLight(0x39405a, 0x14161a, 1.0));
+    // Rebalanced for ACES tone mapping (which darkens/desaturates the raw image):
+    // raised so the space isn't muddy, but kept cool + dim so the green coverage
+    // cones and camera bodies stay the brightest, most saturated things in frame.
+    group.add(new THREE.AmbientLight(0x8090b0, 1.15));
+    group.add(new THREE.HemisphereLight(0x46506e, 0x14161a, 1.5));
+    // Soft overhead "house lighting" fill — a straight-down DirectionalLight has
+    // no distance falloff, so it lights every floor evenly and makes the floor
+    // materials actually read (the warm PointLights below sit just under the
+    // ceiling and only pool light directly beneath each). No shadow: the shadow
+    // budget belongs to the coverage cones. Kept cool + moderate so cameras/cones
+    // stay the brightest, most saturated things in frame (camera-primary).
+    const fill = new THREE.DirectionalLight(0xbcc6e0, 1.15);
+    fill.position.set(0, 10, 0);
+    fill.target.position.set(0, 0, 0);
+    group.add(fill, fill.target);
 
     const ring = scene.footprintRing;
     const pts = ring ?? scene.floorPatches.flatMap((p) => p.ring);
@@ -533,7 +620,9 @@ export class WalkRenderer {
       maxX = Math.max(maxX, x);
       maxY = Math.max(maxY, y);
     }
-    const h = scene.ceilingM - 0.3;
+    // Sit the warm downlights lower than flush-to-ceiling so they wash the FLOOR,
+    // not just blast the ceiling tile 0.3 m above them.
+    const h = Math.min(scene.ceilingM - 0.3, scene.ceilingM * 0.7);
     // Widen the grid step on large floors so the bounded light budget spreads
     // evenly across the whole footprint instead of clustering in the min-corner
     // (a plain cap fills row-major and bottom-left-biases). sqrt(area/budget)
@@ -546,7 +635,7 @@ export class WalkRenderer {
     for (let x = minX + step / 2; x <= maxX && placed < MAX_HOUSE_LIGHTS; x += step) {
       for (let y = minY + step / 2; y <= maxY && placed < MAX_HOUSE_LIGHTS; y += step) {
         if (ring && !pointInRing([x, y], ring)) continue;
-        const p = new THREE.PointLight(0xffd9a0, 45, 55, 1.6);
+        const p = new THREE.PointLight(0xffd9a0, 55, 60, 1.25);
         p.position.copy(v3(x, y, h));
         group.add(p);
         placed++;
@@ -812,10 +901,3 @@ function cameraSignature(s: Scene3D): string {
   return out.join(",");
 }
 
-function categoryColor(c: Category): THREE.ColorRepresentation {
-  return CATEGORY_COLORS[c];
-}
-
-function slabColor(kind: string): THREE.ColorRepresentation {
-  return (CATEGORY_COLORS as Record<string, string | undefined>)[kind] ?? SLAB_FALLBACK;
-}
