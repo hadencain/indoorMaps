@@ -68,6 +68,67 @@ function camDir3(headingDeg: number, tiltDeg: number): THREE.Vector3 {
 }
 
 // Orientation looking along camDir3, then rolled about the view axis (local Z).
+/** Bake a flat vertex colour onto a geometry so many parts can merge into one
+ *  vertex-coloured mesh under a single material (one draw call per camera). */
+function colored(geo: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
+  const c = new THREE.Color(hex);
+  const n = geo.attributes.position.count;
+  const arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    arr[i * 3] = c.r;
+    arr[i * 3 + 1] = c.g;
+    arr[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(arr, 3));
+  return geo;
+}
+
+/** A bullet/box security camera, ~0.24 m long, lens pointing local −Z (the view
+ *  direction poseQuaternion aligns to): housing + sun-hood + lens barrel + glass
+ *  cap + a short ceiling stalk. Reads as a camera from across a room where the
+ *  old plain box read as a green blob. */
+function buildBulletCamGeo(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const housing = new THREE.BoxGeometry(0.13, 0.12, 0.24);
+  housing.translate(0, 0, 0.02);
+  parts.push(colored(housing, 0x9298a2));
+  const hood = new THREE.BoxGeometry(0.16, 0.02, 0.26);
+  hood.translate(0, 0.075, -0.02);
+  parts.push(colored(hood, 0x5f646d));
+  const barrel = new THREE.CylinderGeometry(0.05, 0.055, 0.12, 18);
+  barrel.rotateX(Math.PI / 2); // cylinder axis Y -> Z (points down the lens)
+  barrel.translate(0, 0, -0.16);
+  parts.push(colored(barrel, 0x2b2e35));
+  const glass = new THREE.CylinderGeometry(0.042, 0.042, 0.012, 18);
+  glass.rotateX(Math.PI / 2);
+  glass.translate(0, 0, -0.225);
+  parts.push(colored(glass, 0x0b0d13));
+  const stalk = new THREE.CylinderGeometry(0.018, 0.018, 0.12, 10);
+  stalk.translate(0, 0.14, 0.03);
+  parts.push(colored(stalk, 0x5f646d));
+  const merged = mergeGeometries(parts, false);
+  parts.forEach((p) => p.dispose());
+  if (!merged) throw new Error("bullet cam geometry merge failed");
+  return merged;
+}
+
+/** A ceiling dome camera: flush base plate + smoked bottom hemisphere hanging
+ *  below it. No aim — domes see 360°. */
+function buildDomeCamGeo(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const base = new THREE.CylinderGeometry(0.13, 0.13, 0.03, 22);
+  base.translate(0, 0.055, 0);
+  parts.push(colored(base, 0x9298a2));
+  // Bottom hemisphere (theta from equator to south pole) so the dome hangs down.
+  const dome = new THREE.SphereGeometry(0.12, 22, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+  dome.translate(0, 0.04, 0);
+  parts.push(colored(dome, 0x191c24));
+  const merged = mergeGeometries(parts, false);
+  parts.forEach((p) => p.dispose());
+  if (!merged) throw new Error("dome cam geometry merge failed");
+  return merged;
+}
+
 function poseQuaternion(headingDeg: number, tiltDeg: number, rollDeg: number): THREE.Quaternion {
   const dir = camDir3(headingDeg, tiltDeg);
   const m = new THREE.Matrix4().lookAt(new THREE.Vector3(0, 0, 0), dir, new THREE.Vector3(0, 1, 0));
@@ -143,6 +204,31 @@ export class WalkRenderer {
   private readonly camBodyGroup = new THREE.Group();
   private readonly frustumGroup = new THREE.Group();
   private readonly coverageGroup = new THREE.Group();
+
+  // Camera model resources, built ONCE and shared across every camera mesh (a
+  // large venue has ~1000 cameras — per-camera geometry/materials would be
+  // wasteful). Two merged, vertex-coloured geometries (bullet body + lens/hood/
+  // stalk; dome base + smoked hemisphere) and two shared materials — the base
+  // (faint green emissive so cameras are findable in the dark) and a bright
+  // selection material. Selection is a per-mesh material-pointer swap, never a
+  // rebuild. Disposed once in dispose(); camBodyGroup children are removed
+  // WITHOUT disposal (they only reference these shared resources).
+  private readonly bulletCamGeo = buildBulletCamGeo();
+  private readonly domeCamGeo = buildDomeCamGeo();
+  private readonly camMat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.55,
+    metalness: 0.35,
+    emissive: new THREE.Color(0x39ff88),
+    emissiveIntensity: 0.06,
+  });
+  private readonly camSelMat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.4,
+    metalness: 0.35,
+    emissive: new THREE.Color(0x39ff88),
+    emissiveIntensity: 0.85,
+  });
 
   private readonly raycaster = new THREE.Raycaster();
   private readonly reticle = new THREE.Vector2(0, 0);
@@ -270,6 +356,13 @@ export class WalkRenderer {
     this.controls.lock();
   }
 
+  /** Release pointer lock — WalkView calls this the instant a camera is picked
+   *  so the OS cursor is freed to reach the pose panel (a pointer-locked cursor
+   *  is pinned to screen centre and can't click the HUD). */
+  unlock(): void {
+    this.controls.unlock();
+  }
+
   resize(): void {
     const w = this.container.clientWidth || window.innerWidth;
     const h = this.container.clientHeight || window.innerHeight;
@@ -287,10 +380,15 @@ export class WalkRenderer {
     if (this.controls.isLocked) this.controls.unlock();
     this.controls.dispose();
     this.clearGroup(this.worldGroup);
-    this.clearGroup(this.camBodyGroup);
+    this.clearCameraBodies(); // shared geo/mat — don't dispose per body
     this.clearGroup(this.frustumGroup);
     this.clearGroup(this.coverageGroup);
     this.coverageLights.clear();
+    // Dispose the shared camera-model resources exactly once.
+    this.bulletCamGeo.dispose();
+    this.domeCamGeo.dispose();
+    this.camMat.dispose();
+    this.camSelMat.dispose();
     this.renderer.dispose();
     // dispose() frees three's internal caches but does NOT release the GL
     // context — that's forceContextLoss()'s job. Without it, every walk-mode
@@ -457,17 +555,26 @@ export class WalkRenderer {
   }
 
   private rebuildCameraBodies(scene: Scene3D): void {
-    this.clearGroup(this.camBodyGroup);
+    this.clearCameraBodies();
     for (const pose of scene.cameras) {
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(0.16, 0.16, 0.32),
-        new THREE.MeshStandardMaterial({ color: 0xe8e4da, emissive: 0x39ff88, emissiveIntensity: 0.35 }),
-      );
+      const isDome = pose.kind === "dome";
+      const body = new THREE.Mesh(isDome ? this.domeCamGeo : this.bulletCamGeo, this.camMat);
       body.position.copy(v3(pose.at[0], pose.at[1], pose.mountM));
-      const dir = pose.kind === "dome" ? 90 : pose.tiltDeg;
-      body.quaternion.copy(poseQuaternion(pose.headingDeg, dir, pose.kind === "dome" ? 0 : pose.rollDeg));
+      // Dome bodies mount flush and see 360°, so they take no aim rotation; a
+      // fixed/ptz body aims its lens (local −Z) down the pose direction.
+      if (!isDome) {
+        body.quaternion.copy(poseQuaternion(pose.headingDeg, pose.tiltDeg, pose.rollDeg));
+      }
       body.userData.cameraId = pose.id;
       this.camBodyGroup.add(body);
+    }
+  }
+
+  /** Remove camera bodies WITHOUT disposing — they reference the shared camera
+   *  geometry/material, which outlive any single rebuild (disposed in dispose). */
+  private clearCameraBodies(): void {
+    for (let i = this.camBodyGroup.children.length - 1; i >= 0; i--) {
+      this.camBodyGroup.remove(this.camBodyGroup.children[i]);
     }
   }
 
@@ -494,10 +601,13 @@ export class WalkRenderer {
 
   private applySelection(): void {
     this.clearGroup(this.frustumGroup);
-    // Emphasise the selected camera body; dim the rest.
+    // Emphasise the selected camera body by swapping its shared material pointer
+    // to the bright selection material (mutating emissiveIntensity would hit the
+    // ONE shared base material and light every camera). Cheap: a pointer swap
+    // per body, no geometry churn.
     for (const child of this.camBodyGroup.children) {
-      const mat = (child as THREE.Mesh).material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = child.userData.cameraId === this.selectedId ? 1.1 : 0.35;
+      (child as THREE.Mesh).material =
+        child.userData.cameraId === this.selectedId ? this.camSelMat : this.camMat;
     }
     if (!this.sceneData || !this.selectedId) return;
     const pose = this.sceneData.cameras.find((c) => c.id === this.selectedId);

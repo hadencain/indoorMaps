@@ -3067,6 +3067,19 @@ button.wide.ghost {
   font-size: 12px;
   text-transform: capitalize;
 }
+.walk-pose-resume {
+  margin-top: var(--s1);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--accent);
+  cursor: pointer;
+}
+.walk-pose-resume:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
 
 /* Bottom control hint */
 .walk-hint {

@@ -58,6 +58,7 @@ export default function MapView() {
   const selectedIncidentId = useStore((s) => s.selectedIncidentId);
   const patrolDraft = useStore((s) => s.patrolDraft);
   const probe = useStore((s) => s.probe);
+  const walkMode = useStore((s) => s.walkMode);
   const mode = useStore((s) => s.mode);
   const view3d = useStore((s) => s.view3d);
   const searchQuery = useStore((s) => s.searchQuery);
@@ -1041,6 +1042,15 @@ export default function MapView() {
 
     (map.getSource("route") as maplibregl.GeoJSONSource | undefined)?.setData(routeLines);
 
+    // Walk mode overlays the map with the full-screen 3D view, so its HTML
+    // markers are invisible. Skip the teardown+rebuild entirely while walking —
+    // on a large venue that is ~1000+ camera/label markers recreated on every
+    // camera selection AND every pose-slider tick (building is a dep), which is
+    // the walk-mode selection lag. Filters above still run (cheap) so the map is
+    // coherent the instant walk mode exits, when this effect re-runs (walkMode
+    // is a dep) and rebuilds the markers once.
+    if (walkMode) return;
+
     for (const m of markersRef.current) m.remove();
     markersRef.current = [];
 
@@ -1489,7 +1499,7 @@ export default function MapView() {
     // Freshly-rebuilt markers need their zoom-dependent state applied now —
     // the zoom listener alone only covers zoom changes, not rebuilds.
     updateZoomDeclutter();
-  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, selectedStructureId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter, suggestions, onAcceptSuggestion, onRejectSuggestion, mode, selectTool, health]);
+  }, [ready, ordinal, routeLines, routePoints, building, drawTool, selectedId, selectedIds, selectedCameraId, selectedStructureId, cameraMode, incidentMode, selectedIncidentId, onMoveDoor, onToggleOpeningKind, unit, showDims, vertexEdit, layers, amenityFilter, suggestions, onAcceptSuggestion, onRejectSuggestion, mode, selectTool, health, walkMode]);
 
   // Patrol highlight (display mode): emphasize the selected route, dim the rest.
   // Data-driven paint keyed on the feature `id` (patrolsToGeoJSON tags each line).
