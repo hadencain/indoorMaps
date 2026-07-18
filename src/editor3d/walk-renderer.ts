@@ -924,10 +924,10 @@ export class WalkRenderer {
     // cones and camera bodies stay the brightest, most saturated things in frame.
     // Every recede-able light stamps its full intensity in userData.baseIntensity
     // so applyWorldDim can scale it and restore it exactly (camera-primary focus).
-    const ambient = new THREE.AmbientLight(0x8090b0, 1.15);
-    ambient.userData.baseIntensity = 1.15;
-    const hemi = new THREE.HemisphereLight(0x46506e, 0x14161a, 1.5);
-    hemi.userData.baseIntensity = 1.5;
+    const ambient = new THREE.AmbientLight(0x8090b0, 1.4);
+    ambient.userData.baseIntensity = 1.4;
+    const hemi = new THREE.HemisphereLight(0x46506e, 0x14161a, 1.9);
+    hemi.userData.baseIntensity = 1.9;
     group.add(ambient, hemi);
     // Soft overhead "house lighting" fill — a straight-down DirectionalLight has
     // no distance falloff, so it lights every floor evenly and makes the floor
@@ -935,8 +935,8 @@ export class WalkRenderer {
     // ceiling and only pool light directly beneath each). No shadow: the shadow
     // budget belongs to the coverage cones. Kept cool + moderate so cameras/cones
     // stay the brightest, most saturated things in frame (camera-primary).
-    const fill = new THREE.DirectionalLight(0xbcc6e0, 1.15);
-    fill.userData.baseIntensity = 1.15;
+    const fill = new THREE.DirectionalLight(0xbcc6e0, 2.0);
+    fill.userData.baseIntensity = 2.0;
     fill.position.set(0, 10, 0);
     fill.target.position.set(0, 0, 0);
     group.add(fill, fill.target);
