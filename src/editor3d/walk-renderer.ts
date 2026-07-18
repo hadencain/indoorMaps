@@ -15,6 +15,7 @@ import type { Category, FixtureKind } from "../types";
 import { pointInRing } from "../coverage";
 import { disposeMaterials, getEmissiveMaterial, getMaterial, materialForCategory } from "./materials";
 import { disposeFixtureModels, getFixtureModel } from "./fixtures";
+import { BloomPipeline } from "./post";
 import {
   EYE_M,
   WALL_THICKNESS_M,
@@ -28,7 +29,15 @@ export interface WalkRendererOpts {
   /** A locked-mode crosshair click resolved to a camera under the reticle (or
    *  null for empty space). The shell routes it to the store's setSelectedCamera. */
   onPickCamera(id: string | null): void;
+  /** Optional: fired when the effective render quality changes — including the
+   *  automatic High→Low fallback — so the HUD label can reflect the real state.
+   *  Manual toggles fire it too (idempotently). Nice-to-have, not required. */
+  onQualityChange?(q: RenderQuality): void;
 }
+
+/** Render quality: "high" runs the bloom composer; "low" is a plain forward
+ *  render (the perf valve for the GTX 1650 target). */
+export type RenderQuality = "high" | "low";
 
 /** Coverage-cone display policy. `selected` lights only the selected camera;
  *  `nearby` adds up to 8 cameras nearest the player (≤ 9 shadow casters total);
@@ -38,6 +47,16 @@ export type CoverageMode = "selected" | "nearby" | "off";
 const DEG = Math.PI / 180;
 const WALK_SPEED = 4.2; // m/s (spike-calibrated)
 const RUN_SPEED = 8.5; // m/s (Shift)
+
+// R4 auto quality fallback: sample locked-mode frame times at High and, if the
+// GPU can't hold the budget, drop to Low ONCE so the GTX 1650 degrades gracefully.
+// Sampling is gated on controls.isLocked (real in-scene load, not the idle
+// preview) and skips a warmup window (first-render shader compile / texture upload
+// spikes would poison an early median). The median over the sample window is
+// compared to the budget; a manual quality choice disables this entirely.
+const AUTO_WARMUP_FRAMES = 8; // locked frames skipped before sampling (compile spikes)
+const AUTO_SAMPLE_FRAMES = 60; // locked frames sampled before the one-shot decision
+const AUTO_FRAME_MS_BUDGET = 28; // median locked frame time (ms) above which High → Low (~36 fps)
 // Forward renderer: EVERY house PointLight is evaluated per fragment (no light
 // culling), so this count is a hard fill-rate budget on entry-level Turing
 // (GTX 1650) — the proven spike used 5 fixed downlights. Keep it a small
@@ -400,6 +419,20 @@ export class WalkRenderer {
   private readonly coverageLights = new Map<string, THREE.SpotLight>();
   private raf: number | null = null;
 
+  // R4 quality valve. `quality` selects the render path in tick(): "high" runs the
+  // bloom composer, "low" a plain forward render. The pipeline is built once and
+  // kept alive across toggles (switching back to High must be instant — no composer
+  // rebuild). `manualQuality` latches true the moment the user picks a quality, and
+  // permanently disables the auto-fallback so it never fights a manual choice.
+  // `autoFellBack` guards the fallback to fire at most once; the frame-time window
+  // and warmup counter feed that one-shot decision (see tick()).
+  private quality: RenderQuality = "high";
+  private pipeline: BloomPipeline | null = null;
+  private manualQuality = false;
+  private autoFellBack = false;
+  private autoWarmup = AUTO_WARMUP_FRAMES;
+  private readonly frameSamples: number[] = [];
+
   constructor(container: HTMLElement, opts: WalkRendererOpts) {
     this.container = container;
     this.opts = opts;
@@ -431,6 +464,12 @@ export class WalkRenderer {
     this.camera.position.copy(v3(0, 0, EYE_M));
 
     this.controls = new PointerLockControls(this.camera, this.renderer.domElement);
+
+    // R4: bloom composer for the High path. Built once; kept alive across quality
+    // toggles. References this.scene + this.camera by identity, so floor rebuilds
+    // (which swap the scene's children, not the Scene object) need no re-wiring.
+    // Built before resize() so the first resize sizes its render targets too.
+    this.pipeline = new BloomPipeline(this.renderer, this.scene, this.camera);
 
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
@@ -495,6 +534,23 @@ export class WalkRenderer {
     this.recomputeCoverage();
   }
 
+  /** Public quality control (the HUD button). A manual choice latches
+   *  `manualQuality`, permanently disabling the auto-fallback so it never
+   *  overrides the operator. Never disposes the pipeline — toggling back to High
+   *  is an instant render-path switch. */
+  setQuality(q: RenderQuality): void {
+    this.manualQuality = true;
+    this.applyQuality(q);
+  }
+
+  /** Switch the render path without touching `manualQuality` (so the auto-fallback
+   *  can use it). Notifies the HUD when the effective quality actually changes. */
+  private applyQuality(q: RenderQuality): void {
+    if (this.quality === q) return;
+    this.quality = q;
+    this.opts.onQualityChange?.(q);
+  }
+
   /** Camera id under the screen-centre reticle, or null. */
   pickCenter(): string | null {
     this.raycaster.setFromCamera(this.reticle, this.camera);
@@ -528,6 +584,8 @@ export class WalkRenderer {
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    // Keep the bloom composer's render targets matched to the canvas.
+    this.pipeline?.setSize(w, h);
   }
 
   dispose(): void {
@@ -560,6 +618,11 @@ export class WalkRenderer {
     // Free the cached canonical fixture geometries + their shared body/emissive
     // materials exactly once (clearGroup skips these userData.shared resources).
     disposeFixtureModels();
+    // R4: free the bloom composer + all its passes/render targets before the
+    // renderer (UnrealBloomPass owns a mip chain of targets that would otherwise
+    // leak on every walk-mode teardown).
+    this.pipeline?.dispose();
+    this.pipeline = null;
     this.renderer.dispose();
     // dispose() frees three's internal caches but does NOT release the GL
     // context — that's forceContextLoss()'s job. Without it, every walk-mode
@@ -1188,7 +1251,7 @@ export class WalkRenderer {
   }
 
   private addCoverageLight(pose: SceneCameraPose): void {
-    const spot = new THREE.SpotLight(0x39ff88, 60, pose.rangeM, 0.5, 0.3, 0);
+    const spot = new THREE.SpotLight(0x39ff88, 30, pose.rangeM, 0.5, 0.3, 0);
     spot.castShadow = true;
     spot.shadow.mapSize.set(2048, 2048);
     spot.shadow.camera.near = 0.2;
@@ -1237,10 +1300,39 @@ export class WalkRenderer {
           this.recomputeCoverage();
         }
       }
+
+      this.sampleAutoQuality(dt);
     }
 
-    this.renderer.render(this.scene, this.camera);
+    if (this.quality === "high" && this.pipeline) this.pipeline.render();
+    else this.renderer.render(this.scene, this.camera);
   };
+
+  /** One-shot auto quality fallback. While locked at High (real in-scene load),
+   *  collect frame times past a warmup window; once the sample window fills,
+   *  compare the median to the budget and drop to Low a SINGLE time if the GPU
+   *  can't hold it. Never fires after a manual choice, never upgrades, never fires
+   *  twice. `dt` is the clamped per-frame delta in seconds. */
+  private sampleAutoQuality(dt: number): void {
+    if (this.autoFellBack || this.manualQuality || this.quality !== "high") return;
+    if (this.autoWarmup > 0) {
+      this.autoWarmup--;
+      return;
+    }
+    this.frameSamples.push(dt * 1000);
+    if (this.frameSamples.length < AUTO_SAMPLE_FRAMES) return;
+    const sorted = [...this.frameSamples].sort((a, b) => a - b);
+    const median = sorted[sorted.length >> 1];
+    this.frameSamples.length = 0;
+    if (median > AUTO_FRAME_MS_BUDGET) {
+      this.autoFellBack = true;
+      this.applyQuality("low");
+      // eslint-disable-next-line no-console
+      console.info(
+        `[walk] auto quality fallback: median ${median.toFixed(1)}ms > ${AUTO_FRAME_MS_BUDGET}ms at High → Low`,
+      );
+    }
+  }
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     this.keys.add(e.code);

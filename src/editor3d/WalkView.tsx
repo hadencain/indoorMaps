@@ -9,7 +9,7 @@ import { useStore } from "../store";
 import { build3dScene } from "../scene/scene-build";
 import { levelCeilingM } from "../render";
 import { MOUNT_H } from "../coverage";
-import { WalkRenderer, type CoverageMode } from "./walk-renderer";
+import { WalkRenderer, type CoverageMode, type RenderQuality } from "./walk-renderer";
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 const norm360 = (v: number): number => ((v % 360) + 360) % 360;
@@ -36,6 +36,7 @@ export default function WalkView() {
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<WalkRenderer | null>(null);
   const [coverageMode, setCoverageMode] = useState<CoverageMode>("selected");
+  const [quality, setQuality] = useState<RenderQuality>("high");
   const [locked, setLocked] = useState(false);
 
   // Create the renderer once; ResizeObserver keeps it matched to the container.
@@ -50,6 +51,9 @@ export default function WalkView() {
         // panel's "back to walking" button re-locks.
         if (id) r.unlock();
       },
+      // Reflect the real quality in the HUD, including the renderer's automatic
+      // High→Low fallback on a slow GPU (idempotent for manual toggles).
+      onQualityChange: (q) => setQuality(q),
     });
     rendererRef.current = r;
     const ro = new ResizeObserver(() => r.resize());
@@ -104,6 +108,15 @@ export default function WalkView() {
   const cycleCoverage = () =>
     setCoverageMode((m) => (m === "selected" ? "nearby" : m === "nearby" ? "off" : "selected"));
 
+  // Toggle the render quality (bloom composer on/off). Local, not persisted; the
+  // renderer may also auto-fall-back to Low, which syncs this label via onQualityChange.
+  const cycleQuality = () =>
+    setQuality((q) => {
+      const next: RenderQuality = q === "high" ? "low" : "high";
+      rendererRef.current?.setQuality(next);
+      return next;
+    });
+
   const camId = selectedCam?.id ?? "";
   const mountVal = selectedCam
     ? clamp(selectedCam.mountM ?? Math.min(MOUNT_H, ceilingM - 0.1), 0.3, ceilingM)
@@ -141,6 +154,9 @@ export default function WalkView() {
         </label>
         <button className="walk-cov" onClick={cycleCoverage} title="Cycle coverage cones">
           {COVERAGE_LABEL[coverageMode]}
+        </button>
+        <button className="walk-cov" onClick={cycleQuality} title="Toggle render quality (bloom)">
+          {`quality · ${quality}`}
         </button>
         <button className="walk-exit" onClick={() => setWalkMode(false)} title="Exit walk mode">
           Exit walk
