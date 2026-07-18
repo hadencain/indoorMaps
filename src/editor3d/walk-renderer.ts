@@ -216,6 +216,38 @@ function buildStoolGeo(): THREE.BufferGeometry {
   return merged;
 }
 
+/** A low-poly tiled seat (~0.45 m footprint, ~0.85 m tall): a cushioned pad, a
+ *  short back, and a solid dark base block. Built ONCE and shared across every seat
+ *  instance in every seating section (R5 tiles these across a section's footprint —
+ *  one InstancedMesh, one draw call, even for a stadium bank of thousands). Vertex-
+ *  coloured so pad/back/base read differently under the shared fixture material. */
+function buildSeatGeo(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const pad = new THREE.BoxGeometry(0.44, 0.08, 0.44);
+  pad.translate(0, 0.4, 0);
+  parts.push(colored(pad, 0x3c2f48)); // cushion (matches fixtures CUSHION)
+  const back = new THREE.BoxGeometry(0.44, 0.42, 0.08);
+  back.translate(0, 0.63, -0.18);
+  parts.push(colored(back, 0x3c2f48)); // cushion back, at −Z (the seat faces +Z)
+  const base = new THREE.BoxGeometry(0.34, 0.4, 0.34);
+  base.translate(0, 0.2, 0);
+  parts.push(colored(base, 0x2a1c11)); // dark-wood plinth (matches fixtures WOOD_DARK)
+  const merged = mergeGeometries(parts, false);
+  parts.forEach((p) => p.dispose());
+  if (!merged) throw new Error("seat geometry merge failed");
+  return merged;
+}
+
+/** A unit-height ceiling drop rod: a 0.03 m radius dark-metal cylinder centred at
+ *  Y=0, spanning ±0.5. Built ONCE and shared across every rod instance (one
+ *  InstancedMesh). The renderer positions each at a camera's (x,y), midpoint Y, and
+ *  Y-scales it to span mountM..ceilingM so a ceiling camera reads as hung, not
+ *  floating (R5). Low segment count — thin rods never need round silhouettes. */
+function buildCamRodGeo(): THREE.BufferGeometry {
+  const g = new THREE.CylinderGeometry(0.03, 0.03, 1, 8);
+  return colored(g, 0x3a3d42); // dark metal (matches fixtures METAL_DARK)
+}
+
 /** Neon-valance colour for a unit, by function bucket (id-prefix, matching
  *  src/categories.ts functionBucket), else null (circulation / cage / BOH / core
  *  stay dark — no signage). Bar/sportsbook split to cyan, high-limit/poker/show
@@ -387,6 +419,21 @@ export class WalkRenderer {
     metalness: 0.25,
   });
 
+  // R5 footprint-built fixtures. Two shared geometries (one tiled seat, one ceiling
+  // drop rod) instanced across a whole floor, and ONE shared vertex-coloured body
+  // material used by the seats, the camera rods, and the merged stage/bar/counter
+  // meshes (all built FROM each fixture's ring rather than scaling a canonical
+  // model). Tagged shared so clearGroup/clearCameraBodies free only the per-rebuild
+  // instance buffers / merged geometry; these outlive rebuilds and are freed once
+  // in dispose(). Semi-matte, lightly metallic — matches the fixtures.ts body feel.
+  private readonly seatGeo = buildSeatGeo();
+  private readonly camRodGeo = buildCamRodGeo();
+  private readonly fxMat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.6,
+    metalness: 0.2,
+  });
+
   // R3 camera-primary world-recede state. `focused` is true while a camera is
   // selected; applyWorldDim then scales every recede-able light (base stashed in
   // userData.baseIntensity), deepens the fog, and dims the emissive accents listed
@@ -451,6 +498,9 @@ export class WalkRenderer {
     this.panelMat.userData.shared = true;
     this.stoolGeo.userData.shared = true;
     this.stoolMat.userData.shared = true;
+    this.seatGeo.userData.shared = true;
+    this.camRodGeo.userData.shared = true;
+    this.fxMat.userData.shared = true;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0a0c10);
@@ -635,6 +685,13 @@ export class WalkRenderer {
     // per-rebuild stool InstancedMesh buffers were released by clearGroup.
     this.stoolGeo.dispose();
     this.stoolMat.dispose();
+    // R5 shared footprint-fixture resources (tiled-seat + drop-rod geometry, shared
+    // body material) — freed once here; the per-rebuild seat/rod InstancedMesh
+    // buffers and the merged stage/bar/counter geometry were released by clearGroup
+    // (worldGroup) and clearCameraBodies (the rod InstancedMesh).
+    this.seatGeo.dispose();
+    this.camRodGeo.dispose();
+    this.fxMat.dispose();
     disposeMaterials();
     // Free the cached canonical fixture geometries + their shared body/emissive
     // materials exactly once (clearGroup skips these userData.shared resources).
@@ -839,16 +896,16 @@ export class WalkRenderer {
     }
   }
 
-  /** Fixtures as detailed instanced models (R2). Group the fixture prisms by
-   *  kind; for each kind build ONE InstancedMesh of the cached canonical body
-   *  geometry (fixtures.ts) — plus a SECOND InstancedMesh for the emissive part
-   *  when the kind has one (slot screens, bar bottles, stage lamps). Per instance:
-   *  position = footprint centroid at floor y (baseM); yaw = footprint principal
-   *  axis; scale = fit the canonical to the real footprint. So a floor of 300
-   *  slots is 2 draw calls, not 300 meshes, and no geometry is built per rebuild —
-   *  only fresh instance matrices. The canonical geometries are userData.shared,
-   *  so clearGroup frees each InstancedMesh's instance buffers but never the
-   *  shared source geometry (that's disposeFixtureModels() in dispose()). */
+  /** Fixtures, dispatched per kind (R5). Group the fixture prisms by kind, then:
+   *  · UNIFORM kinds (tables, slots, roulette, wheel, craps, planter, car) keep the
+   *    R2 instanced canonical path — one canonical model (fixtures.ts) scaled to each
+   *    footprint reads correctly for them, and must NOT regress.
+   *  · VENUE kinds flatten into bare slabs when a unit-sized canonical model is
+   *    stretched to a stadium/whole-room footprint (a seating section became one
+   *    giant sofa), so they are built FROM the ring instead: `seating` tiles
+   *    individual seats; `stage`/`bar`/`counter` build extruded structure.
+   *  Every path stays instanced or merged, so a floor is a bounded number of draw
+   *  calls and no geometry is built per frame (only per rebuild). */
   private addFixtures(scene: Scene3D, group: THREE.Group): void {
     const byKind = new Map<FixtureKind, ScenePrism[]>();
     for (const p of scene.fixturePrisms) {
@@ -860,62 +917,353 @@ export class WalkRenderer {
     }
     if (byKind.size === 0) return;
 
+    for (const [kind, prisms] of byKind) {
+      switch (kind) {
+        case "seating":
+          this.addSeating(prisms, group);
+          break;
+        case "stage":
+          this.addStages(prisms, group);
+          break;
+        case "bar":
+        case "counter":
+          this.addBarCounter(kind, prisms, group);
+          break;
+        default:
+          this.addCanonicalFixtures(kind, prisms, group);
+      }
+    }
+  }
+
+  /** The R2 instanced canonical path (unchanged): ONE InstancedMesh of the cached
+   *  canonical body geometry (fixtures.ts) for the kind — plus a SECOND for the
+   *  emissive part when it has one (slot screens) — with each instance placed at its
+   *  footprint centroid, yawed to the principal axis, and scaled to fit. So a floor
+   *  of 300 slots is 2 draw calls, not 300 meshes, and no geometry is built per
+   *  rebuild — only fresh instance matrices. The canonical geometries are
+   *  userData.shared, so clearGroup frees each InstancedMesh's instance buffers but
+   *  never the shared source geometry (disposeFixtureModels() in dispose()). */
+  private addCanonicalFixtures(kind: FixtureKind, prisms: ScenePrism[], group: THREE.Group): void {
+    const model = getFixtureModel(kind);
+    const body = new THREE.InstancedMesh(model.geometry, model.material, prisms.length);
+    const emissive =
+      model.emissiveGeometry && model.emissiveMaterial
+        ? new THREE.InstancedMesh(model.emissiveGeometry, model.emissiveMaterial, prisms.length)
+        : null;
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const pos = new THREE.Vector3();
     const scl = new THREE.Vector3();
     const up = new THREE.Vector3(0, 1, 0);
+    let n = 0;
+    for (const p of prisms) {
+      const frame = footprintFrame(p.ring);
+      if (!frame) continue;
+      // Clamp the footprint extents so a degenerate/huge polygon can't produce a
+      // sub-centimetre or building-sized model.
+      const len = clampSpan(frame.lengthM);
+      const wid = clampSpan(frame.widthM);
+      // "length" fit scales uniformly (preserve aspect, height follows footprint);
+      // "bbox" fit stretches the footprint independently and keeps the authored
+      // real-metre height (Y scale 1).
+      if (model.fit === "length") scl.set(len, len, len);
+      else scl.set(len, 1, wid);
+      // model[x,y] -> three(x, h, -y); base sits at the fixture's floor (baseM).
+      pos.set(frame.centroid[0], p.baseM, -frame.centroid[1]);
+      q.setFromAxisAngle(up, frame.angleRad);
+      m.compose(pos, q, scl);
+      body.setMatrixAt(n, m);
+      if (emissive) emissive.setMatrixAt(n, m);
+      n++;
+    }
+    if (n === 0) {
+      // No placeable instances — release the InstancedMesh buffers we allocated.
+      body.dispose();
+      emissive?.dispose();
+      return;
+    }
+    body.count = n;
+    body.instanceMatrix.needsUpdate = true;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    group.add(body);
+    if (emissive) {
+      emissive.count = n;
+      emissive.instanceMatrix.needsUpdate = true;
+      // Self-lit accents: never receive shadows, and don't cast either — a glowing
+      // screen occluding a coverage cone would be wrong, and it saves shadow-pass
+      // cost (the spec excepts receiveShadow; dropping castShadow is the same intent).
+      emissive.castShadow = false;
+      emissive.receiveShadow = false;
+      group.add(emissive);
+    }
+  }
 
-    for (const [kind, prisms] of byKind) {
-      const model = getFixtureModel(kind);
-      const body = new THREE.InstancedMesh(model.geometry, model.material, prisms.length);
-      const emissive =
-        model.emissiveGeometry && model.emissiveMaterial
-          ? new THREE.InstancedMesh(model.emissiveGeometry, model.emissiveMaterial, prisms.length)
-          : null;
-      let n = 0;
-      for (const p of prisms) {
-        const frame = footprintFrame(p.ring);
-        if (!frame) continue;
-        // Clamp the footprint extents so a degenerate/huge polygon can't produce a
-        // sub-centimetre or building-sized model.
-        const len = clampSpan(frame.lengthM);
-        const wid = clampSpan(frame.widthM);
-        // "length" fit scales uniformly (preserve aspect, height follows footprint);
-        // "bbox" fit stretches the footprint independently and keeps the authored
-        // real-metre height (Y scale 1).
-        if (model.fit === "length") scl.set(len, len, len);
-        else scl.set(len, 1, wid);
-        // model[x,y] -> three(x, h, -y); base sits at the fixture's floor (baseM).
-        pos.set(frame.centroid[0], p.baseM, -frame.centroid[1]);
-        q.setFromAxisAngle(up, frame.angleRad);
-        m.compose(pos, q, scl);
-        body.setMatrixAt(n, m);
-        if (emissive) emissive.setMatrixAt(n, m);
-        n++;
+  /** Tiled seating (R5). Rather than stretch one canonical seat into a slab, tile
+   *  individual low-poly seats across each seating fixture's footprint: rows along
+   *  the long axis (SEAT_ROW_SPACING_M apart), seats along each row
+   *  (SEAT_COL_SPACING_M apart), oriented by the footprint frame. ALL seats across
+   *  ALL sections land in ONE InstancedMesh (one draw call). SEAT_CAP hard-bounds
+   *  the instance count: each section gets an equal share of the cap and widens both
+   *  spacings to fit, so a huge stadium bank stays proportional AND bounded (a final
+   *  global stop guarantees the cap absolutely). */
+  private addSeating(prisms: ScenePrism[], group: THREE.Group): void {
+    interface Layout {
+      cx: number;
+      cy: number;
+      ca: number;
+      sa: number;
+      angle: number;
+      base: number;
+      nRows: number;
+      nCols: number;
+      rowSpacing: number;
+      colSpacing: number;
+      ring: MetreXY[];
+    }
+    const layouts: Layout[] = [];
+    const share = Math.max(1, Math.floor(SEAT_CAP / prisms.length));
+    let planned = 0;
+    for (const p of prisms) {
+      const frame = footprintFrame(p.ring);
+      if (!frame) continue;
+      // Use the REAL extents (not clampSpan's 40 m fixture clamp) so a big section
+      // fills edge-to-edge; only guard against degenerate/corrupt spans. The cap +
+      // spacing widening below bound the COUNT regardless of how large the extent is.
+      const lengthM = Math.max(FIXTURE_MIN_SPAN_M, Math.min(frame.lengthM, SEAT_MAX_SECTION_M));
+      const widthM = Math.max(FIXTURE_MIN_SPAN_M, Math.min(frame.widthM, SEAT_MAX_SECTION_M));
+      let rowSpacing = SEAT_ROW_SPACING_M;
+      let colSpacing = SEAT_COL_SPACING_M;
+      let nRows = Math.max(1, Math.floor(lengthM / rowSpacing));
+      let nCols = Math.max(1, Math.floor(widthM / colSpacing));
+      if (nRows * nCols > share) {
+        // Over its share — widen both spacings by the same factor so the count drops
+        // to ~share while the grid stays proportional (fewer, more-spread seats).
+        const f = Math.sqrt((nRows * nCols) / share);
+        rowSpacing *= f;
+        colSpacing *= f;
+        nRows = Math.max(1, Math.floor(lengthM / rowSpacing));
+        nCols = Math.max(1, Math.floor(widthM / colSpacing));
       }
-      if (n === 0) {
-        // No placeable instances — release the InstancedMesh buffers we allocated.
-        body.dispose();
-        emissive?.dispose();
-        continue;
-      }
-      body.count = n;
-      body.instanceMatrix.needsUpdate = true;
-      body.castShadow = true;
-      body.receiveShadow = true;
-      group.add(body);
-      if (emissive) {
-        emissive.count = n;
-        emissive.instanceMatrix.needsUpdate = true;
-        // Self-lit accents: never receive shadows, and don't cast either — a glowing
-        // screen occluding a coverage cone would be wrong, and it saves shadow-pass
-        // cost (the spec excepts receiveShadow; dropping castShadow is the same intent).
-        emissive.castShadow = false;
-        emissive.receiveShadow = false;
-        group.add(emissive);
+      layouts.push({
+        // Centre the grid on the oriented-bbox centre (which the extents above are
+        // measured over), NOT the area centroid — for a curved stadium wedge the
+        // two differ, and centring on the centroid would shove the grid off the box.
+        cx: frame.center[0],
+        cy: frame.center[1],
+        ca: Math.cos(frame.angleRad),
+        sa: Math.sin(frame.angleRad),
+        angle: frame.angleRad,
+        base: p.baseM,
+        nRows,
+        nCols,
+        rowSpacing,
+        colSpacing,
+        ring: p.ring,
+      });
+      planned += nRows * nCols;
+    }
+    if (planned === 0) return;
+    const total = Math.min(planned, SEAT_CAP);
+    const seats = new THREE.InstancedMesh(this.seatGeo, this.fxMat, total);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const pos = new THREE.Vector3();
+    const one = new THREE.Vector3(1, 1, 1);
+    const up = new THREE.Vector3(0, 1, 0);
+    let idx = 0;
+    for (const L of layouts) {
+      if (idx >= total) break;
+      q.setFromAxisAngle(up, L.angle);
+      const rowOff = (L.nRows - 1) / 2;
+      const colOff = (L.nCols - 1) / 2;
+      for (let r = 0; r < L.nRows && idx < total; r++) {
+        const along = (r - rowOff) * L.rowSpacing; // along the long axis
+        for (let c = 0; c < L.nCols && idx < total; c++) {
+          const across = (c - colOff) * L.colSpacing; // across the row (width axis)
+          // Rotate the local (along, across) grid offset into model space by the
+          // section yaw, then map model (x,y) -> three (x, base, -y).
+          const mx = L.cx + along * L.ca - across * L.sa;
+          const my = L.cy + along * L.sa + across * L.ca;
+          // Cull cells outside the actual (possibly curved/concave) seating ring —
+          // the oriented-bbox grid overshoots a non-rectangular section otherwise.
+          if (!pointInRing([mx, my], L.ring)) continue;
+          pos.set(mx, L.base, -my);
+          m.compose(pos, q, one);
+          seats.setMatrixAt(idx++, m);
+        }
       }
     }
+    seats.count = idx;
+    seats.instanceMatrix.needsUpdate = true;
+    seats.castShadow = true;
+    seats.receiveShadow = true;
+    group.add(seats);
+  }
+
+  /** Footprint-built stage platforms (R5). For each stage fixture: extrude its ring
+   *  into a deck (STAGE_DECK_H), wrap the perimeter in a darker fascia skirt just
+   *  outside each edge, and stand a truss frame — four uprights at the oriented-bbox
+   *  corners joined by a top rectangular cross-frame. ALL stages merge into ONE
+   *  vertex-coloured mesh (1 draw call for every stage on the floor). */
+  private addStages(prisms: ScenePrism[], group: THREE.Group): void {
+    const parts: THREE.BufferGeometry[] = [];
+    for (const p of prisms) {
+      const ring = p.ring;
+      const frame = footprintFrame(ring);
+      if (!frame) continue;
+      const base = p.baseM;
+      const deckTop = base + STAGE_DECK_H;
+      // Deck: the ring extruded to platform height.
+      parts.push(fxRingPrism(ring, base, deckTop, FX_STAGE_DECK));
+      // Fascia: a thin darker skirt just OUTSIDE each ring edge, floor..deck-top.
+      const [ccx, ccy] = frame.centroid;
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i];
+        const b = ring[(i + 1) % ring.length];
+        const dx = b[0] - a[0];
+        const dy = b[1] - a[1];
+        const len = Math.hypot(dx, dy);
+        if (len < 0.05) continue;
+        const mx = (a[0] + b[0]) / 2;
+        const my = (a[1] + b[1]) / 2;
+        let nx = -dy / len;
+        let ny = dx / len;
+        if ((mx - ccx) * nx + (my - ccy) * ny < 0) {
+          nx = -nx;
+          ny = -ny;
+        } // ensure the normal points outward from the centroid
+        parts.push(
+          fxBox(
+            mx + nx * (STAGE_FASCIA_T / 2),
+            my + ny * (STAGE_FASCIA_T / 2),
+            len,
+            STAGE_FASCIA_T,
+            base,
+            deckTop,
+            Math.atan2(dy, dx),
+            FX_STAGE_FASCIA,
+          ),
+        );
+      }
+      // Truss: four uprights at the oriented-bbox corners + a top rectangular frame.
+      const ca = Math.cos(frame.angleRad);
+      const sa = Math.sin(frame.angleRad);
+      const hl = clampSpan(frame.lengthM) / 2;
+      const hw = clampSpan(frame.widthM) / 2;
+      const trussTop = deckTop + STAGE_TRUSS_H;
+      const corner = (sl: number, sw: number): [number, number] => [
+        frame.centroid[0] + sl * hl * ca - sw * hw * sa,
+        frame.centroid[1] + sl * hl * sa + sw * hw * ca,
+      ];
+      for (const [kx, ky] of [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)]) {
+        parts.push(fxBox(kx, ky, STAGE_POST, STAGE_POST, deckTop, trussTop, frame.angleRad, FX_METAL_DARK));
+      }
+      // Top frame: two beams along the length (at ±width edges) + two across the
+      // width (at ±length edges), forming a rectangle at the truss top.
+      for (const sw of [-1, 1]) {
+        parts.push(
+          fxBox(
+            frame.centroid[0] - sw * hw * sa,
+            frame.centroid[1] + sw * hw * ca,
+            hl * 2,
+            STAGE_POST,
+            trussTop - STAGE_POST,
+            trussTop,
+            frame.angleRad,
+            FX_METAL_DARK,
+          ),
+        );
+      }
+      for (const sl of [-1, 1]) {
+        parts.push(
+          fxBox(
+            frame.centroid[0] + sl * hl * ca,
+            frame.centroid[1] + sl * hl * sa,
+            STAGE_POST,
+            hw * 2,
+            trussTop - STAGE_POST,
+            trussTop,
+            frame.angleRad,
+            FX_METAL_DARK,
+          ),
+        );
+      }
+    }
+    this.mergeFixtureParts(parts, group);
+  }
+
+  /** Footprint-built bar / counter (R5). For each fixture: a recessed kick (the ring
+   *  offset INWARD, floor..KICK_H), a cabinet (the ring, kick..cabinet-top) with a
+   *  wood/dark front, and an overhanging stone TOP (the ring offset OUTWARD). Bar
+   *  additionally gets a low back-bar shelf along its longest edge with a few modest
+   *  emissive bottle accents. Body parts merge into ONE vertex-coloured mesh per
+   *  kind; bar bottles merge into ONE emissive mesh (recede-able like the neon
+   *  signage, so it never outshines the green coverage cones). */
+  private addBarCounter(kind: "bar" | "counter", prisms: ScenePrism[], group: THREE.Group): void {
+    const isBar = kind === "bar";
+    const cabinetTop = isBar ? BAR_CABINET_H : COUNTER_CABINET_H;
+    const cabinetHex = isBar ? FX_WOOD_DARK : FX_WOOD;
+    const parts: THREE.BufferGeometry[] = [];
+    const bottles: THREE.BufferGeometry[] = [];
+    for (const p of prisms) {
+      const ring = p.ring;
+      const frame = footprintFrame(ring);
+      if (!frame) continue;
+      const base = p.baseM;
+      parts.push(fxRingPrism(offsetRing(ring, -KICK_INSET), base, base + KICK_H, FX_KICK));
+      parts.push(fxRingPrism(ring, base + KICK_H, base + cabinetTop, cabinetHex));
+      parts.push(fxRingPrism(offsetRing(ring, TOP_OVERHANG), base + cabinetTop, base + cabinetTop + TOP_TH, FX_STONE));
+      if (!isBar) continue;
+      // Back-bar shelf along the LONGEST edge (the long axis, at the +width side).
+      const ca = Math.cos(frame.angleRad);
+      const sa = Math.sin(frame.angleRad);
+      const hl = clampSpan(frame.lengthM) / 2;
+      const hw = clampSpan(frame.widthM) / 2;
+      // Width (perpendicular) unit dir in model space = (−sa, ca); pick the +side.
+      const backOff = hw + 0.15;
+      const bx = frame.centroid[0] - sa * backOff;
+      const by = frame.centroid[1] + ca * backOff;
+      const shelfY = base + 0.9;
+      parts.push(fxBox(bx, by, hl * 2, 0.22, shelfY, shelfY + 0.05, frame.angleRad, FX_WOOD_DARK));
+      for (let i = 0; i < BACKBAR_BOTTLES; i++) {
+        const t = BACKBAR_BOTTLES > 1 ? i / (BACKBAR_BOTTLES - 1) - 0.5 : 0;
+        const along = t * hl * 1.6; // spread over ~80% of the shelf length
+        const ex = bx + along * ca;
+        const ey = by + along * sa;
+        const g = new THREE.BoxGeometry(0.05, 0.22, 0.05);
+        g.translate(ex, shelfY + 0.05 + 0.11, -ey); // standing on the shelf top
+        bottles.push(g);
+      }
+    }
+    this.mergeFixtureParts(parts, group);
+    if (bottles.length > 0) {
+      const merged = mergeGeometries(bottles, false);
+      bottles.forEach((g) => g.dispose());
+      if (merged) {
+        const mat = getEmissiveMaterial(FX_BOTTLE, FX_BOTTLE_I);
+        const mesh = new THREE.Mesh(merged, mat);
+        mesh.castShadow = false;
+        mesh.receiveShadow = false;
+        group.add(mesh);
+        // Recede-able: dims with the world when a camera is focused.
+        this.worldEmissive.push({ mat, base: FX_BOTTLE_I });
+      }
+    }
+  }
+
+  /** Merge a batch of vertex-coloured footprint parts into ONE mesh under the shared
+   *  fixture-build material and add it (1 draw call). Frees the source parts; the
+   *  merged geometry is per-rebuild (clearGroup disposes it), the material shared. */
+  private mergeFixtureParts(parts: THREE.BufferGeometry[], group: THREE.Group): void {
+    if (parts.length === 0) return;
+    const merged = mergeGeometries(parts, false);
+    parts.forEach((g) => g.dispose());
+    if (!merged) return;
+    const mesh = new THREE.Mesh(merged, this.fxMat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
   }
 
   private addHouseLights(scene: Scene3D, group: THREE.Group): void {
@@ -1161,13 +1509,50 @@ export class WalkRenderer {
       body.userData.cameraId = pose.id;
       this.camBodyGroup.add(body);
     }
+    this.addCameraRods(scene);
   }
 
-  /** Remove camera bodies WITHOUT disposing — they reference the shared camera
-   *  geometry/material, which outlive any single rebuild (disposed in dispose). */
+  /** Ceiling drop rods (R5): hang each non-dome, ceiling-mounted camera from the
+   *  ceiling on a thin dark-metal rod so it reads as mounted, not floating, when its
+   *  mountM sits well below the ceiling. ONE shared unit rod geometry + ONE
+   *  InstancedMesh (one draw call for every rod). Each instance is positioned at the
+   *  camera's (x,y), midpoint Y, and Y-scaled to span mountM..ceilingM. Domes mount
+   *  flush and take no rod; wall/column cameras aren't hung from the ceiling. */
+  private addCameraRods(scene: Scene3D): void {
+    const hung = scene.cameras.filter((p) => p.kind !== "dome" && p.mount === "ceiling");
+    if (hung.length === 0) return;
+    const rods = new THREE.InstancedMesh(this.camRodGeo, this.fxMat, hung.length);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion(); // identity — the rod is vertical
+    const pos = new THREE.Vector3();
+    const scl = new THREE.Vector3();
+    let n = 0;
+    for (const pose of hung) {
+      const span = Math.max(0.02, scene.ceilingM - pose.mountM);
+      pos.set(pose.at[0], (pose.mountM + scene.ceilingM) / 2, -pose.at[1]);
+      scl.set(1, span, 1);
+      m.compose(pos, q, scl);
+      rods.setMatrixAt(n++, m);
+    }
+    rods.count = n;
+    rods.instanceMatrix.needsUpdate = true;
+    rods.castShadow = true;
+    rods.receiveShadow = false;
+    // Rods are decoration, not pick targets — keep them out of the camera raycast so
+    // a rod between the reticle and a body can't shadow (or mis-resolve) the pick.
+    rods.raycast = () => {};
+    this.camBodyGroup.add(rods);
+  }
+
+  /** Remove camera bodies. The bodies reference shared camera geometry/material
+   *  (freed in dispose(), never here). The R5 drop-rod InstancedMesh additionally
+   *  owns a per-rebuild instance buffer — free it (its shared geo/material are
+   *  spared, like every other InstancedMesh teardown). */
   private clearCameraBodies(): void {
     for (let i = this.camBodyGroup.children.length - 1; i >= 0; i--) {
-      this.camBodyGroup.remove(this.camBodyGroup.children[i]);
+      const c = this.camBodyGroup.children[i];
+      if ((c as THREE.InstancedMesh).isInstancedMesh) (c as THREE.InstancedMesh).dispose();
+      this.camBodyGroup.remove(c);
     }
   }
 
@@ -1203,6 +1588,10 @@ export class WalkRenderer {
     // ONE shared base material and light every camera). Cheap: a pointer swap
     // per body, no geometry churn.
     for (const child of this.camBodyGroup.children) {
+      // The R5 drop-rod InstancedMesh also lives in camBodyGroup but is
+      // decoration, not a camera body — it carries no userData.cameraId and must
+      // keep its dark-metal fxMat. Guard the swap so it isn't repainted camMat.
+      if (child.userData.cameraId == null) continue;
       (child as THREE.Mesh).material =
         child.userData.cameraId === this.selectedId ? this.camSelMat : this.camMat;
     }
@@ -1395,7 +1784,14 @@ const clampSpan = (v: number): number =>
   v < FIXTURE_MIN_SPAN_M ? FIXTURE_MIN_SPAN_M : v > FIXTURE_MAX_SPAN_M ? FIXTURE_MAX_SPAN_M : v;
 
 interface FootprintFrame {
+  /** Signed-area (shoelace) centroid of the ring. */
   centroid: MetreXY;
+  /** Centre of the MINIMUM-AREA oriented bounding box, in model space. For a
+   *  rectangular footprint this coincides with `centroid`; for an irregular ring
+   *  (a curved stadium wedge) it does NOT — it is the centre of the extents a
+   *  grid is tiled over, so tiling must be centred here (not on the area
+   *  centroid) to stay symmetric about the box. */
+  center: MetreXY;
   /** Yaw about +Y aligning the model's local +X to the footprint's LONG axis.
    *  Measured atan2-style in model space, matching the wall convention so the
    *  model→three (x, ·, −y) mapping lands the length along the real long axis. */
@@ -1478,6 +1874,7 @@ function footprintFrame(ring: MetreXY[]): FootprintFrame | null {
     const dy = maxY - minY;
     return {
       centroid,
+      center: [(minX + maxX) / 2, (minY + maxY) / 2],
       angleRad: Math.atan2(dy, dx),
       lengthM: Math.max(Math.hypot(dx, dy), FIXTURE_MIN_SPAN_M),
       widthM: FIXTURE_MIN_SPAN_M,
@@ -1487,6 +1884,8 @@ function footprintFrame(ring: MetreXY[]): FootprintFrame | null {
   let bestAngle = 0;
   let bestLen = 0;
   let bestWid = 0;
+  let bestCx = centroid[0];
+  let bestCy = centroid[1];
   const h = hull.length;
   for (let i = 0; i < h; i++) {
     const [ax, ay] = hull[i];
@@ -1518,6 +1917,12 @@ function footprintFrame(ring: MetreXY[]): FootprintFrame | null {
       bestAngle = Math.atan2(uy, ux); // long axis resolved below
       bestLen = wU;
       bestWid = wV;
+      // Box centre in the (u, v) projected frame, rotated back to model space
+      // (R⁻¹ = Rᵀ of the [u; v] projection): px = ux·cu − uy·cv, py = uy·cu + ux·cv.
+      const cU = (minU + maxU) / 2;
+      const cV = (minV + maxV) / 2;
+      bestCx = ux * cU - uy * cV;
+      bestCy = uy * cU + ux * cV;
     }
   }
   // Ensure lengthM is the LONGER side; if the edge axis was the short one, swap
@@ -1529,7 +1934,143 @@ function footprintFrame(ring: MetreXY[]): FootprintFrame | null {
     [lengthM, widthM] = [widthM, lengthM];
     angle += Math.PI / 2;
   }
-  return { centroid, angleRad: angle, lengthM, widthM };
+  return { centroid, center: [bestCx, bestCy], angleRad: angle, lengthM, widthM };
+}
+
+// ---- R5 footprint-built fixtures --------------------------------------------
+// seating / stage / bar / counter are built FROM their fixture ring rather than by
+// scaling a canonical model (a venue-scale footprint flattens a unit model into a
+// bare slab — a whole seating section became one giant sofa). These constants +
+// helpers drive that: tiled seats, an extruded stage deck + truss, and an extruded
+// bar/counter cabinet with an overhanging stone top. Everything merges/instances
+// under ONE shared vertex-coloured body material (WalkRenderer.fxMat).
+
+// Seating tiling.
+const SEAT_CAP = 4000; // hard bound on total seat instances across ALL sections
+const SEAT_ROW_SPACING_M = 0.95; // gap between rows (along the long axis)
+const SEAT_COL_SPACING_M = 0.55; // gap between seats within a row (across it)
+const SEAT_MAX_SECTION_M = 400; // guard a corrupt polygon's extent (count is capped separately)
+
+// Vertex-colour palette (sRGB; mirrors src/editor3d/fixtures.ts so the footprint-
+// built fixtures read as the same world as the canonical ones).
+const FX_WOOD = 0x4a3320;
+const FX_WOOD_DARK = 0x2a1c11;
+const FX_STONE = 0xcac6bf;
+const FX_METAL_DARK = 0x3a3d42;
+const FX_STAGE_DECK = 0x1b1920;
+const FX_STAGE_FASCIA = 0x0e0d12; // darker than the deck, for the perimeter skirt
+const FX_KICK = 0x141118; // recessed base kick — near-black shadow line
+const FX_BOTTLE = 0xffb060; // back-bar bottle glow (emissive), matches fixtures BOTTLE
+const FX_BOTTLE_I = 0.7;
+
+// Stage dims (metres).
+const STAGE_DECK_H = 0.6; // platform deck height
+const STAGE_TRUSS_H = 2.5; // truss height above the deck
+const STAGE_POST = 0.08; // truss upright / beam thickness
+const STAGE_FASCIA_T = 0.08; // perimeter skirt thickness
+
+// Bar / counter dims (metres).
+const KICK_H = 0.1; // recessed kick height
+const KICK_INSET = 0.05; // kick footprint inset (inward ring offset)
+const BAR_CABINET_H = 1.05; // bar cabinet top height
+const COUNTER_CABINET_H = 0.95; // counter cabinet top height
+const TOP_TH = 0.05; // stone top slab thickness
+const TOP_OVERHANG = 0.05; // stone top outward overhang (outward ring offset)
+const BACKBAR_BOTTLES = 5; // emissive bottle accents per bar
+
+/** Normalise a geometry to NON-INDEXED and bake a flat vertex colour. A single
+ *  kind's footprint parts mix extruded rings (ExtrudeGeometry, non-indexed) with
+ *  boxes (indexed); mergeGeometries rejects mixed indexing, so every part is
+ *  converted before the merge. */
+function fxColored(g: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
+  let ng = g;
+  if (g.index) {
+    ng = g.toNonIndexed();
+    g.dispose();
+  }
+  return colored(ng, hex);
+}
+
+/** A vertex-coloured extruded ring, baseM..topM (three-space via prismGeo). */
+function fxRingPrism(ring: MetreXY[], baseM: number, topM: number, hex: number): THREE.BufferGeometry {
+  return fxColored(prismGeo(ring, baseM, topM), hex);
+}
+
+/** A vertical box in MODEL space: centre (cx,cy) metres, `wLong` along yaw `angle`
+ *  (local +X, the wall/fixture yaw convention), `wPerp` perpendicular (local +Z),
+ *  spanning baseM..topM in height. Maps model (x,y) → three (x, ·, −y). */
+function fxBox(
+  cx: number,
+  cy: number,
+  wLong: number,
+  wPerp: number,
+  baseM: number,
+  topM: number,
+  angle: number,
+  hex: number,
+): THREE.BufferGeometry {
+  const g = new THREE.BoxGeometry(wLong, Math.max(topM - baseM, 1e-3), wPerp);
+  if (angle) g.rotateY(angle);
+  g.translate(cx, (baseM + topM) / 2, -cy);
+  return fxColored(g, hex);
+}
+
+function ringSignedArea(ring: MetreXY[]): number {
+  let a = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x0, y0] = ring[i];
+    const [x1, y1] = ring[(i + 1) % ring.length];
+    a += x0 * y1 - x1 * y0;
+  }
+  return a / 2;
+}
+
+/** Parallel-offset a ring by `dist` metres (positive = outward, negative = inward),
+ *  mitred at each vertex so every edge shifts by exactly `dist`. Winding-robust (the
+ *  outward normal is derived from the signed area) and clamped at sharp corners so a
+ *  reflex vertex can't spike the miter. Used for the bar/counter stone-top overhang
+ *  (outward) and the recessed kick (inward). */
+function offsetRing(ring: MetreXY[], dist: number): MetreXY[] {
+  const n = ring.length;
+  const sign = ringSignedArea(ring) >= 0 ? 1 : -1;
+  const cap = Math.abs(dist) * 3;
+  const out: MetreXY[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = ring[(i - 1 + n) % n];
+    const c = ring[i];
+    const q = ring[(i + 1) % n];
+    let e1x = c[0] - p[0];
+    let e1y = c[1] - p[1];
+    const l1 = Math.hypot(e1x, e1y) || 1;
+    e1x /= l1;
+    e1y /= l1;
+    let e2x = q[0] - c[0];
+    let e2y = q[1] - c[1];
+    const l2 = Math.hypot(e2x, e2y) || 1;
+    e2x /= l2;
+    e2y /= l2;
+    // Outward edge normals (CCW → (dy,−dx)); sign flips for a CW ring.
+    const n1x = sign * e1y;
+    const n1y = -sign * e1x;
+    const n2x = sign * e2y;
+    const n2y = -sign * e2x;
+    let mx = n1x + n2x;
+    let my = n1y + n2y;
+    const ml = Math.hypot(mx, my);
+    if (ml < 1e-6) {
+      mx = n1x;
+      my = n1y;
+    } else {
+      mx /= ml;
+      my /= ml;
+    }
+    const cosHalf = Math.max(mx * n1x + my * n1y, 0.35);
+    let scale = dist / cosHalf;
+    if (scale > cap) scale = cap;
+    else if (scale < -cap) scale = -cap;
+    out.push([c[0] + mx * scale, c[1] + my * scale]);
+  }
+  return out;
 }
 
 // ---- change detection ------------------------------------------------------
