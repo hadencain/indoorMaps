@@ -969,6 +969,12 @@ export default function MapView() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
+    // Same walk-mode gate as the marker rebuild: this effect re-runs on every
+    // `building` change, and maplibre's ImageSource.updateImage re-decodes +
+    // re-uploads the (multi-MB) floorplan texture unconditionally — so a pose-
+    // slider drag over the hidden map would thrash the GPU every tick on any
+    // floor that has a raster underlay. Skip while walking; it re-runs on exit.
+    if (walkMode) return;
     const src = map.getSource("underlay") as maplibregl.ImageSource | undefined;
     if (src) {
       // Only render an underlay that still has its image (dataUrl may be "" after a
@@ -988,7 +994,7 @@ export default function MapView() {
       const vu = (building.vectorUnderlays ?? []).find((v) => v.ordinal === ordinal);
       map.setPaintProperty("vector-underlay-line", "line-opacity", vu?.opacity ?? 0.5);
     }
-  }, [ready, ordinal, building]);
+  }, [ready, ordinal, building, walkMode]);
 
   // Floor / route / selection changes: filter layers and rebuild HTML markers.
   useEffect(() => {
