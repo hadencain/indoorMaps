@@ -27,6 +27,7 @@ export default function WalkView() {
   const selectedCameraId = useStore((s) => s.selectedCameraId);
   const setOrdinal = useStore((s) => s.setOrdinal);
   const setWalkMode = useStore((s) => s.setWalkMode);
+  const setSelectedCamera = useStore((s) => s.setSelectedCamera);
   const setLevelCeiling = useStore((s) => s.setLevelCeiling);
   const updateCamera = useStore((s) => s.updateCamera);
   const beginCameraGesture = useStore((s) => s.beginCameraGesture);
@@ -42,7 +43,13 @@ export default function WalkView() {
     const el = mountRef.current;
     if (!el) return;
     const r = new WalkRenderer(el, {
-      onPickCamera: (id) => useStore.getState().setSelectedCamera(id),
+      onPickCamera: (id) => {
+        useStore.getState().setSelectedCamera(id);
+        // Picking a camera means the operator wants to adjust it — free the
+        // cursor from pointer lock so the pose panel is reachable. Esc or the
+        // panel's "back to walking" button re-locks.
+        if (id) r.unlock();
+      },
     });
     rendererRef.current = r;
     const ro = new ResizeObserver(() => r.resize());
@@ -59,6 +66,20 @@ export default function WalkView() {
     const onChange = () => setLocked(document.pointerLockElement != null);
     document.addEventListener("pointerlockchange", onChange);
     return () => document.removeEventListener("pointerlockchange", onChange);
+  }, []);
+
+  // Esc while a camera is selected deselects it (closes the pose panel). When
+  // locked, the browser fires Escape as it exits pointer lock, so this also
+  // covers "aimed at a camera, hit Esc" in one keypress. Reads the store live so
+  // the listener stays stable.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && useStore.getState().selectedCameraId) {
+        useStore.getState().setSelectedCamera(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   // Rebuild the scene on any building edit or floor change (build3dScene is pure).
@@ -190,14 +211,28 @@ export default function WalkView() {
               </option>
             ))}
           </select>
+
+          <button
+            className="walk-pose-resume"
+            onClick={() => {
+              setSelectedCamera(null);
+              rendererRef.current?.lock();
+            }}
+          >
+            ◀ back to walking
+          </button>
         </div>
       )}
 
       <div className="walk-hint mono">
-        WASD move · Shift run · click to look · Esc release · click a camera to select
+        {selectedCam
+          ? "adjust the camera · Esc or ◀ back to walking to resume"
+          : "WASD move · Shift run · click to look · Esc release · click a camera to select"}
       </div>
 
-      {!locked && (
+      {/* The full-screen "click to walk" prompt is suppressed while a camera is
+          selected, so it can't cover the pose panel or re-lock on a stray click. */}
+      {!locked && !selectedCam && (
         <button className="walk-lock" onClick={() => rendererRef.current?.lock()}>
           <span className="walk-lock-inner">click to walk</span>
         </button>
