@@ -78,6 +78,14 @@ export class BloomPipeline {
     this.composer.setSize(w, h);
   }
 
+  /** Match the composer's cached pixel ratio to the renderer's (EffectComposer
+   *  snapshots it at construction, so a later renderer.setPixelRatio — e.g. the
+   *  quality valve dropping to 1 — must be mirrored here or the bloom targets
+   *  stay at the old resolution). */
+  setPixelRatio(pixelRatio: number): void {
+    this.composer.setPixelRatio(pixelRatio);
+  }
+
   /** Repoint the RenderPass at a new camera. Unused today (the fp camera is never
    *  swapped) but kept for safety if that ever changes. */
   setCamera(camera: THREE.Camera): void {

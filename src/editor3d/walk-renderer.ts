@@ -438,7 +438,7 @@ export class WalkRenderer {
     this.opts = opts;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(this.pixelRatioForQuality(this.quality));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     // R1 pipeline: ACES tone mapping compresses the warm-downlight + green-cone
@@ -545,9 +545,30 @@ export class WalkRenderer {
 
   /** Switch the render path without touching `manualQuality` (so the auto-fallback
    *  can use it). Notifies the HUD when the effective quality actually changes. */
+  /** Device pixel ratio per quality. Low renders at 1× (≈4× fewer fragments than
+   *  a 2× display) — the single biggest fill-rate lever on the GTX 1650. */
+  private pixelRatioForQuality(q: RenderQuality): number {
+    return q === "low" ? 1 : Math.min(window.devicePixelRatio, 2);
+  }
+
+  /** Coverage shadow-map resolution per quality. Low uses 1024² (≈4× cheaper per
+   *  shadow render than 2048²) while KEEPING shadows so coverage stays
+   *  occlusion-honest — up to 9 of these render every frame. */
+  private shadowMapSizeForQuality(): number {
+    return this.quality === "low" ? 1024 : 2048;
+  }
+
   private applyQuality(q: RenderQuality): void {
     if (this.quality === q) return;
     this.quality = q;
+    // Low mode must shed the DOMINANT costs, not just bloom: drop pixel ratio
+    // (main lever) and shrink the coverage shadow maps. Bloom is additionally
+    // skipped by the tick() render-path branch. High restores full fidelity.
+    const pr = this.pixelRatioForQuality(q);
+    this.renderer.setPixelRatio(pr);
+    this.pipeline?.setPixelRatio(pr);
+    this.resize(); // re-apply the drawing-buffer size at the new ratio (renderer + composer)
+    this.recomputeCoverage(); // rebuild coverage spotlights at the new shadow-map size
     this.opts.onQualityChange?.(q);
   }
 
@@ -1253,7 +1274,8 @@ export class WalkRenderer {
   private addCoverageLight(pose: SceneCameraPose): void {
     const spot = new THREE.SpotLight(0x39ff88, 30, pose.rangeM, 0.5, 0.3, 0);
     spot.castShadow = true;
-    spot.shadow.mapSize.set(2048, 2048);
+    const sm = this.shadowMapSizeForQuality();
+    spot.shadow.mapSize.set(sm, sm);
     spot.shadow.camera.near = 0.2;
     spot.shadow.bias = -0.0004;
     spot.shadow.normalBias = 0.03;
