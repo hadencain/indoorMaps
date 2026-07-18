@@ -11,9 +11,10 @@ import * as THREE from "three";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { MetreXY } from "../types";
-import type { Category } from "../types";
+import type { Category, FixtureKind } from "../types";
 import { pointInRing } from "../coverage";
 import { disposeMaterials, getMaterial, materialForCategory } from "./materials";
+import { disposeFixtureModels, getFixtureModel } from "./fixtures";
 import {
   EYE_M,
   WALL_THICKNESS_M,
@@ -163,13 +164,41 @@ function centroid(ring: MetreXY[] | null): MetreXY | null {
   return [x / ring.length, y / ring.length];
 }
 
+/** Mean of every fixture's centroid — the "gaming floor" centre, used to spawn
+ *  the walker in the action rather than a dead corner. Null when no fixtures. */
+function fixturesCentroid(scene: Scene3D): MetreXY | null {
+  let x = 0, y = 0, n = 0;
+  for (const p of scene.fixturePrisms) {
+    const c = centroid(p.ring);
+    if (c) { x += c[0]; y += c[1]; n++; }
+  }
+  return n > 0 ? [x / n, y / n] : null;
+}
+
+/** The `at` of the camera nearest a point (so spawn faces a CCTV unit). */
+function nearestCameraAt(scene: Scene3D, at: MetreXY): MetreXY | null {
+  let best: MetreXY | null = null;
+  let bd = Infinity;
+  for (const c of scene.cameras) {
+    const d = dist2(c.at, at[0], at[1]);
+    if (d < bd) { bd = d; best = c.at; }
+  }
+  return best;
+}
+
 // Dispose every geometry/material/light under an object before it's discarded —
 // three keeps GPU resources alive until explicitly freed, and the walk view
 // rebuilds its whole scene on each floor/edit.
 function disposeObject(o: THREE.Object3D): void {
   o.traverse((child) => {
     const mesh = child as Partial<THREE.Mesh> & Partial<THREE.Light>;
-    if (mesh.geometry) mesh.geometry.dispose();
+    // Skip geometry tagged userData.shared — the cached canonical fixture models
+    // (fixtures.ts) are reused across every rebuild and freed only in
+    // disposeFixtureModels(). A fixture InstancedMesh still hits the isInstancedMesh
+    // branch below, so its per-rebuild instance buffers are always released; only
+    // the shared source geometry is spared. All other (per-rebuild) geometry —
+    // walls, merged prisms, ceiling panels — is disposed as before.
+    if (mesh.geometry && !mesh.geometry.userData?.shared) mesh.geometry.dispose();
     const mat = (child as THREE.Mesh).material;
     if (mat) {
       const mats = Array.isArray(mat) ? mat : [mat];
@@ -414,6 +443,9 @@ export class WalkRenderer {
     // every rebuild), so this is the only place they're released.
     this.panelMat.dispose();
     disposeMaterials();
+    // Free the cached canonical fixture geometries + their shared body/emissive
+    // materials exactly once (clearGroup skips these userData.shared resources).
+    disposeFixtureModels();
     this.renderer.dispose();
     // dispose() frees three's internal caches but does NOT release the GL
     // context — that's forceContextLoss()'s job. Without it, every walk-mode
@@ -469,10 +501,12 @@ export class WalkRenderer {
     // Extruded prisms, merged per kind, each drawn with a shared material:
     //  · circulation/lobby low slabs → the category's stone/carpet floor material
     //  · structural columns/obstacles → concrete
-    //  · fixtures → brushed metal so they read as objects (R2 gives them models)
     this.addPrismGroup(scene.slabPrisms, (k) => materialForCategory(k as Category), g);
     this.addPrismGroup(scene.structurePrisms, () => getMaterial("concrete"), g);
-    this.addPrismGroup(scene.fixturePrisms, () => getMaterial("brushedMetal"), g);
+
+    // Fixtures — R2: detailed parametric models, instanced per kind (one or two
+    // draw calls per kind), replacing the old brushed-metal box prisms.
+    this.addFixtures(scene, g);
 
     // Ceiling — acoustic tile (DoubleSide baked into the material). castShadow OFF
     // so coverage lights aren't killed by the plane they hang from (spike-proven).
@@ -590,6 +624,85 @@ export class WalkRenderer {
     }
   }
 
+  /** Fixtures as detailed instanced models (R2). Group the fixture prisms by
+   *  kind; for each kind build ONE InstancedMesh of the cached canonical body
+   *  geometry (fixtures.ts) — plus a SECOND InstancedMesh for the emissive part
+   *  when the kind has one (slot screens, bar bottles, stage lamps). Per instance:
+   *  position = footprint centroid at floor y (baseM); yaw = footprint principal
+   *  axis; scale = fit the canonical to the real footprint. So a floor of 300
+   *  slots is 2 draw calls, not 300 meshes, and no geometry is built per rebuild —
+   *  only fresh instance matrices. The canonical geometries are userData.shared,
+   *  so clearGroup frees each InstancedMesh's instance buffers but never the
+   *  shared source geometry (that's disposeFixtureModels() in dispose()). */
+  private addFixtures(scene: Scene3D, group: THREE.Group): void {
+    const byKind = new Map<FixtureKind, ScenePrism[]>();
+    for (const p of scene.fixturePrisms) {
+      if (p.ring.length < 3) continue;
+      const kind = p.kind as FixtureKind;
+      const arr = byKind.get(kind);
+      if (arr) arr.push(p);
+      else byKind.set(kind, [p]);
+    }
+    if (byKind.size === 0) return;
+
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const pos = new THREE.Vector3();
+    const scl = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+
+    for (const [kind, prisms] of byKind) {
+      const model = getFixtureModel(kind);
+      const body = new THREE.InstancedMesh(model.geometry, model.material, prisms.length);
+      const emissive =
+        model.emissiveGeometry && model.emissiveMaterial
+          ? new THREE.InstancedMesh(model.emissiveGeometry, model.emissiveMaterial, prisms.length)
+          : null;
+      let n = 0;
+      for (const p of prisms) {
+        const frame = footprintFrame(p.ring);
+        if (!frame) continue;
+        // Clamp the footprint extents so a degenerate/huge polygon can't produce a
+        // sub-centimetre or building-sized model.
+        const len = clampSpan(frame.lengthM);
+        const wid = clampSpan(frame.widthM);
+        // "length" fit scales uniformly (preserve aspect, height follows footprint);
+        // "bbox" fit stretches the footprint independently and keeps the authored
+        // real-metre height (Y scale 1).
+        if (model.fit === "length") scl.set(len, len, len);
+        else scl.set(len, 1, wid);
+        // model[x,y] -> three(x, h, -y); base sits at the fixture's floor (baseM).
+        pos.set(frame.centroid[0], p.baseM, -frame.centroid[1]);
+        q.setFromAxisAngle(up, frame.angleRad);
+        m.compose(pos, q, scl);
+        body.setMatrixAt(n, m);
+        if (emissive) emissive.setMatrixAt(n, m);
+        n++;
+      }
+      if (n === 0) {
+        // No placeable instances — release the InstancedMesh buffers we allocated.
+        body.dispose();
+        emissive?.dispose();
+        continue;
+      }
+      body.count = n;
+      body.instanceMatrix.needsUpdate = true;
+      body.castShadow = true;
+      body.receiveShadow = true;
+      group.add(body);
+      if (emissive) {
+        emissive.count = n;
+        emissive.instanceMatrix.needsUpdate = true;
+        // Self-lit accents: never receive shadows, and don't cast either — a glowing
+        // screen occluding a coverage cone would be wrong, and it saves shadow-pass
+        // cost (the spec excepts receiveShadow; dropping castShadow is the same intent).
+        emissive.castShadow = false;
+        emissive.receiveShadow = false;
+        group.add(emissive);
+      }
+    }
+  }
+
   private addHouseLights(scene: Scene3D, group: THREE.Group): void {
     // Rebalanced for ACES tone mapping (which darkens/desaturates the raw image):
     // raised so the space isn't muddy, but kept cool + dim so the green coverage
@@ -668,17 +781,18 @@ export class WalkRenderer {
   }
 
   private spawn(scene: Scene3D): void {
-    const first = scene.cameras[0] ?? null;
-    let at: MetreXY;
-    let faceAt: MetreXY | null = null;
-    if (first) {
-      at = [first.at[0] - 6, first.at[1] - 6];
-      faceAt = first.at;
-    } else {
-      at = centroid(scene.footprintRing) ?? [0, 0];
-    }
+    // Spawn in the ACTION, not a dead corner: the mean of the fixture centroids
+    // (the gaming floor) so the operator lands among tables/slots and the
+    // realism is visible on entry — falling back to the footprint centre, then
+    // the first camera. Then face the nearest camera (camera-primary: a CCTV
+    // unit is in view on arrival).
+    let at: MetreXY | null = fixturesCentroid(scene);
+    if (!at) at = centroid(scene.footprintRing);
+    if (!at) at = scene.cameras[0] ? [scene.cameras[0].at[0] - 6, scene.cameras[0].at[1] - 6] : [0, 0];
+
     const sel = this.selectedId ? scene.cameras.find((c) => c.id === this.selectedId) : undefined;
-    if (sel) faceAt = sel.at;
+    let faceAt: MetreXY | null = sel ? sel.at : nearestCameraAt(scene, at);
+
     this.camera.position.copy(v3(at[0], at[1], EYE_M));
     if (faceAt && (faceAt[0] !== at[0] || faceAt[1] !== at[1])) {
       this.camera.lookAt(v3(faceAt[0], faceAt[1], EYE_M));
@@ -842,6 +956,156 @@ function dist2(at: MetreXY, x: number, y: number): number {
   const dx = at[0] - x;
   const dy = at[1] - y;
   return dx * dx + dy * dy;
+}
+
+// ---- fixture footprint frame -----------------------------------------------
+// A fixture is placed by scaling+rotating a canonical model (fixtures.ts) onto
+// its polygon. footprintFrame derives that placement PURELY from the ring (the
+// Scene3D contract carries no orientation field — the renderer synthesises it),
+// returning the area centroid, the principal-axis yaw, and the oriented extents.
+
+const FIXTURE_MIN_SPAN_M = 0.3; // clamp tiny/degenerate footprints
+const FIXTURE_MAX_SPAN_M = 40; // clamp runaway footprints (bad polygons)
+
+const clampSpan = (v: number): number =>
+  v < FIXTURE_MIN_SPAN_M ? FIXTURE_MIN_SPAN_M : v > FIXTURE_MAX_SPAN_M ? FIXTURE_MAX_SPAN_M : v;
+
+interface FootprintFrame {
+  centroid: MetreXY;
+  /** Yaw about +Y aligning the model's local +X to the footprint's LONG axis.
+   *  Measured atan2-style in model space, matching the wall convention so the
+   *  model→three (x, ·, −y) mapping lands the length along the real long axis. */
+  angleRad: number;
+  lengthM: number; // extent along the long axis (≥ widthM)
+  widthM: number; // extent perpendicular
+}
+
+/** Area (signed-shoelace) centroid of an open ring; falls back to the vertex mean
+ *  for a ~zero-area (collinear) ring. */
+function polygonCentroid(ring: MetreXY[]): MetreXY {
+  let a = 0;
+  let cx = 0;
+  let cy = 0;
+  const n = ring.length;
+  for (let i = 0; i < n; i++) {
+    const [x0, y0] = ring[i];
+    const [x1, y1] = ring[(i + 1) % n];
+    const cross = x0 * y1 - x1 * y0;
+    a += cross;
+    cx += (x0 + x1) * cross;
+    cy += (y0 + y1) * cross;
+  }
+  if (Math.abs(a) < 1e-9) {
+    let mx = 0;
+    let my = 0;
+    for (const [x, y] of ring) {
+      mx += x;
+      my += y;
+    }
+    return [mx / n, my / n];
+  }
+  return [cx / (3 * a), cy / (3 * a)];
+}
+
+/** Convex hull (Andrew's monotone chain), CCW, no repeated endpoint. */
+function convexHull(pts: MetreXY[]): MetreXY[] {
+  const p = [...pts].sort((u, v) => (u[0] === v[0] ? u[1] - v[1] : u[0] - v[0]));
+  if (p.length < 3) return p;
+  const cross = (o: MetreXY, a: MetreXY, b: MetreXY): number =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: MetreXY[] = [];
+  for (const q of p) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop();
+    lower.push(q);
+  }
+  const upper: MetreXY[] = [];
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop();
+    upper.push(q);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+/** Derive a fixture's placement frame from its polygon ring. The orientation +
+ *  extents come from the MINIMUM-AREA bounding rectangle (rotating calipers over
+ *  the convex hull): for a rectangular fixture that rectangle IS the fixture, so
+ *  a table/slot/bar snaps exactly to its outline; irregular rings get the tightest
+ *  oriented box. Runs once per fixture per rebuild (never per frame). */
+function footprintFrame(ring: MetreXY[]): FootprintFrame | null {
+  if (ring.length < 3) return null;
+  const centroid = polygonCentroid(ring);
+  const hull = convexHull(ring);
+  if (hull.length < 3) {
+    // Collinear/degenerate: axis along the extent, a thin default width.
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const [x, y] of ring) {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+    const dx = maxX - minX;
+    const dy = maxY - minY;
+    return {
+      centroid,
+      angleRad: Math.atan2(dy, dx),
+      lengthM: Math.max(Math.hypot(dx, dy), FIXTURE_MIN_SPAN_M),
+      widthM: FIXTURE_MIN_SPAN_M,
+    };
+  }
+  let bestArea = Infinity;
+  let bestAngle = 0;
+  let bestLen = 0;
+  let bestWid = 0;
+  const h = hull.length;
+  for (let i = 0; i < h; i++) {
+    const [ax, ay] = hull[i];
+    const [bx, by] = hull[(i + 1) % h];
+    const ex = bx - ax;
+    const ey = by - ay;
+    const elen = Math.hypot(ex, ey);
+    if (elen < 1e-9) continue;
+    const ux = ex / elen;
+    const uy = ey / elen;
+    // Project every hull point onto the edge axis (u) and its perpendicular.
+    let minU = Infinity;
+    let maxU = -Infinity;
+    let minV = Infinity;
+    let maxV = -Infinity;
+    for (const [px, py] of hull) {
+      const pu = px * ux + py * uy;
+      const pv = -px * uy + py * ux;
+      if (pu < minU) minU = pu;
+      if (pu > maxU) maxU = pu;
+      if (pv < minV) minV = pv;
+      if (pv > maxV) maxV = pv;
+    }
+    const wU = maxU - minU;
+    const wV = maxV - minV;
+    const area = wU * wV;
+    if (area < bestArea) {
+      bestArea = area;
+      bestAngle = Math.atan2(uy, ux); // long axis resolved below
+      bestLen = wU;
+      bestWid = wV;
+    }
+  }
+  // Ensure lengthM is the LONGER side; if the edge axis was the short one, swap
+  // the extents and rotate the yaw 90° so +X still lands along the long axis.
+  let angle = bestAngle;
+  let lengthM = bestLen;
+  let widthM = bestWid;
+  if (widthM > lengthM) {
+    [lengthM, widthM] = [widthM, lengthM];
+    angle += Math.PI / 2;
+  }
+  return { centroid, angleRad: angle, lengthM, widthM };
 }
 
 // ---- change detection ------------------------------------------------------
