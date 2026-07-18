@@ -265,6 +265,7 @@ function slotMachine(): RawModel {
   const emissive: THREE.BufferGeometry[] = [];
   emissive.push(ebox(0.46, 0.5, 0.03, 0, 0.85, 0.26)); // main screen
   emissive.push(ebox(0.44, 0.08, 0.04, 0, 1.42, 0.09)); // topper light strip
+  emissive.push(ebox(0.5, 0.05, 0.03, 0, 0.06, 0.28)); // R3: base glow strip (slot-row floor wash)
   return { body, emissive, emissiveColor: SCREEN, emissiveIntensity: SCREEN_I, fit: "bbox" };
 }
 

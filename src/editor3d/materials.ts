@@ -483,6 +483,37 @@ export function materialForCategory(category: Category, id?: string): THREE.Mesh
   return getMaterial(materialNameForCategory(category, id));
 }
 
+// ---- emissive (signage / neon) materials -----------------------------------
+// Textureless self-lit materials for R3 neon valances / glow strips. Cached by
+// colour+intensity so the whole signage pass is a handful of shared materials
+// (one per neon colour), each drawn on a merged strip mesh. Tagged shared so the
+// renderer's per-rebuild teardown skips them; freed once in disposeMaterials().
+// The renderer scales `emissiveIntensity` for the camera-primary world-recede and
+// restores it from a stored base — mutating the level, not the cache key, so
+// lookups stay stable.
+
+const emissiveCache = new Map<string, THREE.MeshStandardMaterial>();
+
+/** Shared emissive material for a signage/neon accent, cached by colour+level.
+ *  Black base colour (unlit it reads dark), the colour lives on `emissive`. Kept
+ *  modest so neon never outshines the green coverage cones (camera-primary). */
+export function getEmissiveMaterial(color: number, intensity: number): THREE.MeshStandardMaterial {
+  const key = `${color}:${intensity}`;
+  let m = emissiveCache.get(key);
+  if (!m) {
+    m = new THREE.MeshStandardMaterial({
+      color: 0x000000,
+      emissive: new THREE.Color(color),
+      emissiveIntensity: intensity,
+      roughness: 1,
+      metalness: 0,
+    });
+    m.userData.shared = true;
+    emissiveCache.set(key, m);
+  }
+  return m;
+}
+
 /** Dispose every cached material and its textures. Call ONCE from the renderer's
  *  dispose() — never per rebuild (clearGroup skips shared materials by design). */
 export function disposeMaterials(): void {
@@ -494,4 +525,6 @@ export function disposeMaterials(): void {
     m.dispose();
   }
   cache.clear();
+  for (const m of emissiveCache.values()) m.dispose();
+  emissiveCache.clear();
 }
