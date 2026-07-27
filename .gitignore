@@ -11,3 +11,5 @@ docs/superpowers/
 .env
 .vite/
 *.tsbuildinfo
+CLAUDE.md
+session_log.md
