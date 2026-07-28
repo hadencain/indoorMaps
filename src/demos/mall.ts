@@ -850,10 +850,10 @@ export const mallBuilding: Building = {
   origin: [-115.0228,36.1147],
   demoRev: 2,
   levels: [
-    {"ordinal":0,"name":"Level 1"},
-    {"ordinal":1,"name":"Level 2"},
-    {"ordinal":2,"name":"Level 3"},
-    {"ordinal":3,"name":"Level 4"},
+    {"ordinal":0,"name":"Level 1","ceilingM":4.5},
+    {"ordinal":1,"name":"Level 2","ceilingM":4.5},
+    {"ordinal":2,"name":"Level 3","ceilingM":4.5},
+    {"ordinal":3,"name":"Level 4","ceilingM":3},
   ],
   units: [
     {"id":"gal-0","ordinal":0,"name":"The Galleria","category":"corridor","polygon":[[60,40],[146,40],[146,52],[158,52],[158,40],[162,40],[162,52],[170,52],[170,40],[260,40],[260,60],[60,60]]},
