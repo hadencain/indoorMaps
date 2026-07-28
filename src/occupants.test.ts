@@ -81,14 +81,25 @@ describe("demo occupant seeding", () => {
       for (const o of occs) expect(unitIds.has(o.unitId)).toBe(true);
       expect(new Set(occs.map((o) => o.id)).size).toBe(occs.length);
     });
-
-    it(`${label}: tenanted units carry space labels, occupants keep business names`, () => {
-      const occs = b.occupants ?? [];
-      const tenanted = new Set(occs.map((o) => o.unitId));
-      for (const u of b.units.filter((x) => tenanted.has(x.id))) {
-        expect(u.name).toMatch(/^Unit \d{3,}$/);
-      }
-      for (const o of occs) expect(o.name).not.toMatch(/^Unit \d{3,}$/);
-    });
   }
+
+  it("airport: tenanted units carry space labels, occupants keep business names", () => {
+    const occs = airportBuilding.occupants ?? [];
+    const tenanted = new Set(occs.map((o) => o.unitId));
+    for (const u of airportBuilding.units.filter((x) => tenanted.has(x.id))) {
+      expect(u.name).toMatch(/^Unit \d{3,}$/);
+    }
+    for (const o of occs) expect(o.name).not.toMatch(/^Unit \d{3,}$/);
+  });
+
+  // Mall v2 (skeleton rebuild) has two tenancy shapes: pool tenants in
+  // anonymous "Unit NNN" spaces, plus named anchors/flagships (e.g. the
+  // department stores) whose unit carries the tenant's name.
+  it("mall: pool tenants sit in space-labeled units, occupants keep business names", () => {
+    const occs = mallBuilding.occupants ?? [];
+    const tenanted = new Set(occs.map((o) => o.unitId));
+    const labeled = mallBuilding.units.filter((u) => tenanted.has(u.id) && /^Unit \d{3,}$/.test(u.name));
+    expect(labeled.length).toBeGreaterThan(10);
+    for (const o of occs) expect(o.name).not.toMatch(/^Unit \d{3,}$/);
+  });
 });
