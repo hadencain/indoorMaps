@@ -262,6 +262,16 @@ export function computeVisibility(cam: Camera, walls: Segment[]): MetreXY[] {
   const band = tiltBand(cam);
   const R = band ? Math.min(cam.rangeM, band.farM) : cam.rangeM;
 
+  // Range-disc cull: a wall farther from the camera than R can never occlude
+  // (any blocking point lies within R of `at` and on the segment), and its
+  // endpoint rays only add redundant vertices on the free arc. Densely
+  // partitioned floors put thousands of segments outside a 50 m disc — culling
+  // keeps per-camera cost O(local walls²) instead of O(floor walls²). The
+  // small-scene guard skips the filter where it can't pay for itself.
+  if (walls.length > 64) {
+    walls = walls.filter((s) => segDistPt(at, s.a, s.b) <= R + 0.01);
+  }
+
   // --- gather candidate ray angles, as offsets `rel` from heading h ---
   const rels: number[] = [];
   if (!full) rels.push(-half, half); // exact sector boundary rays
