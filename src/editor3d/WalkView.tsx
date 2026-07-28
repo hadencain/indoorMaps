@@ -78,7 +78,14 @@ export default function WalkView() {
   // the listener stays stable.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && useStore.getState().selectedCameraId) {
+      if (e.key !== "Escape") return;
+      // Two-stage Esc. While pointer-locked the browser is already exiting lock
+      // on this same keypress — that is the operator stepping out to reach the
+      // pose panel, NOT abandoning the camera, so the selection survives. A
+      // second Esc (now unlocked) clears it. Previously one keypress did both,
+      // so you could never free the cursor without losing the camera.
+      if (document.pointerLockElement) return;
+      if (useStore.getState().selectedCameraId) {
         useStore.getState().setSelectedCamera(null);
       }
     };
@@ -228,21 +235,26 @@ export default function WalkView() {
             ))}
           </select>
 
-          <button
-            className="walk-pose-resume"
-            onClick={() => {
-              setSelectedCamera(null);
-              rendererRef.current?.lock();
-            }}
-          >
-            ◀ back to walking
+          {/* Resume walking WITHOUT dropping the camera: the selection and its
+              lit coverage cone persist, so the operator can walk the floor and
+              watch where this camera's green actually lands — which is the
+              entire reason to inspect in 3D. Clearing is a separate, explicit
+              act. (Previously this button deselected, so every attempt to go
+              look at the coverage closed the camera you were configuring.) */}
+          <button className="walk-pose-resume" onClick={() => rendererRef.current?.lock()}>
+            ◀ walk while this camera stays selected
+          </button>
+          <button className="walk-pose-clear" onClick={() => setSelectedCamera(null)}>
+            ✕ deselect camera
           </button>
         </div>
       )}
 
       <div className="walk-hint mono">
         {selectedCam
-          ? "adjust the camera · Esc or ◀ back to walking to resume"
+          ? locked
+            ? "walking · this camera stays selected · Esc to adjust it · click another to switch"
+            : "adjust the camera · ◀ to walk with it still selected · Esc to deselect"
           : "WASD move · Shift run · click to look · Esc release · click a camera to select"}
       </div>
 
