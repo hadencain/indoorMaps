@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { MOUNT_H, WALK_UNDER_M, collectWalls, computeVisibility, tiltBand } from "./coverage";
+import {
+  MOUNT_H,
+  WALK_UNDER_M,
+  collectWalls,
+  computeCoverage,
+  computeVisibility,
+  tiltBand,
+} from "./coverage";
 import type { Segment } from "./coverage";
 import { polygonArea } from "./geo";
 import type { Building, Camera, MetreXY, Structure } from "./types";
@@ -195,5 +202,73 @@ describe("computeVisibility range culling", () => {
     const withClutter = computeVisibility(dome(), [near, ...farWalls()]);
     const alone = computeVisibility(dome(), [near]);
     expect(polygonArea(withClutter)).toBeCloseTo(polygonArea(alone), 1);
+  });
+});
+
+describe("computeCoverage union scaling", () => {
+  // Minimal floor: a 100 x 10 m footprint (computeCoverage only reads units +
+  // footprints from the building).
+  const floorBld = {
+    units: [
+      { id: "u", ordinal: 0, name: "Hall", category: "room",
+        polygon: [[0, 0], [100, 0], [100, 10], [0, 10]] },
+    ],
+    footprints: [{ ordinal: 0, polygon: [[0, 0], [100, 0], [100, 10], [0, 10]] }],
+  } as unknown as Building;
+
+  /** n overlapping 4 m-wide cones striding 2 m — heavy pairwise overlap, which
+   *  is what a real camera plant produces and what made the union quadratic. */
+  const cones = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      cameraId: `c${i}`,
+      ordinal: 0,
+      ring: [[i * 2, 0], [i * 2 + 4, 0], [i * 2 + 4, 10], [i * 2, 10]] as MetreXY[],
+    }));
+
+  it("fully overlapping cones cover the whole floor", () => {
+    const r = computeCoverage(floorBld, 0, cones(50));
+    expect(r.coveragePct).toBeCloseTo(1, 3);
+    expect(r.blindRings.length).toBe(0);
+  });
+
+  it("partial cones leave the exact blind remainder", () => {
+    // 25 cones stride 2 m and are 4 m wide: the last starts at 48, so they span
+    // x 0..52 of a 0..100 floor.
+    const r = computeCoverage(floorBld, 0, cones(25));
+    expect(r.coveragePct).toBeCloseTo(0.52, 3);
+    expect(r.blindRings.length).toBeGreaterThan(0);
+  });
+
+  /** Many-vertex overlapping discs — the shape a real plant produces, and the
+   *  case the union batches. Batching changes the ORDER polygons are merged in,
+   *  so order-independence is the invariant that must hold. (A wall-clock
+   *  assertion here would be a lie: simple rectangles collapse to one rectangle
+   *  each step and never reproduce the real accumulation cost. Field timings
+   *  live in scratch/_scratch-loadperf.test.ts against the real casino.) */
+  const discs = (n: number) =>
+    Array.from({ length: n }, (_, i) => {
+      const cx = 3 + (i * 7) % 96;
+      const cy = 5 + ((i * 13) % 7) - 3;
+      const ring: MetreXY[] = [];
+      for (let k = 0; k < 40; k++) {
+        const a = (k / 40) * 2 * Math.PI;
+        ring.push([cx + 6 * Math.cos(a), cy + 4 * Math.sin(a)]);
+      }
+      return { cameraId: `d${i}`, ordinal: 0, ring };
+    });
+
+  it("union is order-independent for complex overlapping cones", () => {
+    const forward = computeCoverage(floorBld, 0, discs(60));
+    const reversed = computeCoverage(floorBld, 0, [...discs(60)].reverse());
+    expect(forward.coveragePct).toBeGreaterThan(0.5); // genuinely overlapping
+    // Materially identical, not bit-identical: polygon-clipping's sweep-line
+    // resolves intersections in input order, so reordering perturbs the last
+    // few digits (~1e-4 relative here). Coverage is reported to whole percent,
+    // so the tolerance is set where the number is actually read.
+    expect(reversed.coveragePct).toBeCloseTo(forward.coveragePct, 3);
+    const rel =
+      Math.abs(reversed.coveredAreaM2 - forward.coveredAreaM2) /
+      Math.max(forward.coveredAreaM2, 1e-9);
+    expect(rel).toBeLessThan(1e-3);
   });
 });
