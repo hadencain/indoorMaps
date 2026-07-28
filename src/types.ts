@@ -150,6 +150,35 @@ export interface Camera {
    *  vfovHalfRad in coverage.ts). Ignored for domes. Optional + additive:
    *  persistence stays v3. */
   vfovDeg?: number;
+
+  // ---- device + service record ----------------------------------------------
+  // A coverage map answers "what can be seen"; maintaining a plant also needs
+  // "which box is it, where is it on the network, and is it working". All
+  // optional + additive (persistence stays v3), and all stripped from the
+  // public viewer export along with the rest of the camera record.
+
+  /** Operational state. Absent ⇒ unknown/unspecified, NOT "online" — an
+   *  unaudited plant should not read as healthy. */
+  status?: "online" | "offline" | "fault" | "planned";
+  /** Manufacturer + model, freeform (e.g. "Axis P3265-LVE"). */
+  model?: string;
+  /** Serial / asset tag, for the maintenance record. */
+  serial?: string;
+  /** Management IP or hostname. Distinct from `streamRef`, which is the media
+   *  path — the same device is reached one way to configure, another to view. */
+  ipAddress?: string;
+  /** Sensor resolution in megapixels. With `fovDeg` and distance this is what
+   *  decides whether coverage is merely detection or good enough to identify
+   *  a face — pixel density, not just geometry. */
+  resolutionMP?: number;
+  /** ISO date (YYYY-MM-DD) the device went in. */
+  installedOn?: string;
+  /** ISO date (YYYY-MM-DD) it was last serviced — the field that drives a
+   *  maintenance sweep. */
+  lastServicedOn?: string;
+  /** Free notes: mounting quirks, glare at dusk, obstruction, anything the
+   *  next technician needs. */
+  notes?: string;
 }
 
 /** What an incident annotation records. Drives the pin color + kind dropdown. */
