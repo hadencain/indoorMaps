@@ -439,6 +439,11 @@ function fixturesCentroid(scene: Scene3D): MetreXY | null {
  *  adjacent wall and the whole venue is behind you. */
 const MIN_FACE_DIST_M = 8;
 
+/** Screen-space grab radius for selecting a camera, pixels. */
+const PICK_RADIUS_PX = 70;
+/** Don't grab a camera across the room just because it lines up with the reticle. */
+const PICK_MAX_DIST_M = 40;
+
 /** Spawn aim: the nearest camera at least MIN_FACE_DIST_M away (so the view
  *  looks down the room with a CCTV unit in frame — camera-primary), falling
  *  back to the farthest camera when every one of them is close. */
@@ -754,7 +759,9 @@ export class WalkRenderer {
     this.opts.onQualityChange?.(q);
   }
 
-  /** Camera id under the screen-centre reticle, or null. */
+  /** Camera id under the screen-centre reticle, or null. Exact geometry hit
+   *  first; failing that, the camera nearest the reticle in SCREEN space (see
+   *  pickNearReticle) so ceiling hardware is actually selectable. */
   pickCenter(): string | null {
     this.raycaster.setFromCamera(this.reticle, this.camera);
     const hits = this.raycaster.intersectObjects(this.camBodyGroup.children, true);
@@ -766,7 +773,43 @@ export class WalkRenderer {
         o = o.parent;
       }
     }
-    return null;
+    return this.pickNearReticle();
+  }
+
+  /**
+   * Nearest camera whose screen projection falls within PICK_RADIUS_PX of the
+   * reticle, within PICK_MAX_DIST_M.
+   *
+   * A dome on a 7 m casino ceiling (or 9 m at the airport) is a handful of
+   * pixels from floor level, so demanding a pixel-perfect raycast made simply
+   * selecting the thing you are standing under a chore — the operator had to
+   * crane up and hunt. Aim roughly; get the camera you meant.
+   */
+  private pickNearReticle(): string | null {
+    if (!this.sceneData) return null;
+    const el = this.renderer.domElement;
+    const w = el.clientWidth || 1;
+    const h = el.clientHeight || 1;
+    const world = new THREE.Vector3();
+    const local = new THREE.Vector3();
+    let best: string | null = null;
+    let bestD2 = PICK_RADIUS_PX * PICK_RADIUS_PX;
+    for (const pose of this.sceneData.cameras) {
+      world.set(pose.at[0], pose.mountM, -pose.at[1]);
+      if (world.distanceTo(this.camera.position) > PICK_MAX_DIST_M) continue;
+      // Camera-space z is negative in front of the lens; skip anything behind.
+      local.copy(world).applyMatrix4(this.camera.matrixWorldInverse);
+      if (local.z >= -0.5) continue;
+      const ndc = world.project(this.camera);
+      const px = ndc.x * 0.5 * w;
+      const py = -ndc.y * 0.5 * h;
+      const d2 = px * px + py * py;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = pose.id;
+      }
+    }
+    return best;
   }
 
   /** Request pointer lock (the WalkView "click to walk" overlay calls this). */
@@ -1896,7 +1939,13 @@ export class WalkRenderer {
   };
   private readonly onCanvasClick = (): void => {
     if (!this.controls.isLocked) return; // unlocked clicks go to the HUD/overlay
-    this.opts.onPickCamera(this.pickCenter());
+    const id = this.pickCenter();
+    // Only act on a HIT. A miss used to clear the selection, which meant any
+    // stray click while walking closed the pose panel mid-edit — and made it
+    // impossible to keep a camera selected while moving around to see where its
+    // coverage actually lands, which is the whole point of inspecting in 3D.
+    // Deselection is now an explicit act (panel close, or Esc when unlocked).
+    if (id) this.opts.onPickCamera(id);
   };
 
   private clearGroup(g: THREE.Group): void {

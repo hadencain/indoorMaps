@@ -3080,6 +3080,21 @@ button.wide.ghost {
   background: var(--accent);
   color: var(--bg);
 }
+/* Deselect is the secondary action — resuming the walk with the camera still
+   selected is the primary one, so this stays quiet until hovered. */
+.walk-pose-clear {
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+.walk-pose-clear:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
 
 /* Bottom control hint */
 .walk-hint {
