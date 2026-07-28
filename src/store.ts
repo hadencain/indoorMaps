@@ -44,6 +44,7 @@ import {
   buildingFileText,
   buildingKey,
   isValidBuildingShape,
+  isStaleDemoSave,
   migrateLegacyBuilding,
   parseBuildingFileText,
   withBuildingDefaults,
@@ -233,6 +234,10 @@ function loadBuilding(propertyId: string): Building {
       if (isValidBuildingShape(b)) {
         // Additive migration: legacy payloads predate some collections — default
         // them in place (persistence stays v3; shared with file import).
+        const demo = DEMOS.find((d) => d.id === propertyId);
+        if (demo && isStaleDemoSave(b as unknown as Record<string, unknown>, demo.building)) {
+          return pristineFor(propertyId);
+        }
         return withBuildingDefaults(b);
       }
     }

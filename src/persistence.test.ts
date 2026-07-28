@@ -5,6 +5,7 @@ import {
   buildingFileText,
   buildingKey,
   isValidBuildingShape,
+  isStaleDemoSave,
   migrateLegacyBuilding,
   parseBuildingFileText,
   withBuildingDefaults,
@@ -195,5 +196,21 @@ describe("3D-walk additive fields (forward-compat retention)", () => {
     expect(again.building.cameras).toEqual(building3d().cameras);
     expect(again.building.levels).toEqual(building3d().levels);
     expect(again.building.structures).toEqual(building3d().structures);
+  });
+});
+
+describe("isStaleDemoSave", () => {
+  it("stale when pristine has demoRev and the save does not", () => {
+    expect(isStaleDemoSave({}, { demoRev: 2 })).toBe(true);
+  });
+  it("stale when revisions differ", () => {
+    expect(isStaleDemoSave({ demoRev: 1 }, { demoRev: 2 })).toBe(true);
+  });
+  it("fresh when revisions match", () => {
+    expect(isStaleDemoSave({ demoRev: 2 }, { demoRev: 2 })).toBe(false);
+  });
+  it("never stale when the pristine demo declares no revision (user properties, legacy demos)", () => {
+    expect(isStaleDemoSave({ demoRev: 99 }, {})).toBe(false);
+    expect(isStaleDemoSave({}, {})).toBe(false);
   });
 });
