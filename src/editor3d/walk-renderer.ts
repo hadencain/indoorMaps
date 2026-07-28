@@ -47,7 +47,13 @@ export type CoverageMode = "selected" | "nearby" | "off";
 
 const DEG = Math.PI / 180;
 const WALK_SPEED = 4.2; // m/s (spike-calibrated)
-const RUN_SPEED = 8.5; // m/s (Shift)
+const RUN_SPEED = 8.5; // m/s (Ctrl — Shift is descend in fly mode)
+/** Vertical fly speed, m/s (Space up / Shift down). */
+const FLY_VERTICAL_SPEED = 3.4;
+/** Fly floor: never sink through the slab. */
+const FLY_MIN_Y = 0.25;
+/** Headroom kept under the ceiling so the view never clips through it. */
+const FLY_CEILING_MARGIN_M = 0.25;
 
 // R4 auto quality fallback: sample locked-mode frame times at High and, if the
 // GPU can't hold the budget, drop to Low ONCE so the GTX 1650 degrades gracefully.
@@ -810,6 +816,15 @@ export class WalkRenderer {
       }
     }
     return best;
+  }
+
+  /** Drop the operator at a floor position, keeping their current flying height
+   *  and view direction. Used by the floor directory: pick a section, arrive
+   *  there, inspect its cameras — instead of flying the length of the venue. */
+  teleportTo(at: MetreXY): void {
+    const y = this.camera.position.y;
+    this.camera.position.set(at[0], y, -at[1]);
+    if (this.coverageMode === "nearby") this.recomputeCoverage();
   }
 
   /** Request pointer lock (the WalkView "click to walk" overlay calls this). */
@@ -1882,12 +1897,27 @@ export class WalkRenderer {
     const dt = Math.min(this.clock.getDelta(), 0.05);
 
     if (this.controls.isLocked) {
-      const sp = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") ? RUN_SPEED : WALK_SPEED;
+      const fast = this.keys.has("ControlLeft") || this.keys.has("ControlRight");
+      const sp = fast ? RUN_SPEED : WALK_SPEED;
       const f = (this.keys.has("KeyW") ? 1 : 0) - (this.keys.has("KeyS") ? 1 : 0);
       const r = (this.keys.has("KeyD") ? 1 : 0) - (this.keys.has("KeyA") ? 1 : 0);
       if (f) this.controls.moveForward(f * sp * dt);
       if (r) this.controls.moveRight(r * sp * dt);
-      this.camera.position.y = EYE_M; // stay at eye height regardless of look pitch
+      // FREE FLY. Cameras live on the ceiling — 7 m in a casino, 9 m at the
+      // airport — so an operator pinned to 1.7 m has to crane up at hardware
+      // they can never get level with. Space rises, Shift descends; height is
+      // free between the slab and just under the ceiling.
+      const up =
+        (this.keys.has("Space") ? 1 : 0) -
+        (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") ? 1 : 0);
+      if (up) {
+        const vsp = fast ? FLY_VERTICAL_SPEED * 2 : FLY_VERTICAL_SPEED;
+        this.camera.position.y += up * vsp * dt;
+      }
+      const ceil = this.sceneData
+        ? this.sceneData.ceilingM - FLY_CEILING_MARGIN_M
+        : Number.POSITIVE_INFINITY;
+      this.camera.position.y = Math.max(FLY_MIN_Y, Math.min(this.camera.position.y, ceil));
 
       // Throttled nearby recompute: never per-frame — only after ≥ 2 s AND a
       // real move (> 1 m) since the last coverage rebuild.
@@ -1932,6 +1962,9 @@ export class WalkRenderer {
   }
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    // Space is the fly-up key while flying; left unhandled the browser scrolls
+    // the page underneath the locked view.
+    if (e.code === "Space" && this.controls.isLocked) e.preventDefault();
     this.keys.add(e.code);
   };
   private readonly onKeyUp = (e: KeyboardEvent): void => {

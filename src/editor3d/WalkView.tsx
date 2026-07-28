@@ -25,6 +25,7 @@ export default function WalkView() {
   const building = useStore((s) => s.building);
   const ordinal = useStore((s) => s.ordinal);
   const selectedCameraId = useStore((s) => s.selectedCameraId);
+  const flyTarget = useStore((s) => s.flyTarget);
   const setOrdinal = useStore((s) => s.setOrdinal);
   const setWalkMode = useStore((s) => s.setWalkMode);
   const setSelectedCamera = useStore((s) => s.setSelectedCamera);
@@ -101,6 +102,22 @@ export default function WalkView() {
   useEffect(() => {
     rendererRef.current?.setSelectedCamera(selectedCameraId);
   }, [selectedCameraId]);
+
+  // Floor-directory click (requestFly) teleports the operator to that section so
+  // they can inspect its cameras, instead of flying the length of the venue. On
+  // another floor: switch floors first and keep the target — this effect re-runs
+  // on the new ordinal and lands. MapView ignores flyTarget while walking, so
+  // exactly one consumer handles it.
+  useEffect(() => {
+    if (!flyTarget) return;
+    if (flyTarget.ordinal !== ordinal) {
+      if (building.levels.some((l) => l.ordinal === flyTarget.ordinal)) setOrdinal(flyTarget.ordinal);
+      else useStore.setState({ flyTarget: null });
+      return;
+    }
+    rendererRef.current?.teleportTo(flyTarget.center);
+    useStore.setState({ flyTarget: null });
+  }, [flyTarget, ordinal, building.levels, setOrdinal]);
 
   useEffect(() => {
     rendererRef.current?.setCoverageMode(coverageMode);
@@ -255,7 +272,7 @@ export default function WalkView() {
           ? locked
             ? "walking · this camera stays selected · Esc to adjust it · click another to switch"
             : "adjust the camera · ◀ to walk with it still selected · Esc to deselect"
-          : "WASD move · Shift run · click to look · Esc release · click a camera to select"}
+          : "WASD move · Space up · Shift down · Ctrl fast · click a camera to select · Esc release"}
       </div>
 
       {/* The full-screen "click to walk" prompt is suppressed while a camera is

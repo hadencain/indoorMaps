@@ -945,6 +945,9 @@ export default function MapView() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || !flyTarget) return;
+    // Walk mode owns fly requests (WalkView teleports the operator). Bail so the
+    // two don't race to clear flyTarget and swallow each other's handling.
+    if (walkMode) return;
     if (flyTarget.ordinal === ordinal) {
       map.easeTo({ center: m2ll(building.origin, flyTarget.center[0], flyTarget.center[1]), duration: 450 });
       useStore.setState({ flyTarget: null });
@@ -954,7 +957,7 @@ export default function MapView() {
     } else {
       useStore.setState({ flyTarget: null });
     }
-  }, [ready, flyTarget, ordinal, building.origin, building.levels]);
+  }, [ready, flyTarget, ordinal, building.origin, building.levels, walkMode]);
 
   // Rebuild the snap grid when toggled / resized / building extent changes.
   useEffect(() => {
