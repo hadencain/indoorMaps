@@ -311,6 +311,12 @@ export interface CameraView {
 export interface Building {
   /** SW origin of the local metre grid, as [lng, lat]. */
   origin: LngLat;
+  /** Revision stamp for shipped demo data. When a demo's pristine building
+   *  declares demoRev and a localStorage save forked from an older revision is
+   *  loaded, the save is discarded and the pristine demo wins (demo edits are
+   *  tour state, not user projects). Absent on user properties. Additive:
+   *  persistence stays v3. */
+  demoRev?: number;
   levels: Level[];
   units: Unit[];
   openings: Opening[];
