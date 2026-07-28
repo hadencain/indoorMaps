@@ -166,3 +166,33 @@ describe("computeVisibility with structures", () => {
     expect(blockedArea).toBeLessThan(clearArea);
   });
 });
+
+describe("computeVisibility range culling", () => {
+  const dome = (): Camera => ({
+    id: "d1", ordinal: 0, at: [0, 0], heading: 0, fovDeg: 360,
+    rangeM: 10, kind: "dome", streamRef: "rtsp://x",
+  });
+  const farWalls = (): Segment[] => {
+    const segs: Segment[] = [];
+    for (let i = 0; i < 200; i++) {
+      const a = (i / 200) * 2 * Math.PI;
+      const x = 100 * Math.cos(a), y = 100 * Math.sin(a);
+      segs.push({ a: [x, y], b: [x + 2, y + 2] });
+    }
+    return segs;
+  };
+
+  it("walls beyond range add no redundant free-arc vertices (dense scenes)", () => {
+    const ring = computeVisibility(dome(), farWalls());
+    // 360° arc sampling at 4°/step ≈ 90 rays; pre-cull this was ~1290 vertices.
+    expect(ring.length).toBeLessThan(150);
+    for (const p of ring) expect(Math.hypot(p[0], p[1])).toBeCloseTo(10, 1);
+  });
+
+  it("culling is occlusion-exact: near wall still clips identically among far clutter", () => {
+    const near: Segment = { a: [5, -8], b: [5, 8] }; // inside range, blocks +X
+    const withClutter = computeVisibility(dome(), [near, ...farWalls()]);
+    const alone = computeVisibility(dome(), [near]);
+    expect(polygonArea(withClutter)).toBeCloseTo(polygonArea(alone), 1);
+  });
+});
