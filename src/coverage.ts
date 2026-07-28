@@ -466,24 +466,59 @@ function mpSimplify(mp: MultiPolygon): MultiPolygon {
  * accumulator each step and skipping any polygon whose merge throws. This keeps
  * coverage correct-enough and — critically — never crashes the app.
  */
+/** Polygons merged per sweep. Small enough that one pathological ring only
+ *  costs its own batch's fallback, large enough to keep the tree shallow. */
+const UNION_BATCH = 24;
+
+/** Union one batch in a SINGLE variadic sweep, falling back to pairwise only if
+ *  that sweep throws — so a single degenerate ring can't drop the whole batch. */
+function unionBatch(items: MultiPolygon[]): MultiPolygon {
+  if (items.length === 0) return [];
+  if (items.length === 1) return items[0];
+  try {
+    return mpSimplify(polygonClipping.union(items[0], ...items.slice(1)));
+  } catch {
+    let acc: MultiPolygon | null = null;
+    for (const m of items) {
+      if (!acc) {
+        acc = m;
+        continue;
+      }
+      try {
+        acc = mpSimplify(polygonClipping.union(acc, m));
+      } catch {
+        /* skip the polygon that breaks the sweep-line; coverage is ~unchanged */
+      }
+    }
+    return acc ?? [];
+  }
+}
+
+/**
+ * Union many rings via a BATCHED TREE REDUCTION.
+ *
+ * The obvious `acc = union(acc, next)` accumulation is quadratic in the
+ * accumulated vertex count: every step re-sweeps the entire merged shape, which
+ * grows with each camera. On the casino's 571 cones that cost ~10.6 s on the
+ * main thread at load and on every floor switch. Merging in batches and then
+ * reducing the batch results keeps each sweep small and the tree shallow.
+ * Union is associative and commutative, so the result is order-independent
+ * (locked by a test) — only the cost changes.
+ */
 function unionRings(rings: MetreXY[][]): MultiPolygon {
-  const mps = rings
+  let parts: MultiPolygon[] = rings
     .map((r) => simplifyRing(r))
     .filter((r) => r.length >= 3)
     .map((r): MultiPolygon => [[closedRing(r)]]);
-  let acc: MultiPolygon | null = null;
-  for (const m of mps) {
-    if (!acc) {
-      acc = m;
-      continue;
+  if (parts.length === 0) return [];
+  while (parts.length > 1) {
+    const next: MultiPolygon[] = [];
+    for (let i = 0; i < parts.length; i += UNION_BATCH) {
+      next.push(unionBatch(parts.slice(i, i + UNION_BATCH)));
     }
-    try {
-      acc = mpSimplify(polygonClipping.union(acc, m));
-    } catch {
-      /* skip the polygon that breaks the sweep-line; coverage is ~unchanged */
-    }
+    parts = next;
   }
-  return acc ?? [];
+  return parts[0] ?? [];
 }
 
 /** A polygon-clipping Ring is closed (last == first); polygonArea (geo.ts)
