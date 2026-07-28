@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MOUNT_H, WALK_UNDER_M, collectWalls, computeVisibility, tiltBand } from "./coverage";
+import type { Segment } from "./coverage";
 import { polygonArea } from "./geo";
 import type { Building, Camera, MetreXY, Structure } from "./types";
 
@@ -169,7 +170,7 @@ describe("computeVisibility with structures", () => {
 
 describe("computeVisibility range culling", () => {
   const dome = (): Camera => ({
-    id: "d1", ordinal: 0, at: [0, 0], heading: 0, fovDeg: 360,
+    id: "d1", name: "D1", ordinal: 0, at: [0, 0], heading: 0, fovDeg: 360,
     rangeM: 10, kind: "dome", streamRef: "rtsp://x",
   });
   const farWalls = (): Segment[] => {
