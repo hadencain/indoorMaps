@@ -621,3 +621,50 @@ export function computeCoverage(
     coveragePct: floorAreaM2 > 0 ? coveredAreaM2 / floorAreaM2 : 0,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Pixel density (DORI, EN 62676-4). Geometric coverage answers "can this point
+// be seen at all". Whether the footage is usable is a different question: the
+// same camera that identifies a face at 3 m only detects a shape at 30 m. This
+// is the number that decides where a camera must actually be placed.
+// ---------------------------------------------------------------------------
+
+/** EN 62676-4 pixel-density thresholds, horizontal px per metre of scene. */
+export const DORI_PX_PER_M = { detect: 25, observe: 62, recognise: 125, identify: 250 } as const;
+
+/**
+ * Horizontal pixels per metre of scene at distance `dM`.
+ *
+ * Horizontal pixel count is derived from `resolutionMP` at a 16:9 sensor (the
+ * same aspect assumption `deriveVfovDeg` uses). Returns 0 when resolution is
+ * unknown or the geometry degenerates, so callers can treat 0 as "unrated"
+ * rather than "bad".
+ */
+export function pxPerMetreAt(cam: Camera, dM: number): number {
+  const mp = cam.resolutionMP;
+  if (!mp || mp <= 0 || !Number.isFinite(dM) || dM <= 0) return 0;
+  const k = Math.sqrt((mp * 1e6) / (16 * 9));
+  const widthPx = 16 * k;
+  // A dome spreads its sensor over the whole circle; clamp into the range where
+  // the half-angle tangent is finite, which also keeps its density honestly low.
+  const fovDeg = cam.kind === "dome" || cam.fovDeg >= 360 ? 179 : Math.min(179, Math.max(1, cam.fovDeg));
+  const sceneWidthM = 2 * dM * Math.tan((fovDeg * Math.PI) / 360);
+  return sceneWidthM > 0 ? widthPx / sceneWidthM : 0;
+}
+
+/** The DORI band a pixel density falls in; null when unrated (0). */
+export function doriBand(pxPerM: number): "identify" | "recognise" | "observe" | "detect" | "below" | null {
+  if (!Number.isFinite(pxPerM) || pxPerM <= 0) return null;
+  if (pxPerM >= DORI_PX_PER_M.identify) return "identify";
+  if (pxPerM >= DORI_PX_PER_M.recognise) return "recognise";
+  if (pxPerM >= DORI_PX_PER_M.observe) return "observe";
+  if (pxPerM >= DORI_PX_PER_M.detect) return "detect";
+  return "below";
+}
+
+/** Greatest distance at which `cam` still meets a DORI band, metres. 0 when
+ *  unrated. Reads as "this camera identifies out to 4.2 m" in a panel. */
+export function doriRangeM(cam: Camera, band: keyof typeof DORI_PX_PER_M): number {
+  const at1 = pxPerMetreAt(cam, 1);
+  return at1 > 0 ? at1 / DORI_PX_PER_M[band] : 0;
+}

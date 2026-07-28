@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  DORI_PX_PER_M,
+  doriBand,
+  doriRangeM,
+  pxPerMetreAt,
   MOUNT_H,
   WALK_UNDER_M,
   collectWalls,
@@ -270,5 +274,58 @@ describe("computeCoverage union scaling", () => {
       Math.abs(reversed.coveredAreaM2 - forward.coveredAreaM2) /
       Math.max(forward.coveredAreaM2, 1e-9);
     expect(rel).toBeLessThan(1e-3);
+  });
+});
+
+describe("pixel density (DORI)", () => {
+  const rated = (over: Partial<Camera> = {}): Camera =>
+    cam({ resolutionMP: 4, fovDeg: 90, rangeM: 20, ...over });
+
+  it("derives horizontal pixels from megapixels at 16:9", () => {
+    // 4 MP at 16:9 is ~2667 px wide; a 90 deg FOV spans 2*d*tan(45) = 2d metres.
+    // At 1 m that is 2 m of scene, so ~1333 px/m.
+    expect(pxPerMetreAt(rated(), 1)).toBeCloseTo(2666.67 / 2, 0);
+  });
+
+  it("falls off inversely with distance", () => {
+    const near = pxPerMetreAt(rated(), 5);
+    const far = pxPerMetreAt(rated(), 20);
+    expect(near / far).toBeCloseTo(4, 6);
+  });
+
+  it("a wider lens spreads the same sensor thinner", () => {
+    expect(pxPerMetreAt(rated({ fovDeg: 30 }), 10)).toBeGreaterThan(
+      pxPerMetreAt(rated({ fovDeg: 120 }), 10),
+    );
+  });
+
+  it("is unrated (0) without a resolution, and for nonsense distances", () => {
+    expect(pxPerMetreAt(cam(), 10)).toBe(0);
+    expect(pxPerMetreAt(rated(), 0)).toBe(0);
+    expect(pxPerMetreAt(rated(), -5)).toBe(0);
+    expect(doriBand(0)).toBeNull();
+  });
+
+  it("bands follow EN 62676-4 thresholds", () => {
+    expect(doriBand(300)).toBe("identify");
+    expect(doriBand(DORI_PX_PER_M.identify)).toBe("identify");
+    expect(doriBand(200)).toBe("recognise");
+    expect(doriBand(100)).toBe("observe");
+    expect(doriBand(30)).toBe("detect");
+    expect(doriBand(10)).toBe("below");
+  });
+
+  it("doriRangeM is the distance where the band threshold is met", () => {
+    const c = rated();
+    const d = doriRangeM(c, "identify");
+    expect(pxPerMetreAt(c, d)).toBeCloseTo(DORI_PX_PER_M.identify, 6);
+    // Bands nest: you can identify closer than you can merely detect.
+    expect(doriRangeM(c, "identify")).toBeLessThan(doriRangeM(c, "detect"));
+  });
+
+  it("a dome spreads its sensor over the circle, so density is far lower", () => {
+    const dome = rated({ kind: "dome", fovDeg: 360 });
+    expect(pxPerMetreAt(dome, 5)).toBeLessThan(pxPerMetreAt(rated(), 5));
+    expect(pxPerMetreAt(dome, 5)).toBeGreaterThan(0);
   });
 });
