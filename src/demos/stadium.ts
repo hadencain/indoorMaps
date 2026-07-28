@@ -54,11 +54,13 @@ export const stadiumBuilding: Building = {
   "levels": [
     {
       "ordinal": 0,
-      "name": "Main Concourse"
+      "name": "Main Concourse",
+      "ceilingM": 5
     },
     {
       "ordinal": 1,
-      "name": "Upper Deck & Suites"
+      "name": "Upper Deck & Suites",
+      "ceilingM": 4.5
     }
   ],
   "units": [
