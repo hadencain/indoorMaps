@@ -43,6 +43,30 @@ export function deriveVfovDeg(fovDeg: number): number {
   return (2 * Math.atan(Math.tan((h * Math.PI) / 360) * (9 / 16)) * 180) / Math.PI;
 }
 
+/** Drop below the ceiling for a ceiling-mounted camera with no authored height. */
+const CEILING_MOUNT_DROP_M = 0.6;
+/** Practical ceiling for an unauthored mount: a 12 m atrium does not put its
+ *  cameras 11.4 m up — installers work off catwalks/poles around this height. */
+const MAX_DEFAULT_MOUNT_M = 7;
+
+/**
+ * Display mount height for a camera with no authored `mountM`, given the floor's
+ * ceiling. Cameras are ceiling-mounted hardware: pinning every unauthored camera
+ * to the flat MOUNT_H (4 m) left them floating mid-air in a 7 m casino hall and
+ * reading as "too low to the ground" in walk mode.
+ *
+ * At the 3.2 m default ceiling this returns the legacy value (4 m clamped to
+ * 3.1 m by the caller), so existing venues render unchanged. 3D-ONLY: the 2D
+ * tiltBand keeps using the raw stored value — and is null for untilted/dome
+ * cameras anyway, so coverage geometry never moves because of this.
+ */
+export function defaultMountM(ceilingM: number): number {
+  return Math.min(
+    Math.max(MOUNT_H, ceilingM - CEILING_MOUNT_DROP_M),
+    MAX_DEFAULT_MOUNT_M,
+  );
+}
+
 /** A vertical extrusion of an open metre ring, baseM..topM above the floor
  *  slab. `kind` is the source object's category/kind string — the renderer's
  *  material lookup key, never geometry. */
@@ -199,7 +223,7 @@ export function build3dScene(b: Building, ordinal: number): Scene3D {
       id: c.id,
       name: c.name,
       at: c.at,
-      mountM: Math.max(0.1, Math.min(c.mountM ?? MOUNT_H, ceilingM - 0.1)),
+      mountM: Math.max(0.1, Math.min(c.mountM ?? defaultMountM(ceilingM), ceilingM - 0.1)),
       headingDeg: c.heading,
       tiltDeg: c.tiltDeg ?? 0,
       rollDeg: c.rollDeg ?? 0,

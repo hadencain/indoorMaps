@@ -13,8 +13,9 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import type { MetreXY } from "../types";
 import type { Category, FixtureKind } from "../types";
 import { pointInRing } from "../coverage";
+import { polygonArea } from "../geo";
 import { disposeMaterials, getEmissiveMaterial, getMaterial, materialForCategory } from "./materials";
-import { disposeFixtureModels, getFixtureModel } from "./fixtures";
+import { disposeFixtureModels, getFixtureModel, planFitScale } from "./fixtures";
 import { BloomPipeline } from "./post";
 import {
   EYE_M,
@@ -105,6 +106,18 @@ const STOOL_GAP = 0.35; // gap outside the table footprint the stool ring sits a
 // walls, coloured by function bucket (matches src/categories.ts functionBucket).
 // Modest intensity + small area so it never outshines the green coverage cones.
 const SIGNAGE_H_BELOW_CEIL = 0.28; // valance drop below the ceiling, metres
+/** Storefront-fascia height, metres: where signage actually reads from eye level.
+ *  Valances hang at the ceiling in ordinary rooms but must NOT ride a 7 m casino
+ *  ceiling up out of every sightline — real venue signage stays at human scale
+ *  no matter how tall the hall. At the 3.2 m default this is inert (2.92 < 3.0),
+ *  so legacy venues render unchanged. */
+const SIGNAGE_FASCIA_H = 3.0;
+/** House-light height the base intensity was tuned at (the 3.2 m default ceiling
+ *  × the 0.7 factor below). Taller ceilings lift the lights away from the floor,
+ *  so intensity is compensated back up — otherwise open high-ceiling venues go
+ *  murky, the exact regression fix f05fa11 landed for. */
+const HOUSE_LIGHT_TUNED_H = 3.2 * 0.7;
+const HOUSE_LIGHT_MAX_BOOST = 3;
 const SIGNAGE_VAL_H = 0.14; // valance strip height, metres
 const SIGNAGE_VAL_D = 0.05; // valance strip depth, metres
 const SIGNAGE_INSET_M = 0.08; // pull the strip inside the room so neighbours don't co-plane
@@ -304,24 +317,143 @@ function centroid(ring: MetreXY[] | null): MetreXY | null {
 
 /** Mean of every fixture's centroid — the "gaming floor" centre, used to spawn
  *  the walker in the action rather than a dead corner. Null when no fixtures. */
-function fixturesCentroid(scene: Scene3D): MetreXY | null {
-  let x = 0, y = 0, n = 0;
-  for (const p of scene.fixturePrisms) {
-    const c = centroid(p.ring);
-    if (c) { x += c[0]; y += c[1]; n++; }
+/** Metre size of the density bucket used to find the busiest part of a floor. */
+const ACTION_CELL_M = 12;
+
+/**
+ * The floor's ACTION ANCHOR: the centroid of its densest fixture cluster.
+ *
+ * Deliberately NOT the arithmetic mean of fixture centroids. A mean is
+ * meaningless for any venue whose fixtures straddle a void — the casino's
+ * gaming halls sit north AND south of a 24 m promenade with parking lots off
+ * two sides, so the mean landed dead in the empty promenade and the operator
+ * spawned staring down 540 m of nothing. Bucketing into room-sized cells and
+ * taking the busiest one lands them among the slot banks instead, which is what
+ * "spawn in the action" was always supposed to mean.
+ */
+/** Body clearance the spawn search wants from the nearest fixture centroid — a
+ *  slot aisle or a shop aisle, never standing inside the furniture. */
+const SPAWN_CLEARANCE_M = 1.1;
+/** How far out the spawn search will look for that clearance. */
+const SPAWN_SEARCH_M = 9;
+
+/**
+ * The floor's DOMINANT HALL: its largest interior room. The operator should
+ * arrive in the space that defines the venue — a casino's gaming floor, a
+ * mall's department store, an airport concourse — never inside a broom closet
+ * or a 8 m shop, which is where a pure fixture-density pick lands (a small room
+ * packed with shelving out-scores a vast hall of well-spaced slot banks).
+ */
+function dominantHall(scene: Scene3D): MetreXY[] | null {
+  let ring: MetreXY[] | null = null;
+  let best = 0;
+  for (const p of scene.floorPatches) {
+    if (p.category === "outside" || p.ring.length < 3) continue;
+    const a = Math.abs(polygonArea(p.ring));
+    if (a > best) {
+      best = a;
+      ring = p.ring;
+    }
   }
-  return n > 0 ? [x / n, y / n] : null;
+  return ring;
+}
+
+function fixturesCentroid(scene: Scene3D): MetreXY | null {
+  const cells = new Map<string, { x: number; y: number; n: number }>();
+  const byCell = new Map<string, MetreXY[]>();
+  const key = (x: number, y: number) =>
+    `${Math.floor(x / ACTION_CELL_M)}:${Math.floor(y / ACTION_CELL_M)}`;
+  let best: { x: number; y: number; n: number } | null = null;
+  // Restrict to fixtures standing in the dominant hall when that hall is
+  // furnished; otherwise fall back to the whole floor (an empty-hall venue
+  // still deserves to spawn wherever its fixtures actually are).
+  const hall = dominantHall(scene);
+  const inHall = hall
+    ? scene.fixturePrisms.filter((p) => {
+        const c = centroid(p.ring);
+        return c ? pointInRing(c, hall) : false;
+      })
+    : [];
+  const source = inHall.length > 0 ? inHall : scene.fixturePrisms;
+  for (const p of source) {
+    const c = centroid(p.ring);
+    if (!c) continue;
+    const k = key(c[0], c[1]);
+    let cell = cells.get(k);
+    if (!cell) {
+      cell = { x: 0, y: 0, n: 0 };
+      cells.set(k, cell);
+      byCell.set(k, []);
+    }
+    byCell.get(k)!.push(c);
+    cell.x += c[0];
+    cell.y += c[1];
+    cell.n++;
+    if (!best || cell.n > best.n) best = cell;
+  }
+  if (!best) return null;
+  const anchor: MetreXY = [best.x / best.n, best.y / best.n];
+
+  // The densest cell's centroid usually lands ON a fixture (a slot bank, a shop
+  // gondola), which spawns the operator face-first inside the furniture. Step
+  // outward for the nearest spot with real body clearance, checking only the
+  // 3×3 neighbouring cells so this stays cheap on a 5,000-fixture floor.
+  const near = (x: number, y: number): MetreXY[] => {
+    const out: MetreXY[] = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const list = byCell.get(key(x + dx * ACTION_CELL_M, y + dy * ACTION_CELL_M));
+        if (list) out.push(...list);
+      }
+    }
+    return out;
+  };
+  const clearance = (x: number, y: number): number => {
+    let m = Infinity;
+    for (const [fx, fy] of near(x, y)) m = Math.min(m, Math.hypot(x - fx, y - fy));
+    return m;
+  };
+  if (clearance(anchor[0], anchor[1]) >= SPAWN_CLEARANCE_M) return anchor;
+  let bestPt = anchor;
+  let bestClear = clearance(anchor[0], anchor[1]);
+  for (let r = 0.5; r <= SPAWN_SEARCH_M; r += 0.5) {
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * 2 * Math.PI;
+      const x = anchor[0] + r * Math.cos(a);
+      const y = anchor[1] + r * Math.sin(a);
+      const c = clearance(x, y);
+      if (c > bestClear) {
+        bestClear = c;
+        bestPt = [x, y];
+      }
+      if (c >= SPAWN_CLEARANCE_M) return [x, y];
+    }
+  }
+  return bestPt;
 }
 
 /** The `at` of the camera nearest a point (so spawn faces a CCTV unit). */
+/** Minimum standoff for the camera the operator is turned to face on arrival.
+ *  A dense plant plants cameras every few metres, so the literally-nearest one
+ *  is often a metre from your face — aiming at it points the view into the
+ *  adjacent wall and the whole venue is behind you. */
+const MIN_FACE_DIST_M = 8;
+
+/** Spawn aim: the nearest camera at least MIN_FACE_DIST_M away (so the view
+ *  looks down the room with a CCTV unit in frame — camera-primary), falling
+ *  back to the farthest camera when every one of them is close. */
 function nearestCameraAt(scene: Scene3D, at: MetreXY): MetreXY | null {
   let best: MetreXY | null = null;
   let bd = Infinity;
+  let farthest: MetreXY | null = null;
+  let fd = -1;
+  const min2 = MIN_FACE_DIST_M * MIN_FACE_DIST_M;
   for (const c of scene.cameras) {
     const d = dist2(c.at, at[0], at[1]);
-    if (d < bd) { bd = d; best = c.at; }
+    if (d >= min2 && d < bd) { bd = d; best = c.at; }
+    if (d > fd) { fd = d; farthest = c.at; }
   }
-  return best;
+  return best ?? farthest;
 }
 
 // Dispose every geometry/material/light under an object before it's discarded —
@@ -963,11 +1095,11 @@ export class WalkRenderer {
       // sub-centimetre or building-sized model.
       const len = clampSpan(frame.lengthM);
       const wid = clampSpan(frame.widthM);
-      // "length" fit scales uniformly (preserve aspect, height follows footprint);
-      // "bbox" fit stretches the footprint independently and keeps the authored
-      // real-metre height (Y scale 1).
-      if (model.fit === "length") scl.set(len, len, len);
-      else scl.set(len, 1, wid);
+      // The sizing contract (fixtures.planFitScale): the footprint is a real
+      // footprint, so the model is FITTED into it preserving its own plan
+      // aspect — never stretched to it. A slot cabinet stays slot-shaped.
+      const s = planFitScale(model, len, wid);
+      scl.set(s.x, s.y, s.z);
       // model[x,y] -> three(x, h, -y); base sits at the fixture's floor (baseM).
       pos.set(frame.centroid[0], p.baseM, -frame.centroid[1]);
       q.setFromAxisAngle(up, frame.angleRad);
@@ -1313,12 +1445,23 @@ export class WalkRenderer {
     const spanX = Math.max(maxX - minX, 1);
     const spanY = Math.max(maxY - minY, 1);
     const step = Math.max(HOUSE_LIGHT_STEP_M, Math.sqrt((spanX * spanY) / MAX_HOUSE_LIGHTS));
+    // Inverse-square-ish falloff means lifting a light from 2.24 m to 4.9 m costs
+    // the floor most of its light. Compensate by the same decay exponent so floor
+    // illuminance holds roughly constant as ceilings rise (1× at the 3.2 m default
+    // — legacy venues unchanged), capped so a freak ceiling can't blow out bloom.
+    const DECAY = 1.25;
+    const boost = Math.min(
+      HOUSE_LIGHT_MAX_BOOST,
+      Math.max(1, Math.pow(h / HOUSE_LIGHT_TUNED_H, DECAY)),
+    );
+    const intensity = 55 * boost;
+    const range = Math.max(60, h * 12);
     let placed = 0;
     for (let x = minX + step / 2; x <= maxX && placed < MAX_HOUSE_LIGHTS; x += step) {
       for (let y = minY + step / 2; y <= maxY && placed < MAX_HOUSE_LIGHTS; y += step) {
         if (ring && !pointInRing([x, y], ring)) continue;
-        const p = new THREE.PointLight(0xffd9a0, 55, 60, 1.25);
-        p.userData.baseIntensity = 55;
+        const p = new THREE.PointLight(0xffd9a0, intensity, range, DECAY);
+        p.userData.baseIntensity = intensity;
         p.position.copy(v3(x, y, h));
         group.add(p);
         placed++;
@@ -1366,7 +1509,7 @@ export class WalkRenderer {
    *  shared emissive materials, and registered as recede-able so they dim on
    *  camera focus. Cheap geometry, NO extra light objects. */
   private addSignage(scene: Scene3D, group: THREE.Group): void {
-    const h = scene.ceilingM - SIGNAGE_H_BELOW_CEIL;
+    const h = Math.min(scene.ceilingM - SIGNAGE_H_BELOW_CEIL, SIGNAGE_FASCIA_H);
     if (h <= 0) return;
     const byColor = new Map<number, THREE.BufferGeometry[]>();
     for (const patch of scene.floorPatches) {

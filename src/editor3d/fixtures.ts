@@ -50,6 +50,39 @@ export interface FixtureModel {
   emissiveMaterial?: THREE.Material;
   fit: FixtureFit;
   height: number;
+  /** Measured plan extents of the canonical body, in the model's own units
+   *  (real metres for "bbox"). The renderer fits these into the authored
+   *  footprint — see planFitScale. Measured, never hand-declared, so a model
+   *  edit can't silently desync its own size. */
+  spanX: number;
+  spanZ: number;
+}
+
+/** Per-axis scale placing a canonical model inside an authored footprint.
+ *
+ *  THE SIZING CONTRACT: a fixture polygon is a REAL FOOTPRINT, not a scale
+ *  multiplier. The model is fitted *into* it preserving the model's own plan
+ *  aspect — a slot machine renders slot-machine-shaped whether its polygon was
+ *  drawn 0.6 m or 0.9 m deep, and can never overflow the footprint.
+ *   · "bbox"   — uniform in plan (X/Z), identity in Y: height is authored in
+ *                real metres and must not follow the footprint.
+ *   · "length" — uniform on all three axes: the car's height genuinely scales.
+ *  Degenerate spans/footprints fall back to 1 rather than emitting NaN or a
+ *  zero-scale (invisible) instance. */
+export function planFitScale(
+  model: Pick<FixtureModel, "fit" | "spanX" | "spanZ">,
+  lengthM: number,
+  widthM: number,
+): { x: number; y: number; z: number } {
+  const sx = model.spanX > 1e-6 ? lengthM / model.spanX : NaN;
+  const sz = model.spanZ > 1e-6 ? widthM / model.spanZ : NaN;
+  if (model.fit === "length") {
+    const k = Number.isFinite(sx) && sx > 0 ? sx : 1;
+    return { x: k, y: k, z: k };
+  }
+  const cands = [sx, sz].filter((v) => Number.isFinite(v) && v > 0);
+  const k = cands.length > 0 ? Math.min(...cands) : 1;
+  return { x: k, y: 1, z: k };
 }
 
 // ---- palette (sRGB hex; THREE.Color converts to linear working space) --------
@@ -258,13 +291,16 @@ function moneyWheel(): RawModel {
 
 function slotMachine(): RawModel {
   const body: THREE.BufferGeometry[] = [];
-  body.push(box(0.5, 0.5, 0.55, 0, 0.25, 0, METAL_DARK)); // base cabinet
-  body.push(box(0.56, 0.7, 0.5, 0, 0.75, 0, METAL)); // body
-  body.push(box(0.56, 0.06, 0.22, 0, 0.52, 0.28, METAL)); // button deck
-  body.push(box(0.5, 0.22, 0.18, 0, 1.45, 0, METAL_DARK)); // topper
+  // Real cabinet height ≈1.8 m WITH the topper — deliberately above the 1.7 m
+  // walk eye line. At the old 1.56 m the operator looked DOWN on a sea of
+  // cabinet tops and a slot bank read as low furniture instead of a machine row.
+  body.push(box(0.5, 0.55, 0.55, 0, 0.275, 0, METAL_DARK)); // base cabinet
+  body.push(box(0.56, 0.85, 0.5, 0, 0.975, 0, METAL)); // body
+  body.push(box(0.56, 0.06, 0.22, 0, 0.6, 0.28, METAL)); // button deck
+  body.push(box(0.5, 0.4, 0.18, 0, 1.6, 0, METAL_DARK)); // topper
   const emissive: THREE.BufferGeometry[] = [];
-  emissive.push(ebox(0.46, 0.5, 0.03, 0, 0.85, 0.26)); // main screen
-  emissive.push(ebox(0.44, 0.08, 0.04, 0, 1.42, 0.09)); // topper light strip
+  emissive.push(ebox(0.46, 0.55, 0.03, 0, 1.05, 0.26)); // main screen
+  emissive.push(ebox(0.44, 0.1, 0.04, 0, 1.72, 0.09)); // topper light strip
   emissive.push(ebox(0.5, 0.05, 0.03, 0, 0.06, 0.28)); // R3: base glow strip (slot-row floor wash)
   return { body, emissive, emissiveColor: SCREEN, emissiveIntensity: SCREEN_I, fit: "bbox" };
 }
@@ -432,8 +468,17 @@ function buildModel(kind: FixtureKind): FixtureModel {
   geometry.userData.shared = true; // clearGroup must NOT dispose the cached body
   const bb = geometry.boundingBox;
   const height = bb ? bb.max.y - bb.min.y : 1;
+  const spanX = bb ? bb.max.x - bb.min.x : 1;
+  const spanZ = bb ? bb.max.z - bb.min.z : 1;
 
-  const model: FixtureModel = { geometry, material: getBodyMaterial(), fit: raw.fit, height };
+  const model: FixtureModel = {
+    geometry,
+    material: getBodyMaterial(),
+    fit: raw.fit,
+    height,
+    spanX,
+    spanZ,
+  };
 
   if (raw.emissive && raw.emissive.length > 0 && raw.emissiveColor != null) {
     const eg = mergeGeometries(raw.emissive, false);
