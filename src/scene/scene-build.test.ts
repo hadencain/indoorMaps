@@ -3,6 +3,7 @@ import {
   EYE_M,
   WALL_THICKNESS_M,
   build3dScene,
+  defaultMountM,
   deriveVfovDeg,
 } from "./scene-build";
 import { MOUNT_H } from "../coverage";
@@ -198,16 +199,18 @@ describe("build3dScene cameras", () => {
     expect(poses.find((p) => p.id === "lo")!.mountM).toBe(0.1);
   });
 
-  it("defaults absent mountM to MOUNT_H, itself ceiling-clamped", () => {
-    // Default 3.2 m ceiling: MOUNT_H (4) clamps to 3.1.
+  it("defaults absent mountM to a ceiling-hung height, itself ceiling-clamped", () => {
+    // Default 3.2 m ceiling: unchanged from the flat-MOUNT_H era — 4 clamps to 3.1.
     const low = build3dScene(bld({ cameras: [cam()] }), 0).cameras[0];
     expect(low.mountM).toBeCloseTo(DEFAULT_CEILING_M - 0.1, 12);
-    // Tall ceiling: MOUNT_H fits and is used as-is.
+    // Tall ceiling: cameras are ceiling-mounted hardware, so they RIDE UP with
+    // the ceiling instead of floating at 4 m in the middle of a 6 m hall.
     const tall = build3dScene(
       bld({ levels: [{ ordinal: 0, name: "G", ceilingM: 6 }], cameras: [cam()] }),
       0,
     ).cameras[0];
-    expect(tall.mountM).toBe(MOUNT_H);
+    expect(tall.mountM).toBeCloseTo(defaultMountM(6), 12);
+    expect(tall.mountM).toBeGreaterThan(MOUNT_H);
   });
 
   it("resolves every absent-able field and passes the rest through", () => {
@@ -309,5 +312,25 @@ describe("build3dScene exclusions + degenerates", () => {
     // Floor patches only need >= 3 verts (a flat patch has no occlusion role):
     // the 2-vertex unit is dropped, the zero-area one still paints.
     expect(s.floorPatches.map((p) => p.id)).toEqual(["u3"]);
+  });
+});
+
+describe("defaultMountM (unauthored camera mount height)", () => {
+  it("is unchanged at the legacy 3.2 m default ceiling", () => {
+    // 4 m, which build3dScene then clamps to ceilingM − 0.1 exactly as before.
+    expect(defaultMountM(3.2)).toBe(MOUNT_H);
+  });
+
+  it("hangs cameras near the ceiling in a tall hall", () => {
+    expect(defaultMountM(7)).toBeCloseTo(6.4, 6);
+  });
+
+  it("caps at a practical installer height in an atrium", () => {
+    expect(defaultMountM(12)).toBe(7);
+    expect(defaultMountM(30)).toBe(7);
+  });
+
+  it("never returns below the legacy mount for low ceilings", () => {
+    expect(defaultMountM(2.4)).toBe(MOUNT_H);
   });
 });

@@ -13,7 +13,7 @@ import type { Building } from "../types";
 // measured floor rather than off in undefined space.
 export const venueSmallBuilding: Building = {
   origin: [-115.1228, 36.1147],
-  levels: [{ ordinal: 0, name: "Main" }],
+  levels: [{ ordinal: 0, name: "Main", ceilingM: 3.6 }],
   units: [
     { id: "restroom-1", ordinal: 0, name: "Restroom A", category: "restroom", polygon: [[0,0],[6,0],[6,5],[0,5]] },
     { id: "vestibule", ordinal: 0, name: "Vestibule", category: "lobby", polygon: [[6,0],[24,0],[24,5],[6,5]] },

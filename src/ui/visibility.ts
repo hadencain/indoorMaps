@@ -47,6 +47,12 @@ export function useVisibility(): VisibilityInfo {
   // compute the (expensive) boolean union whenever EITHER overlay is on.
   const coverageOn = useStore((s) => s.layers.coverage);
   const blindOn = useStore((s) => s.layers.blindSpots);
+  // Walk mode covers the 2D map with the full-screen 3D view, so these overlays
+  // are invisible — but MapView stays mounted, so without this gate every camera
+  // selection and every pose-slider tick re-ran the whole floor's visibility AND
+  // the coverage union behind the walk view. That is the walk-mode edit lag.
+  // walkMode is a memo dep, so exiting recomputes once and the map is correct.
+  const walkMode = useStore((s) => s.walkMode);
 
   const walls = useMemo(
     () => collectWalls(building, ordinal),
@@ -59,6 +65,7 @@ export function useVisibility(): VisibilityInfo {
   const cacheRef = useRef<Map<string, CacheEntry>>(new Map());
 
   const polys = useMemo(() => {
+    if (walkMode) return [];
     const cache = cacheRef.current;
     const cams = building.cameras.filter((c) => c.ordinal === ordinal);
     const seen = new Set<string>();
@@ -82,12 +89,13 @@ export function useVisibility(): VisibilityInfo {
     for (const id of [...cache.keys()]) if (!seen.has(id)) cache.delete(id);
 
     return out;
-  }, [building.cameras, walls, ordinal]);
+  }, [building.cameras, walls, ordinal, walkMode]);
 
   // Coverage/blind union — gated behind the coverage/blind layers (skip when off),
   // memoized on the same walls/visibility identity so it recomputes exactly
   // when the visibility set or floor geometry changes.
   const coverage = useMemo<CoverageResult | null>(() => {
+    if (walkMode) return null;
     if (!coverageOn && !blindOn) return null;
     try {
       return computeCoverage(building, ordinal, polys);
@@ -99,7 +107,7 @@ export function useVisibility(): VisibilityInfo {
       return null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coverageOn, blindOn, polys, walls, ordinal]);
+  }, [coverageOn, blindOn, polys, walls, ordinal, walkMode]);
 
   return { polys, coverage };
 }

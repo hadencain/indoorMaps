@@ -262,6 +262,16 @@ export function computeVisibility(cam: Camera, walls: Segment[]): MetreXY[] {
   const band = tiltBand(cam);
   const R = band ? Math.min(cam.rangeM, band.farM) : cam.rangeM;
 
+  // Range-disc cull: a wall farther from the camera than R can never occlude
+  // (any blocking point lies within R of `at` and on the segment), and its
+  // endpoint rays only add redundant vertices on the free arc. Densely
+  // partitioned floors put thousands of segments outside a 50 m disc — culling
+  // keeps per-camera cost O(local walls²) instead of O(floor walls²). The
+  // small-scene guard skips the filter where it can't pay for itself.
+  if (walls.length > 64) {
+    walls = walls.filter((s) => segDistPt(at, s.a, s.b) <= R + 0.01);
+  }
+
   // --- gather candidate ray angles, as offsets `rel` from heading h ---
   const rels: number[] = [];
   if (!full) rels.push(-half, half); // exact sector boundary rays
@@ -456,24 +466,59 @@ function mpSimplify(mp: MultiPolygon): MultiPolygon {
  * accumulator each step and skipping any polygon whose merge throws. This keeps
  * coverage correct-enough and — critically — never crashes the app.
  */
+/** Polygons merged per sweep. Small enough that one pathological ring only
+ *  costs its own batch's fallback, large enough to keep the tree shallow. */
+const UNION_BATCH = 24;
+
+/** Union one batch in a SINGLE variadic sweep, falling back to pairwise only if
+ *  that sweep throws — so a single degenerate ring can't drop the whole batch. */
+function unionBatch(items: MultiPolygon[]): MultiPolygon {
+  if (items.length === 0) return [];
+  if (items.length === 1) return items[0];
+  try {
+    return mpSimplify(polygonClipping.union(items[0], ...items.slice(1)));
+  } catch {
+    let acc: MultiPolygon | null = null;
+    for (const m of items) {
+      if (!acc) {
+        acc = m;
+        continue;
+      }
+      try {
+        acc = mpSimplify(polygonClipping.union(acc, m));
+      } catch {
+        /* skip the polygon that breaks the sweep-line; coverage is ~unchanged */
+      }
+    }
+    return acc ?? [];
+  }
+}
+
+/**
+ * Union many rings via a BATCHED TREE REDUCTION.
+ *
+ * The obvious `acc = union(acc, next)` accumulation is quadratic in the
+ * accumulated vertex count: every step re-sweeps the entire merged shape, which
+ * grows with each camera. On the casino's 571 cones that cost ~10.6 s on the
+ * main thread at load and on every floor switch. Merging in batches and then
+ * reducing the batch results keeps each sweep small and the tree shallow.
+ * Union is associative and commutative, so the result is order-independent
+ * (locked by a test) — only the cost changes.
+ */
 function unionRings(rings: MetreXY[][]): MultiPolygon {
-  const mps = rings
+  let parts: MultiPolygon[] = rings
     .map((r) => simplifyRing(r))
     .filter((r) => r.length >= 3)
     .map((r): MultiPolygon => [[closedRing(r)]]);
-  let acc: MultiPolygon | null = null;
-  for (const m of mps) {
-    if (!acc) {
-      acc = m;
-      continue;
+  if (parts.length === 0) return [];
+  while (parts.length > 1) {
+    const next: MultiPolygon[] = [];
+    for (let i = 0; i < parts.length; i += UNION_BATCH) {
+      next.push(unionBatch(parts.slice(i, i + UNION_BATCH)));
     }
-    try {
-      acc = mpSimplify(polygonClipping.union(acc, m));
-    } catch {
-      /* skip the polygon that breaks the sweep-line; coverage is ~unchanged */
-    }
+    parts = next;
   }
-  return acc ?? [];
+  return parts[0] ?? [];
 }
 
 /** A polygon-clipping Ring is closed (last == first); polygonArea (geo.ts)
@@ -575,4 +620,51 @@ export function computeCoverage(
     coveredAreaM2,
     coveragePct: floorAreaM2 > 0 ? coveredAreaM2 / floorAreaM2 : 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Pixel density (DORI, EN 62676-4). Geometric coverage answers "can this point
+// be seen at all". Whether the footage is usable is a different question: the
+// same camera that identifies a face at 3 m only detects a shape at 30 m. This
+// is the number that decides where a camera must actually be placed.
+// ---------------------------------------------------------------------------
+
+/** EN 62676-4 pixel-density thresholds, horizontal px per metre of scene. */
+export const DORI_PX_PER_M = { detect: 25, observe: 62, recognise: 125, identify: 250 } as const;
+
+/**
+ * Horizontal pixels per metre of scene at distance `dM`.
+ *
+ * Horizontal pixel count is derived from `resolutionMP` at a 16:9 sensor (the
+ * same aspect assumption `deriveVfovDeg` uses). Returns 0 when resolution is
+ * unknown or the geometry degenerates, so callers can treat 0 as "unrated"
+ * rather than "bad".
+ */
+export function pxPerMetreAt(cam: Camera, dM: number): number {
+  const mp = cam.resolutionMP;
+  if (!mp || mp <= 0 || !Number.isFinite(dM) || dM <= 0) return 0;
+  const k = Math.sqrt((mp * 1e6) / (16 * 9));
+  const widthPx = 16 * k;
+  // A dome spreads its sensor over the whole circle; clamp into the range where
+  // the half-angle tangent is finite, which also keeps its density honestly low.
+  const fovDeg = cam.kind === "dome" || cam.fovDeg >= 360 ? 179 : Math.min(179, Math.max(1, cam.fovDeg));
+  const sceneWidthM = 2 * dM * Math.tan((fovDeg * Math.PI) / 360);
+  return sceneWidthM > 0 ? widthPx / sceneWidthM : 0;
+}
+
+/** The DORI band a pixel density falls in; null when unrated (0). */
+export function doriBand(pxPerM: number): "identify" | "recognise" | "observe" | "detect" | "below" | null {
+  if (!Number.isFinite(pxPerM) || pxPerM <= 0) return null;
+  if (pxPerM >= DORI_PX_PER_M.identify) return "identify";
+  if (pxPerM >= DORI_PX_PER_M.recognise) return "recognise";
+  if (pxPerM >= DORI_PX_PER_M.observe) return "observe";
+  if (pxPerM >= DORI_PX_PER_M.detect) return "detect";
+  return "below";
+}
+
+/** Greatest distance at which `cam` still meets a DORI band, metres. 0 when
+ *  unrated. Reads as "this camera identifies out to 4.2 m" in a panel. */
+export function doriRangeM(cam: Camera, band: keyof typeof DORI_PX_PER_M): number {
+  const at1 = pxPerMetreAt(cam, 1);
+  return at1 > 0 ? at1 / DORI_PX_PER_M[band] : 0;
 }

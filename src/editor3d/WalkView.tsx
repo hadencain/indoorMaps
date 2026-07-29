@@ -25,6 +25,7 @@ export default function WalkView() {
   const building = useStore((s) => s.building);
   const ordinal = useStore((s) => s.ordinal);
   const selectedCameraId = useStore((s) => s.selectedCameraId);
+  const flyTarget = useStore((s) => s.flyTarget);
   const setOrdinal = useStore((s) => s.setOrdinal);
   const setWalkMode = useStore((s) => s.setWalkMode);
   const setSelectedCamera = useStore((s) => s.setSelectedCamera);
@@ -78,7 +79,14 @@ export default function WalkView() {
   // the listener stays stable.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && useStore.getState().selectedCameraId) {
+      if (e.key !== "Escape") return;
+      // Two-stage Esc. While pointer-locked the browser is already exiting lock
+      // on this same keypress — that is the operator stepping out to reach the
+      // pose panel, NOT abandoning the camera, so the selection survives. A
+      // second Esc (now unlocked) clears it. Previously one keypress did both,
+      // so you could never free the cursor without losing the camera.
+      if (document.pointerLockElement) return;
+      if (useStore.getState().selectedCameraId) {
         useStore.getState().setSelectedCamera(null);
       }
     };
@@ -94,6 +102,22 @@ export default function WalkView() {
   useEffect(() => {
     rendererRef.current?.setSelectedCamera(selectedCameraId);
   }, [selectedCameraId]);
+
+  // Floor-directory click (requestFly) teleports the operator to that section so
+  // they can inspect its cameras, instead of flying the length of the venue. On
+  // another floor: switch floors first and keep the target — this effect re-runs
+  // on the new ordinal and lands. MapView ignores flyTarget while walking, so
+  // exactly one consumer handles it.
+  useEffect(() => {
+    if (!flyTarget) return;
+    if (flyTarget.ordinal !== ordinal) {
+      if (building.levels.some((l) => l.ordinal === flyTarget.ordinal)) setOrdinal(flyTarget.ordinal);
+      else useStore.setState({ flyTarget: null });
+      return;
+    }
+    rendererRef.current?.teleportTo(flyTarget.center);
+    useStore.setState({ flyTarget: null });
+  }, [flyTarget, ordinal, building.levels, setOrdinal]);
 
   useEffect(() => {
     rendererRef.current?.setCoverageMode(coverageMode);
@@ -228,22 +252,27 @@ export default function WalkView() {
             ))}
           </select>
 
-          <button
-            className="walk-pose-resume"
-            onClick={() => {
-              setSelectedCamera(null);
-              rendererRef.current?.lock();
-            }}
-          >
-            ◀ back to walking
+          {/* Resume walking WITHOUT dropping the camera: the selection and its
+              lit coverage cone persist, so the operator can walk the floor and
+              watch where this camera's green actually lands — which is the
+              entire reason to inspect in 3D. Clearing is a separate, explicit
+              act. (Previously this button deselected, so every attempt to go
+              look at the coverage closed the camera you were configuring.) */}
+          <button className="walk-pose-resume" onClick={() => rendererRef.current?.lock()}>
+            ◀ walk while this camera stays selected
+          </button>
+          <button className="walk-pose-clear" onClick={() => setSelectedCamera(null)}>
+            ✕ deselect camera
           </button>
         </div>
       )}
 
       <div className="walk-hint mono">
         {selectedCam
-          ? "adjust the camera · Esc or ◀ back to walking to resume"
-          : "WASD move · Shift run · click to look · Esc release · click a camera to select"}
+          ? locked
+            ? "walking · this camera stays selected · Esc to adjust it · click another to switch"
+            : "adjust the camera · ◀ to walk with it still selected · Esc to deselect"
+          : "WASD move · Space up · Shift down · Ctrl fast · click a camera to select · Esc release"}
       </div>
 
       {/* The full-screen "click to walk" prompt is suppressed while a camera is

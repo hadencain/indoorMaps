@@ -41,11 +41,13 @@ export const venueLargeBuilding: Building = {
   "levels": [
     {
       "ordinal": 0,
-      "name": "Ground — Hall & BOH"
+      "name": "Ground — Hall & BOH",
+      "ceilingM": 9
     },
     {
       "ordinal": 1,
-      "name": "Mezzanine & VIP Boxes"
+      "name": "Mezzanine & VIP Boxes",
+      "ceilingM": 4.5
     }
   ],
   "units": [

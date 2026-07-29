@@ -49,6 +49,16 @@ export function withBuildingDefaults<T extends object>(b: T): T {
   return b;
 }
 
+/** Whether a persisted demo save was forked from an older demo revision.
+ *  Only demos that DECLARE demoRev can invalidate saves — user properties and
+ *  legacy demos (no demoRev) never do. Pure, node-testable. */
+export function isStaleDemoSave(
+  saved: Record<string, unknown>,
+  pristine: { demoRev?: number },
+): boolean {
+  return pristine.demoRev !== undefined && saved.demoRev !== pristine.demoRev;
+}
+
 /** File format for the full-fidelity building save (Data → Save building
  *  file…). The envelope wraps the EXACT persisted v3 building shape — nothing
  *  is projected or dropped, unlike the IMDF/GeoJSON exports. */

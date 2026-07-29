@@ -5,9 +5,10 @@ import { useVisibility } from "../visibility";
 import { polygonArea } from "../../geo";
 import { formatArea } from "../../format";
 import { unitsCoveredByCamera } from "../../security/coverage-link";
+import { doriBand, doriRangeM, pxPerMetreAt } from "../../coverage";
 import SearchBox from "../SearchBox";
 import FeedPlaceholder from "./FeedPlaceholder";
-import type { CameraKind } from "../../types";
+import type { Camera, CameraKind } from "../../types";
 
 const M_TO_FT = 3.280839895;
 const KINDS: ReadonlyArray<CameraKind> = ["fixed", "dome", "ptz"];
@@ -268,6 +269,102 @@ export default function CameraPanel() {
         covers {formatArea(coversArea, unit)} · {covered.length} space
         {covered.length === 1 ? "" : "s"}
       </div>
+
+      {/* Pixel density (DORI). "Covered" is not the same as "usable footage" —
+          this is the number that says whether the far end of the range can
+          identify a face or merely register that something moved. */}
+      {selected.resolutionMP ? (
+        <div className="readout mono">
+          {pxPerMetreAt(selected, selected.rangeM).toFixed(0)} px/m at{" "}
+          {selected.rangeM.toFixed(1)} m ({doriBand(pxPerMetreAt(selected, selected.rangeM)) ?? "—"})
+          <br />
+          identifies to {doriRangeM(selected, "identify").toFixed(1)} m · recognises to{" "}
+          {doriRangeM(selected, "recognise").toFixed(1)} m · detects to{" "}
+          {doriRangeM(selected, "detect").toFixed(1)} m
+        </div>
+      ) : (
+        <p className="hint">Set resolution to rate this camera&rsquo;s usable range (DORI).</p>
+      )}
+
+      {/* Device + service record. A coverage map says what can be seen; keeping
+          a plant running also needs to know which box it is, where it is on the
+          network, and whether it works. */}
+      <div className="panel-subtitle" style={{ marginTop: 12 }}>
+        Device
+      </div>
+
+      <label>Status</label>
+      <select
+        value={selected.status ?? ""}
+        onChange={(e) =>
+          updateCamera(selected.id, {
+            status: (e.target.value || undefined) as Camera["status"],
+          })
+        }
+      >
+        <option value="">— unspecified —</option>
+        <option value="online">online</option>
+        <option value="offline">offline</option>
+        <option value="fault">fault</option>
+        <option value="planned">planned</option>
+      </select>
+
+      <label>Make / model</label>
+      <input
+        value={selected.model ?? ""}
+        placeholder="Axis P3265-LVE"
+        onChange={(e) => updateCamera(selected.id, { model: e.target.value || undefined })}
+      />
+
+      <label>Resolution (MP)</label>
+      <input
+        type="number"
+        min={0}
+        step={0.1}
+        value={selected.resolutionMP ?? ""}
+        placeholder="e.g. 4"
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          updateCamera(selected.id, {
+            resolutionMP: e.target.value === "" || !Number.isFinite(v) || v <= 0 ? undefined : v,
+          });
+        }}
+      />
+
+      <label>Management IP / host</label>
+      <input
+        value={selected.ipAddress ?? ""}
+        placeholder="10.60.12.41"
+        onChange={(e) => updateCamera(selected.id, { ipAddress: e.target.value || undefined })}
+      />
+
+      <label>Serial / asset tag</label>
+      <input
+        value={selected.serial ?? ""}
+        onChange={(e) => updateCamera(selected.id, { serial: e.target.value || undefined })}
+      />
+
+      <label>Installed</label>
+      <input
+        type="date"
+        value={selected.installedOn ?? ""}
+        onChange={(e) => updateCamera(selected.id, { installedOn: e.target.value || undefined })}
+      />
+
+      <label>Last serviced</label>
+      <input
+        type="date"
+        value={selected.lastServicedOn ?? ""}
+        onChange={(e) => updateCamera(selected.id, { lastServicedOn: e.target.value || undefined })}
+      />
+
+      <label>Notes</label>
+      <textarea
+        rows={3}
+        value={selected.notes ?? ""}
+        placeholder="Glare at dusk, obstructed by signage, needs a lift to service…"
+        onChange={(e) => updateCamera(selected.id, { notes: e.target.value || undefined })}
+      />
 
       <div className="panel-subtitle" style={{ marginTop: 12 }}>
         Covers

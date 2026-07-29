@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { MOUNT_H, WALK_UNDER_M, collectWalls, computeVisibility, tiltBand } from "./coverage";
+import {
+  DORI_PX_PER_M,
+  doriBand,
+  doriRangeM,
+  pxPerMetreAt,
+  MOUNT_H,
+  WALK_UNDER_M,
+  collectWalls,
+  computeCoverage,
+  computeVisibility,
+  tiltBand,
+} from "./coverage";
+import type { Segment } from "./coverage";
 import { polygonArea } from "./geo";
 import type { Building, Camera, MetreXY, Structure } from "./types";
 
@@ -164,5 +176,156 @@ describe("computeVisibility with structures", () => {
     expect(clearArea).toBeGreaterThan(0);
     expect(blockedArea).toBeGreaterThan(0);
     expect(blockedArea).toBeLessThan(clearArea);
+  });
+});
+
+describe("computeVisibility range culling", () => {
+  const dome = (): Camera => ({
+    id: "d1", name: "D1", ordinal: 0, at: [0, 0], heading: 0, fovDeg: 360,
+    rangeM: 10, kind: "dome", streamRef: "rtsp://x",
+  });
+  const farWalls = (): Segment[] => {
+    const segs: Segment[] = [];
+    for (let i = 0; i < 200; i++) {
+      const a = (i / 200) * 2 * Math.PI;
+      const x = 100 * Math.cos(a), y = 100 * Math.sin(a);
+      segs.push({ a: [x, y], b: [x + 2, y + 2] });
+    }
+    return segs;
+  };
+
+  it("walls beyond range add no redundant free-arc vertices (dense scenes)", () => {
+    const ring = computeVisibility(dome(), farWalls());
+    // 360° arc sampling at 4°/step ≈ 90 rays; pre-cull this was ~1290 vertices.
+    expect(ring.length).toBeLessThan(150);
+    for (const p of ring) expect(Math.hypot(p[0], p[1])).toBeCloseTo(10, 1);
+  });
+
+  it("culling is occlusion-exact: near wall still clips identically among far clutter", () => {
+    const near: Segment = { a: [5, -8], b: [5, 8] }; // inside range, blocks +X
+    const withClutter = computeVisibility(dome(), [near, ...farWalls()]);
+    const alone = computeVisibility(dome(), [near]);
+    expect(polygonArea(withClutter)).toBeCloseTo(polygonArea(alone), 1);
+  });
+});
+
+describe("computeCoverage union scaling", () => {
+  // Minimal floor: a 100 x 10 m footprint (computeCoverage only reads units +
+  // footprints from the building).
+  const floorBld = {
+    units: [
+      { id: "u", ordinal: 0, name: "Hall", category: "room",
+        polygon: [[0, 0], [100, 0], [100, 10], [0, 10]] },
+    ],
+    footprints: [{ ordinal: 0, polygon: [[0, 0], [100, 0], [100, 10], [0, 10]] }],
+  } as unknown as Building;
+
+  /** n overlapping 4 m-wide cones striding 2 m — heavy pairwise overlap, which
+   *  is what a real camera plant produces and what made the union quadratic. */
+  const cones = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      cameraId: `c${i}`,
+      ordinal: 0,
+      ring: [[i * 2, 0], [i * 2 + 4, 0], [i * 2 + 4, 10], [i * 2, 10]] as MetreXY[],
+    }));
+
+  it("fully overlapping cones cover the whole floor", () => {
+    const r = computeCoverage(floorBld, 0, cones(50));
+    expect(r.coveragePct).toBeCloseTo(1, 3);
+    expect(r.blindRings.length).toBe(0);
+  });
+
+  it("partial cones leave the exact blind remainder", () => {
+    // 25 cones stride 2 m and are 4 m wide: the last starts at 48, so they span
+    // x 0..52 of a 0..100 floor.
+    const r = computeCoverage(floorBld, 0, cones(25));
+    expect(r.coveragePct).toBeCloseTo(0.52, 3);
+    expect(r.blindRings.length).toBeGreaterThan(0);
+  });
+
+  /** Many-vertex overlapping discs — the shape a real plant produces, and the
+   *  case the union batches. Batching changes the ORDER polygons are merged in,
+   *  so order-independence is the invariant that must hold. (A wall-clock
+   *  assertion here would be a lie: simple rectangles collapse to one rectangle
+   *  each step and never reproduce the real accumulation cost. Field timings
+   *  live in scratch/_scratch-loadperf.test.ts against the real casino.) */
+  const discs = (n: number) =>
+    Array.from({ length: n }, (_, i) => {
+      const cx = 3 + (i * 7) % 96;
+      const cy = 5 + ((i * 13) % 7) - 3;
+      const ring: MetreXY[] = [];
+      for (let k = 0; k < 40; k++) {
+        const a = (k / 40) * 2 * Math.PI;
+        ring.push([cx + 6 * Math.cos(a), cy + 4 * Math.sin(a)]);
+      }
+      return { cameraId: `d${i}`, ordinal: 0, ring };
+    });
+
+  it("union is order-independent for complex overlapping cones", () => {
+    const forward = computeCoverage(floorBld, 0, discs(60));
+    const reversed = computeCoverage(floorBld, 0, [...discs(60)].reverse());
+    expect(forward.coveragePct).toBeGreaterThan(0.5); // genuinely overlapping
+    // Materially identical, not bit-identical: polygon-clipping's sweep-line
+    // resolves intersections in input order, so reordering perturbs the last
+    // few digits (~1e-4 relative here). Coverage is reported to whole percent,
+    // so the tolerance is set where the number is actually read.
+    expect(reversed.coveragePct).toBeCloseTo(forward.coveragePct, 3);
+    const rel =
+      Math.abs(reversed.coveredAreaM2 - forward.coveredAreaM2) /
+      Math.max(forward.coveredAreaM2, 1e-9);
+    expect(rel).toBeLessThan(1e-3);
+  });
+});
+
+describe("pixel density (DORI)", () => {
+  const rated = (over: Partial<Camera> = {}): Camera =>
+    cam({ resolutionMP: 4, fovDeg: 90, rangeM: 20, ...over });
+
+  it("derives horizontal pixels from megapixels at 16:9", () => {
+    // 4 MP at 16:9 is ~2667 px wide; a 90 deg FOV spans 2*d*tan(45) = 2d metres.
+    // At 1 m that is 2 m of scene, so ~1333 px/m.
+    expect(pxPerMetreAt(rated(), 1)).toBeCloseTo(2666.67 / 2, 0);
+  });
+
+  it("falls off inversely with distance", () => {
+    const near = pxPerMetreAt(rated(), 5);
+    const far = pxPerMetreAt(rated(), 20);
+    expect(near / far).toBeCloseTo(4, 6);
+  });
+
+  it("a wider lens spreads the same sensor thinner", () => {
+    expect(pxPerMetreAt(rated({ fovDeg: 30 }), 10)).toBeGreaterThan(
+      pxPerMetreAt(rated({ fovDeg: 120 }), 10),
+    );
+  });
+
+  it("is unrated (0) without a resolution, and for nonsense distances", () => {
+    expect(pxPerMetreAt(cam(), 10)).toBe(0);
+    expect(pxPerMetreAt(rated(), 0)).toBe(0);
+    expect(pxPerMetreAt(rated(), -5)).toBe(0);
+    expect(doriBand(0)).toBeNull();
+  });
+
+  it("bands follow EN 62676-4 thresholds", () => {
+    expect(doriBand(300)).toBe("identify");
+    expect(doriBand(DORI_PX_PER_M.identify)).toBe("identify");
+    expect(doriBand(200)).toBe("recognise");
+    expect(doriBand(100)).toBe("observe");
+    expect(doriBand(30)).toBe("detect");
+    expect(doriBand(10)).toBe("below");
+  });
+
+  it("doriRangeM is the distance where the band threshold is met", () => {
+    const c = rated();
+    const d = doriRangeM(c, "identify");
+    expect(pxPerMetreAt(c, d)).toBeCloseTo(DORI_PX_PER_M.identify, 6);
+    // Bands nest: you can identify closer than you can merely detect.
+    expect(doriRangeM(c, "identify")).toBeLessThan(doriRangeM(c, "detect"));
+  });
+
+  it("a dome spreads its sensor over the circle, so density is far lower", () => {
+    const dome = rated({ kind: "dome", fovDeg: 360 });
+    expect(pxPerMetreAt(dome, 5)).toBeLessThan(pxPerMetreAt(rated(), 5));
+    expect(pxPerMetreAt(dome, 5)).toBeGreaterThan(0);
   });
 });
