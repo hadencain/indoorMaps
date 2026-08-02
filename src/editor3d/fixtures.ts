@@ -415,16 +415,82 @@ const BUILDERS: Record<FixtureKind, () => RawModel> = {
 // ---- shared materials --------------------------------------------------------
 
 let bodyMaterial: THREE.MeshStandardMaterial | null = null;
+let detailMap: THREE.CanvasTexture | null = null;
+let detailRough: THREE.CanvasTexture | null = null;
+
+/** Fine surface detail shared by every fixture body: a near-white speckle+streak
+ *  map that MULTIPLIES the baked vertex colours (so it adds texture without
+ *  touching hue), plus a matching roughness map.
+ *
+ *  Without it every fixture in the venue was a perfectly uniform shade at a
+ *  single roughness — the reason a bank of slot cabinets read as blocked-out
+ *  primitives even after the models themselves gained real detail. Surface
+ *  variation is what separates "a box the right shape" from "an object".
+ *  Primitive UVs are 0..1 per face, so this lands once per face at a scale that
+ *  suits everything from a chip tray to a bar front. */
+function buildDetailTextures(): void {
+  // fixtures.test.ts asserts the canonical models' real-world SPANS (a slot
+  // cabinet is 0.5–0.8 m wide, a card table is longer than it is deep) and runs
+  // in plain node with no DOM — that geometry maths is the part worth testing and
+  // it should stay runnable without a browser. Skip the canvas work there; the
+  // material simply renders untextured, which no test looks at.
+  if (typeof document === "undefined") return;
+  const S = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = S;
+  const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
+  const rc = document.createElement("canvas");
+  rc.width = rc.height = S;
+  const rctx = rc.getContext("2d") as CanvasRenderingContext2D;
+  const img = ctx.createImageData(S, S);
+  const rimg = rctx.createImageData(S, S);
+  // Deterministic hash noise — never Math.random, so the texture is identical
+  // every session (a surface that shimmers between reloads reads as a bug).
+  const h2 = (x: number, y: number): number => {
+    let h = (Math.imul(x | 0, 0x1f1f1f1f) ^ Math.imul(y | 0, 0x27d4eb2d)) | 0;
+    h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  };
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const speck = h2(x, y);
+      const streak = h2(Math.floor(x / 3), y * 7) * 0.5 + h2(x, Math.floor(y / 9)) * 0.5;
+      // Kept close to 1 on purpose: this modulates, it does not recolour.
+      const v = 0.88 + speck * 0.09 + streak * 0.06;
+      const o = (y * S + x) * 4;
+      const c = Math.round(Math.min(1, v) * 255);
+      img.data[o] = img.data[o + 1] = img.data[o + 2] = c;
+      img.data[o + 3] = 255;
+      const r = Math.round((0.42 + streak * 0.4 + speck * 0.1) * 255);
+      rimg.data[o] = rimg.data[o + 1] = rimg.data[o + 2] = r;
+      rimg.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  rctx.putImageData(rimg, 0, 0);
+  detailMap = new THREE.CanvasTexture(canvas);
+  detailMap.colorSpace = THREE.SRGBColorSpace;
+  detailMap.wrapS = detailMap.wrapT = THREE.RepeatWrapping;
+  detailMap.anisotropy = 8;
+  detailRough = new THREE.CanvasTexture(rc);
+  detailRough.colorSpace = THREE.NoColorSpace;
+  detailRough.wrapS = detailRough.wrapT = THREE.RepeatWrapping;
+  detailRough.anisotropy = 8;
+}
 
 /** The single shared vertex-coloured body material for every fixture kind. One
  *  material ⇒ one draw call per kind's opaque InstancedMesh. Semi-matte / lightly
  *  metallic so fixtures read as solid objects without out-glinting the cameras. */
 function getBodyMaterial(): THREE.MeshStandardMaterial {
   if (!bodyMaterial) {
+    if (!detailMap) buildDetailTextures();
     bodyMaterial = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.6,
-      metalness: 0.2,
+      map: detailMap,
+      roughnessMap: detailRough,
+      roughness: 0.75,
+      metalness: 0.22,
     });
     bodyMaterial.userData.shared = true;
   }
@@ -515,6 +581,10 @@ export function disposeFixtureModels(): void {
   registry.clear();
   bodyMaterial?.dispose();
   bodyMaterial = null;
+  detailMap?.dispose();
+  detailMap = null;
+  detailRough?.dispose();
+  detailRough = null;
   for (const m of emissiveCache.values()) m.dispose();
   emissiveCache.clear();
 }

@@ -154,9 +154,58 @@ export function getEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
   return cached;
 }
 
+// ---- exterior sky ------------------------------------------------------------
+// Separate from the environment map above, and for a different job. The IBL is
+// what surfaces REFLECT; this is what the player SEES through a shopfront, an
+// entrance or a gate. Before it, `scene.background` was a flat fog-coloured fill,
+// so every opening in the building envelope looked out onto dead grey — which
+// made the exterior read as a void rather than as outside.
+
+let skyCached: THREE.Texture | null = null;
+
+/** A vertical sky gradient as an equirect texture: deep zenith blue, pale band at
+ *  the horizon, dull ground below it. Painted rather than shaded so it costs one
+ *  small texture and no per-frame work. */
+export function getSky(): THREE.Texture {
+  if (skyCached) return skyCached;
+  const W = 8; // horizontally uniform — one column would stretch, eight is plenty
+  const H = 128;
+  const data = new Uint8Array(W * H * 4);
+  const zenith: Rgb = [58, 92, 148];
+  const horizon: Rgb = [176, 196, 214];
+  const ground: Rgb = [64, 62, 58];
+  for (let y = 0; y < H; y++) {
+    const v = y / (H - 1); // 0 = zenith
+    let c: Rgb;
+    if (v < 0.5) {
+      // Bias the blend toward the horizon so the pale band is tight, the way a
+      // real sky reads, rather than a linear wash from top to bottom.
+      c = mix(zenith, horizon, smooth(Math.pow(v / 0.5, 2.2)));
+    } else {
+      c = mix(horizon, ground, smooth(Math.min(1, (v - 0.5) / 0.06)));
+    }
+    for (let x = 0; x < W; x++) {
+      const o = (y * W + x) * 4;
+      data[o] = c[0];
+      data[o + 1] = c[1];
+      data[o + 2] = c[2];
+      data[o + 3] = 255;
+    }
+  }
+  const t = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.needsUpdate = true;
+  t.userData.shared = true;
+  skyCached = t;
+  return t;
+}
+
 /** Free the cached environment. Call ONCE from the renderer's dispose(), alongside
  *  disposeMaterials() / disposeFixtureModels(). */
 export function disposeEnvironment(): void {
   cached?.dispose();
   cached = null;
+  skyCached?.dispose();
+  skyCached = null;
 }

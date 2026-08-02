@@ -216,7 +216,10 @@ const BUILDERS: Record<MaterialName, () => MatSpec> = {
       const s = 0.82 + grain * 0.32;
       return [c[0] * s, c[1] * s, c[2] * s];
     });
-    return { map, color: 0xffffff, roughness: 0.97, metalness: 0, repeat: 1 / 3 };
+    // Tile every 1.4 m, not every 3 m. At the old scale the lattice motif was
+    // ~1.5 m across and read as blotches on the floor rather than as a pattern
+    // woven into it — carpet detail is a thing you see at your feet.
+    return { map, color: 0xffffff, roughness: 0.97, metalness: 0, repeat: 1 / 1.4 };
   },
 
   // Even green baize (table felt) — fine even nap. Exposed now for R2 tables.

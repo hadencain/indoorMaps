@@ -16,7 +16,7 @@ import { pointInRing } from "../coverage";
 import { polygonArea } from "../geo";
 import { disposeMaterials, getEmissiveMaterial, getMaterial, materialForCategory } from "./materials";
 import { disposeFixtureModels, getFixtureModel, planFitScale } from "./fixtures";
-import { disposeEnvironment, getEnvironment } from "./env";
+import { disposeEnvironment, getEnvironment, getSky } from "./env";
 import { buildBaseRig, buildLighting, disposeLighting } from "./lighting";
 import { buildWalls, disposeArchitecture } from "./architecture";
 import { buildCeilings, ceilingSpecFor, disposeCeilings, getDeckMaterial } from "./ceilings";
@@ -41,9 +41,12 @@ export interface WalkRendererOpts {
   onQualityChange?(q: RenderQuality): void;
 }
 
-/** Render quality: "high" runs the bloom composer; "low" is a plain forward
- *  render (the perf valve for the GTX 1650 target). */
-export type RenderQuality = "high" | "low";
+/** Render quality.
+ *  - "low"       plain forward render at 1x — the perf valve for the GTX 1650
+ *  - "high"      bloom composer at display resolution; the interactive default
+ *  - "cinematic" supersampled with large shadow maps. Meant for standing still
+ *                and looking, and for the photo-mode capture; not for walking. */
+export type RenderQuality = "high" | "low" | "cinematic";
 
 /** Coverage-cone display policy. `selected` lights only the selected camera;
  *  `nearby` adds up to 8 cameras nearest the player (≤ 9 shadow casters total);
@@ -618,7 +621,10 @@ export class WalkRenderer {
     this.fxMat.userData.shared = true;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(FOG_COLOR);
+    // Sky, not a flat fill. Every opening in the building envelope — entrance,
+    // gate, shopfront on an outside wall — used to look out onto dead grey, which
+    // read as a void rather than as outside.
+    this.scene.background = getSky();
     // A light architectural haze, matched to the background so distant geometry
     // dissolves into it instead of silhouetting against a different colour.
     this.scene.fog = new THREE.FogExp2(FOG_COLOR, BASE_FOG_DENSITY);
@@ -706,6 +712,40 @@ export class WalkRenderer {
     this.recomputeCoverage();
   }
 
+  /**
+   * PHOTO MODE. Render one frame at cinematic fidelity and hand back a PNG blob.
+   *
+   * Nothing is animated while this runs, so the frame budget that governs the
+   * interactive path does not apply — the renderer is temporarily pushed to a
+   * supersampled pixel ratio and 4096² coverage shadow maps, one frame is drawn
+   * through the bloom composer, the canvas is read back, and every setting is
+   * restored. The HUD is DOM and never appears in the WebGL canvas, so there is
+   * nothing to hide.
+   *
+   * `preserveDrawingBuffer` is not set on the context (it costs every frame), so
+   * the read-back has to happen in the SAME task as the draw — before the browser
+   * clears the buffer at the next composite. Hence the synchronous
+   * render-then-toBlob, with the restore in a finally so a failed capture can't
+   * strand the renderer at 3x pixel ratio.
+   */
+  async capturePhoto(): Promise<Blob | null> {
+    const prevQuality = this.quality;
+    const prevManual = this.manualQuality;
+    try {
+      if (prevQuality !== "cinematic") this.applyQuality("cinematic");
+      // Draw immediately rather than waiting for the next tick, so the read-back
+      // below sees this frame.
+      this.renderFrame();
+      const canvas = this.renderer.domElement;
+      return await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((b) => resolve(b), "image/png");
+      });
+    } finally {
+      if (prevQuality !== "cinematic") this.applyQuality(prevQuality);
+      this.manualQuality = prevManual;
+    }
+  }
+
   /** Public quality control (the HUD button). A manual choice latches
    *  `manualQuality`, permanently disabling the auto-fallback so it never
    *  overrides the operator. Never disposes the pipeline — toggling back to High
@@ -720,14 +760,23 @@ export class WalkRenderer {
   /** Device pixel ratio per quality. Low renders at 1× (≈4× fewer fragments than
    *  a 2× display) — the single biggest fill-rate lever on the GTX 1650. */
   private pixelRatioForQuality(q: RenderQuality): number {
-    return q === "low" ? 1 : Math.min(window.devicePixelRatio, 2);
+    if (q === "low") return 1;
+    // Cinematic supersamples: render well above display resolution and let the
+    // downscale do the anti-aliasing. Plain SSAA is unglamorous but it is the
+    // single largest quality-per-line win available for a still — it cleans every
+    // edge, every thin mullion and every specular sparkle at once, which no
+    // post-process AA does as well. Capped at 3 so a 4K display doesn't try to
+    // allocate a 12K drawing buffer.
+    if (q === "cinematic") return Math.min(window.devicePixelRatio * 2, 3);
+    return Math.min(window.devicePixelRatio, 2);
   }
 
   /** Coverage shadow-map resolution per quality. Low uses 1024² (≈4× cheaper per
    *  shadow render than 2048²) while KEEPING shadows so coverage stays
    *  occlusion-honest — up to 9 of these render every frame. */
   private shadowMapSizeForQuality(): number {
-    return this.quality === "low" ? 1024 : 2048;
+    if (this.quality === "low") return 1024;
+    return this.quality === "cinematic" ? 4096 : 2048;
   }
 
   private applyQuality(q: RenderQuality): void {
@@ -1783,9 +1832,15 @@ export class WalkRenderer {
       this.sampleAutoQuality(dt);
     }
 
-    if (this.quality === "high" && this.pipeline) this.pipeline.render();
-    else this.renderer.render(this.scene, this.camera);
+    this.renderFrame();
   };
+
+  /** Draw one frame on the current quality's path. Split out of tick() so photo
+   *  mode can force a draw and read the canvas back in the same task. */
+  private renderFrame(): void {
+    if (this.quality !== "low" && this.pipeline) this.pipeline.render();
+    else this.renderer.render(this.scene, this.camera);
+  }
 
   /** One-shot auto quality fallback. While locked at High (real in-scene load),
    *  collect frame times past a warmup window; once the sample window fills,
