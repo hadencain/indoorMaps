@@ -46,3 +46,21 @@
 - Phase C2 / P6: coverage + blind-spot analysis — `computeCoverage` unions the
   occlusion-clipped visibility polygons and differences against the floor. Adds the
   `polygon-clipping` dependency (above).
+
+## AAA venue render pass (2026-08-01/02)
+
+No new dependencies. Everything is generated in code, which is what keeps the
+offline / single-file / no-network guarantee intact:
+
+- `src/editor3d/env.ts` — float32 equirect radiance map painted in code, run
+  through `THREE.PMREMGenerator` for image-based lighting, plus a painted sky
+  gradient for `scene.background`. No `.hdr`, no RGBELoader, no CDN.
+- `src/editor3d/lighting.ts` — luminaire geometry + zone light rig.
+- `src/editor3d/architecture.ts` — walls, openings, shopfronts; tenant signage is
+  drawn into one canvas atlas (no font files beyond the already-bundled Geist).
+- `src/editor3d/ceilings.ts`, `vertical.ts`, `props.ts` — ceiling systems, stair
+  flights, set dressing.
+
+`three` / `@types/three` remain devDependencies used only under `src/editor3d/`,
+which is code-split out of the initial chunk and never enters the single-file
+viewer bundle (verified: `grep -c editor3d dist-viewer/viewer.js` → 0).
