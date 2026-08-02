@@ -199,12 +199,15 @@ interface MatSpec {
 }
 
 const BUILDERS: Record<MaterialName, () => MatSpec> = {
-  // Low-key dark casino carpet: a subtle two-tone diamond lattice + fine grain.
-  // Deliberately desaturated and dark so the floor recedes under the cameras.
+  // Patterned casino carpet: a two-tone diamond lattice + fine grain.
+  // Lifted out of near-black (was 26,22,30): that value was chosen when the whole
+  // world was dimmed for the camera-primary look, and under a properly lit ceiling
+  // it inverted the natural contrast of a room — a bright soffit over a floor that
+  // read as a hole. Still the darkest surface in the venue, just not a void.
   carpet: () => {
     const S = 512;
-    const base: Rgb = [26, 22, 30];
-    const accent: Rgb = [42, 35, 50];
+    const base: Rgb = [52, 42, 58];
+    const accent: Rgb = [78, 62, 88];
     const map = paint(S, (_px, _py, u, v) => {
       const grain = fbmTiled(u * 24, v * 24, 24, 4);
       const lattice = Math.abs(Math.sin(u * Math.PI * 4) * Math.sin(v * Math.PI * 4));

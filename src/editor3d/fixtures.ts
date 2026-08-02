@@ -117,8 +117,8 @@ const STAGE_DECK = 0x1b1920;
 // Emissive accents — kept modest on purpose: the CCTV coverage cones + camera
 // bodies stay the brightest, most saturated things in frame (camera-primary,
 // the spec's core constraint). The human tunes intensities after screenshots.
-const SCREEN = 0x4fb8f0; // slot screen — cool cyan (recedes vs the green cones)
-const SCREEN_I = 0.9;
+const SCREEN = 0x6fa8c8; // slot screen — a lit LCD, not a neon panel (was over-saturated cyan)
+const SCREEN_I = 0.55;
 const BOTTLE = 0xffb060; // back-bar bottle glow — warm amber, tiny area
 const BOTTLE_I = 0.7;
 const STAGE_LIGHT = 0xffd39a; // truss lamps — warm

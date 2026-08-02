@@ -252,6 +252,11 @@ interface Placement {
   x: number;
   y: number;
   zone: LightZone;
+  /** The FINISHED ceiling of the host unit — which is not the level's ceiling once
+   *  ceilings.ts gives each space its own height. Mounting to the level ceiling
+   *  put every fitting in a shop or corridor ABOVE its own ceiling tile, i.e.
+   *  invisible, lighting the back of the plane. */
+  ceilM: number;
   /** Longest axis of the host unit, radians — fittings run WITH the room, not
    *  across it. A ceiling of troffers all facing the same way regardless of the
    *  room they're in is an instant tell. */
@@ -306,7 +311,10 @@ function ringArea(ring: MetreXY[]): number {
 
 /** Lay fittings out on each unit's own grid, aligned to that unit's principal axis
  *  and inset half a cell so a row never lands hard against a wall. */
-function placeFittings(patches: SceneFloorPatch[]): Placement[] {
+function placeFittings(
+  patches: SceneFloorPatch[],
+  ceilingFor: (patch: SceneFloorPatch) => number,
+): Placement[] {
   const out: Placement[] = [];
   for (const patch of patches) {
     if (patch.ring.length < 3) continue;
@@ -316,11 +324,12 @@ function placeFittings(patches: SceneFloorPatch[]): Placement[] {
     const step = zone.spacingM;
     const yaw = ringYaw(patch.ring);
     const area = ringArea(patch.ring);
+    const ceilM = ceilingFor(patch);
     let n = 0;
     for (let x = minX + step / 2; x <= maxX && n < MAX_PER_UNIT; x += step) {
       for (let y = minY + step / 2; y <= maxY && n < MAX_PER_UNIT; y += step) {
         if (!pointInRing([x, y], patch.ring)) continue;
-        out.push({ x, y, zone, yaw, area });
+        out.push({ x, y, zone, yaw, area, ceilM });
         n++;
         if (out.length >= MAX_TOTAL) return out;
       }
@@ -333,7 +342,9 @@ function placeFittings(patches: SceneFloorPatch[]): Placement[] {
  *  lights (already positioned) and the fitting placements the caller can reuse. */
 export interface LightingBuild {
   meshes: THREE.Object3D[];
-  lights: THREE.Light[];
+  /** Lights AND their spot targets — a SpotLight aims at its target's world
+   *  position, so the target Object3D must be added to the scene graph too. */
+  lights: THREE.Object3D[];
 }
 
 /** Real-light budget. Forward rendering recompiles per light count and costs
@@ -355,21 +366,29 @@ const LIGHT_MIN_SEP_M = 14;
 export function buildLighting(
   patches: SceneFloorPatch[],
   ceilingM: number,
+  ceilingFor: (patch: SceneFloorPatch) => number = () => ceilingM,
   minClearM = 2.15,
 ): LightingBuild {
   const meshes: THREE.Object3D[] = [];
-  const lights: THREE.Light[] = [];
-  const placements = placeFittings(patches);
+  const lights: THREE.Object3D[] = [];
+  const placements = placeFittings(patches, ceilingFor);
 
   // ---- visible fittings ------------------------------------------------------
-  // Bucket by kind+kelvin so each bucket is one housing draw and one face draw.
-  const buckets = new Map<string, { kind: Exclude<LuminaireKind, "none">; zone: LightZone; items: Placement[] }>();
+  // Bucket by kind+kelvin AND mount height, so each bucket is one housing draw and
+  // one face draw. Height is in the key because instances in a bucket share one
+  // geometry and differ only by matrix — mixing a 2.8 m office and a 7 m hall in
+  // one bucket is fine mathematically, but keying it keeps the mount clamp below
+  // a single value per bucket rather than per instance.
+  const buckets = new Map<
+    string,
+    { kind: Exclude<LuminaireKind, "none">; zone: LightZone; ceilM: number; items: Placement[] }
+  >();
   for (const p of placements) {
     const kind = p.zone.luminaire as Exclude<LuminaireKind, "none">;
-    const key = `${kind}:${Math.round(p.zone.kelvin / 100)}:${p.zone.emissiveI}`;
+    const key = `${kind}:${Math.round(p.zone.kelvin / 100)}:${p.zone.emissiveI}:${p.ceilM.toFixed(2)}`;
     const b = buckets.get(key);
     if (b) b.items.push(p);
-    else buckets.set(key, { kind, zone: p.zone, items: [p] });
+    else buckets.set(key, { kind, zone: p.zone, ceilM: p.ceilM, items: [p] });
   }
 
   const m = new THREE.Matrix4();
@@ -379,17 +398,18 @@ export function buildLighting(
   const pos = new THREE.Vector3();
 
   for (const b of buckets) {
-    const { kind, zone, items } = b[1];
+    const { kind, zone, ceilM, items } = b[1];
     const fit = getFitting(kind);
-    // Hang from the ceiling, but never low enough to hit a walking player.
-    const mountY = Math.max(ceilingM, minClearM + fit.dropM);
+    // Hang from THIS space's finished ceiling, but never low enough to hit a
+    // walking player.
+    const mountY = Math.max(ceilM, minClearM + fit.dropM);
     const housing = new THREE.InstancedMesh(fit.housing, getHousingMaterial(), items.length);
     const face = new THREE.InstancedMesh(fit.face, getFaceMaterial(zone.kelvin, zone.emissiveI), items.length);
     for (let i = 0; i < items.length; i++) {
       const p = items[i];
       // model (x,y) → three (x, ·, −y); yaw about +Y matches atan2(dy,dx) there.
       q.setFromAxisAngle(up, p.yaw);
-      pos.set(p.x, Math.min(mountY, ceilingM), -p.y);
+      pos.set(p.x, Math.min(mountY, ceilM), -p.y);
       m.compose(pos, q, one);
       housing.setMatrixAt(i, m);
       face.setMatrixAt(i, m);
@@ -448,19 +468,35 @@ export function buildLighting(
   const DECAY = 1.25;
   const TARGET_L = 0.3; // linear value a reference floor should read directly under a lamp
   const REF_ALBEDO = 0.3; // mid-grey; the venue floor materials sit near this
-  const h = Math.max(2, ceilingM - 0.4);
-  const solved = (TARGET_L * Math.PI * Math.pow(h, DECAY)) / REF_ALBEDO;
   for (const p of finalPicks) {
-    const light = new THREE.PointLight(
+    // Solved PER LAMP against the height of the space it hangs in, so a 2.8 m
+    // office and a 7 m gaming hall both land on target.
+    const h = Math.max(2, p.ceilM - 0.4);
+    const solved = (TARGET_L * Math.PI * Math.pow(h, DECAY)) / REF_ALBEDO;
+    // A DOWNLIGHT, not a bare bulb. A PointLight 0.4 m under a ceiling delivers
+    // intensity/0.4^decay to the plane it hangs from — roughly 3x what it puts on
+    // the floor 6 m below — so every ceiling in the venue clipped to flat white
+    // and lost its coffers, tile grid and cove entirely. A downward spot with a
+    // wide cone excludes the soffit above it, which is also what a real recessed
+    // or pendant fitting does. Same cost: these never cast shadows (the shadow
+    // budget belongs to the coverage cones).
+    const light = new THREE.SpotLight(
       kelvinColor(p.zone.kelvin),
       solved * p.zone.weight,
       // Reach far enough to overlap neighbours at LIGHT_MIN_SEP_M spacing, so the
       // floor between two lamps doesn't fall into a hole.
       Math.max(40, h * 8),
+      1.25, // ≈72° half-angle: a broad wash, not a theatre special
+      0.75, // soft edge, so the pools blend instead of showing hard circles
       DECAY,
     );
     light.position.set(p.x, h, -p.y);
+    light.target.position.set(p.x, 0, -p.y);
+    light.castShadow = false;
     lights.push(light);
+    // A SpotLight aims at its target's WORLD position, so the target must be in
+    // the scene graph or every lamp silently aims at the origin instead.
+    lights.push(light.target);
   }
 
   return { meshes, lights };

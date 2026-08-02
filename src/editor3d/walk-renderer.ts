@@ -19,6 +19,8 @@ import { disposeFixtureModels, getFixtureModel, planFitScale } from "./fixtures"
 import { disposeEnvironment, getEnvironment } from "./env";
 import { buildBaseRig, buildLighting, disposeLighting } from "./lighting";
 import { buildWalls, disposeArchitecture } from "./architecture";
+import { buildCeilings, ceilingSpecFor, disposeCeilings, getDeckMaterial } from "./ceilings";
+import { buildVertical, disposeVertical } from "./vertical";
 import { BloomPipeline } from "./post";
 import {
   EYE_M,
@@ -859,6 +861,8 @@ export class WalkRenderer {
     disposeLighting();
     disposeEnvironment();
     disposeArchitecture();
+    disposeCeilings();
+    disposeVertical();
     this.signTexture?.dispose();
     this.signTexture = null;
     // R4: free the bloom composer + all its passes/render targets before the
@@ -933,11 +937,25 @@ export class WalkRenderer {
 
     // Ceiling — acoustic tile (DoubleSide baked into the material). castShadow OFF
     // so coverage lights aren't killed by the plane they hang from (spike-proven).
+    // Ceilings (ceilings.ts). The footprint plane is now only the STRUCTURAL
+    // soffit — a concrete deck closing the box — and each unit builds its own
+    // finished ceiling below it at a height chosen for what the space is, with a
+    // bulkhead closing the step. A single tile plane across the whole footprint
+    // gave every venue the same ceiling and, worse, the same section: floor at 0,
+    // ceiling at H, nothing in between anywhere.
     if (scene.footprintRing) {
-      const ceil = new THREE.Mesh(flatGeo(scene.footprintRing, scene.ceilingM + 0.02), getMaterial("ceilingTile"));
-      ceil.castShadow = false;
-      g.add(ceil);
+      const deck = new THREE.Mesh(
+        flatGeo(scene.footprintRing, scene.ceilingM + 0.02),
+        getDeckMaterial(),
+      );
+      deck.castShadow = false;
+      g.add(deck);
     }
+    for (const m of buildCeilings(scene.floorPatches, scene.ceilingM)) g.add(m);
+
+    // Stair flights + lift doors (vertical.ts). Stair and elevator units used to
+    // render as ordinary rooms — a stairwell with a flat floor.
+    for (const m of buildVertical(scene.floorPatches, scene.ceilingM).meshes) g.add(m);
 
     // Base rig + visible luminaires + bounded zone lights (lighting.ts). This also
     // supersedes the old emissive ceiling-panel grid and the pit pendants: the
@@ -1367,7 +1385,14 @@ export class WalkRenderer {
    *  was lit identically by nothing the player could see. */
   private addHouseLights(scene: Scene3D, group: THREE.Group): void {
     for (const o of buildBaseRig()) group.add(o);
-    const { meshes, lights } = buildLighting(scene.floorPatches, scene.ceilingM);
+    // Fittings mount to each space's FINISHED ceiling (ceilings.ts), not the
+    // level's structural one — otherwise every shop and corridor light sits above
+    // its own ceiling tile, invisible, lighting the back of the plane. Passed as a
+    // callback rather than imported inside lighting.ts, because ceilings.ts
+    // already depends on lighting.ts for zone colour temperature.
+    const { meshes, lights } = buildLighting(scene.floorPatches, scene.ceilingM, (p) =>
+      Math.min(ceilingSpecFor(p.category, p.id).preferredM, scene.ceilingM),
+    );
     for (const m of meshes) group.add(m);
     for (const l of lights) group.add(l);
   }
