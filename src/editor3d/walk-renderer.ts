@@ -16,6 +16,8 @@ import { pointInRing } from "../coverage";
 import { polygonArea } from "../geo";
 import { disposeMaterials, getEmissiveMaterial, getMaterial, materialForCategory } from "./materials";
 import { disposeFixtureModels, getFixtureModel, planFitScale } from "./fixtures";
+import { disposeEnvironment, getEnvironment } from "./env";
+import { buildBaseRig, buildLighting, disposeLighting } from "./lighting";
 import { BloomPipeline } from "./post";
 import {
   EYE_M,
@@ -79,29 +81,10 @@ const AUTO_FRAME_MS_BUDGET = 28; // median locked frame time (ms) above which Hi
 // 1/0 coverage spots, so the static ~19 is the floor, not the ceiling.) The 12 → 8
 // house cut buys headroom against that ~28 worst case — where the 9 shadow spots
 // dominate cost — rather than trading against an imaginary sub-20 static budget.
-const MAX_HOUSE_LIGHTS = 8; // forward-rendering fill-rate budget for warm downlights
-const HOUSE_LIGHT_STEP_M = 22; // MINIMUM downlight grid spacing (widened per-floor to stay under the budget)
 const MAX_SHADOW_LIGHTS = 9; // hard cap on shadow-casting coverage spotlights
 const BASEBOARD_H = 0.12; // baseboard trim height, metres (spec R1)
-const CEILING_PANEL_STEP_M = 7; // recessed-light panel grid spacing, metres
-const MAX_CEILING_PANELS = 24; // cap on emissive ceiling panels (look-only, no lights)
-const PANEL_EMISSIVE_I = 2.2; // recessed ceiling-panel emissive level (recede-able)
 
-// R3 pit pendants: ONE warm shadow-free PointLight per gaming-table cluster so the
-// pits pool in light and read as the room's focus. Table centroids are grid-
-// bucketed (PIT_GRID_M) into pits; the densest MAX_PIT_LIGHTS pits get a pendant.
-const MAX_PIT_LIGHTS = 8;
-const PIT_GRID_M = 12; // bucket size for merging nearby tables into one pit light
-const PIT_LIGHT_H = 2.4; // pendant hang height, metres (clamped under the ceiling)
-const PIT_LIGHT_COLOR = 0xffbf7a; // warm pendant
-const PIT_LIGHT_INTENSITY = 50;
-const PIT_LIGHT_RANGE = 18;
-const PIT_LIGHT_DECAY = 1.6;
-
-// Table kinds that anchor a pit light, and (a subset) that get a ring of stools.
-const PIT_TABLE_KINDS: ReadonlySet<FixtureKind> = new Set<FixtureKind>([
-  "blackjack", "roulette", "baccarat", "poker", "craps", "wheel",
-]);
+// Card-table kinds that get a ring of stools.
 const STOOL_TABLE_KINDS: ReadonlySet<FixtureKind> = new Set<FixtureKind>([
   "blackjack", "roulette", "baccarat", "poker", "craps",
 ]);
@@ -111,6 +94,8 @@ const STOOL_GAP = 0.35; // gap outside the table footprint the stool ring sits a
 // R3 neon signage — thin emissive valance along the top of each functional room's
 // walls, coloured by function bucket (matches src/categories.ts functionBucket).
 // Modest intensity + small area so it never outshines the green coverage cones.
+// (House-light constants removed with the old rig — lighting.ts owns level, colour
+// temperature, fitting rhythm and the ceiling-height compensation now.)
 const SIGNAGE_H_BELOW_CEIL = 0.28; // valance drop below the ceiling, metres
 /** Storefront-fascia height, metres: where signage actually reads from eye level.
  *  Valances hang at the ceiling in ordinary rooms but must NOT ride a 7 m casino
@@ -118,12 +103,6 @@ const SIGNAGE_H_BELOW_CEIL = 0.28; // valance drop below the ceiling, metres
  *  no matter how tall the hall. At the 3.2 m default this is inert (2.92 < 3.0),
  *  so legacy venues render unchanged. */
 const SIGNAGE_FASCIA_H = 3.0;
-/** House-light height the base intensity was tuned at (the 3.2 m default ceiling
- *  × the 0.7 factor below). Taller ceilings lift the lights away from the floor,
- *  so intensity is compensated back up — otherwise open high-ceiling venues go
- *  murky, the exact regression fix f05fa11 landed for. */
-const HOUSE_LIGHT_TUNED_H = 3.2 * 0.7;
-const HOUSE_LIGHT_MAX_BOOST = 3;
 const SIGNAGE_VAL_H = 0.14; // valance strip height, metres
 const SIGNAGE_VAL_D = 0.05; // valance strip depth, metres
 const SIGNAGE_INSET_M = 0.08; // pull the strip inside the room so neighbours don't co-plane
@@ -133,13 +112,14 @@ const NEON_BAR = 0x3ad0e6; // bar / sportsbook — cyan
 const NEON_PREMIUM = 0xd94fce; // high-limit / poker / showroom — magenta
 const NEON_FNB = 0xffb060; // food & retail — warm
 
-// Camera-primary world-recede: when a camera is selected the world dims + the fog
-// deepens so the lit coverage cone + emphasized camera body dominate. Applied by
-// scaling stored base values (exact restore), never a rebuild.
-const BASE_FOG_DENSITY = 0.005;
-const FOCUS_LIGHT_SCALE = 0.4; // house/pit/ambient/hemi/fill dimmed to this on focus
-const FOCUS_FOG_SCALE = 1.5; // fog density deepened by this on focus
-const FOCUS_EMISSIVE_SCALE = 0.4; // signage + ceiling-panel glow dimmed to this on focus
+// VENUE-PRIMARY (AAA render pass, decision 1). The camera-primary world-recede —
+// which dimmed every light, deepened the fog and dulled the signage whenever a
+// camera was selected — is GONE. The venue is the subject; a selected camera is
+// emphasised by its own body material and gizmo, not by darkening the building
+// around it. Fog is now a light architectural haze that gives a 200 m concourse
+// depth, not the murk that used to hide an under-lit world.
+const BASE_FOG_DENSITY = 0.0021;
+const FOG_COLOR = 0x2a3038;
 
 // model metre-space [x, y] (x-east, y-north) -> three (x, h, -y), Y-up.
 const v3 = (x: number, y: number, h: number): THREE.Vector3 => new THREE.Vector3(x, h, -y);
@@ -539,18 +519,6 @@ export class WalkRenderer {
     emissiveIntensity: 0.85,
   });
 
-  // Emissive recessed-light panels on the ceiling — a look-only "the ceiling is
-  // lit" read (the actual light objects arrive in R3). Shared across every panel
-  // in the merged mesh; tagged so clearGroup skips it and it's freed only in
-  // dispose().
-  private readonly panelMat = new THREE.MeshStandardMaterial({
-    color: 0x0b0b0d,
-    emissive: new THREE.Color(0xffe6c2),
-    emissiveIntensity: PANEL_EMISSIVE_I,
-    roughness: 1,
-    metalness: 0,
-  });
-
   // R3 props: one shared low-poly stool geometry + material, instanced per floor
   // (one InstancedMesh for every stool around every card table). Tagged shared so
   // clearGroup frees only the per-rebuild instance buffers; the geometry/material
@@ -576,15 +544,6 @@ export class WalkRenderer {
     roughness: 0.6,
     metalness: 0.2,
   });
-
-  // R3 camera-primary world-recede state. `focused` is true while a camera is
-  // selected; applyWorldDim then scales every recede-able light (base stashed in
-  // userData.baseIntensity), deepens the fog, and dims the emissive accents listed
-  // in worldEmissive (each with its true base level for exact restore). The
-  // coverage spotlights (coverageGroup) and camera-body emissive are NEVER in
-  // scope — they stay full so the cone + selected body pop.
-  private focused = false;
-  private worldEmissive: Array<{ mat: THREE.MeshStandardMaterial; base: number }> = [];
 
   private readonly raycaster = new THREE.Raycaster();
   private readonly reticle = new THREE.Vector2(0, 0);
@@ -635,10 +594,11 @@ export class WalkRenderer {
     // highlights into a filmic range; sRGB output so the procedural albedo
     // textures (tagged SRGBColorSpace) decode correctly.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.3;
+    // Venue-primary: the rig itself now carries the level, so exposure comes back
+    // toward neutral. At the old 1.3 the brighter rig + IBL clipped highlights.
+    this.renderer.toneMappingExposure = 1.05;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
-    this.panelMat.userData.shared = true;
     this.stoolGeo.userData.shared = true;
     this.stoolMat.userData.shared = true;
     this.seatGeo.userData.shared = true;
@@ -646,11 +606,18 @@ export class WalkRenderer {
     this.fxMat.userData.shared = true;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0a0c10);
-    // Slightly thinner than the pre-realism 0.006 so the new procedural surfaces
-    // read, while the world still recedes into cool haze behind the cones. The
-    // camera-primary world-recede deepens this from the stored BASE_FOG_DENSITY.
-    this.scene.fog = new THREE.FogExp2(0x0a0c10, BASE_FOG_DENSITY);
+    this.scene.background = new THREE.Color(FOG_COLOR);
+    // A light architectural haze, matched to the background so distant geometry
+    // dissolves into it instead of silhouetting against a different colour.
+    this.scene.fog = new THREE.FogExp2(FOG_COLOR, BASE_FOG_DENSITY);
+    // Image-based lighting. Without this every metal, glass and polished-stone
+    // surface reflects pure black and reads as plastic — see env.ts. One PMREM
+    // build, shared for the life of the module.
+    this.scene.environment = getEnvironment(this.renderer);
+    // Part of the same illumination budget as the base rig (lighting.ts): the IBL
+    // is here for SPECULAR — giving metal and glass something to reflect — not to
+    // be a third ambient term stacked on top of the ambient and hemisphere ones.
+    this.scene.environmentIntensity = 0.55;
     this.scene.add(this.worldGroup, this.camBodyGroup, this.frustumGroup, this.coverageGroup);
 
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.05, 600);
@@ -867,10 +834,6 @@ export class WalkRenderer {
     this.domeCamGeo.dispose();
     this.camMat.dispose();
     this.camSelMat.dispose();
-    // Free the shared procedural materials/textures + the emissive panel material
-    // exactly once. clearGroup skips shared materials by design (they survive
-    // every rebuild), so this is the only place they're released.
-    this.panelMat.dispose();
     // R3 shared prop resources (stool geometry + material) — freed once here; the
     // per-rebuild stool InstancedMesh buffers were released by clearGroup.
     this.stoolGeo.dispose();
@@ -886,6 +849,10 @@ export class WalkRenderer {
     // Free the cached canonical fixture geometries + their shared body/emissive
     // materials exactly once (clearGroup skips these userData.shared resources).
     disposeFixtureModels();
+    // Phase A: the cached luminaire geometries + housing/lit-face materials, and
+    // the PMREM environment target. Same contract — shared, so freed only here.
+    disposeLighting();
+    disposeEnvironment();
     // R4: free the bloom composer + all its passes/render targets before the
     // renderer (UnrealBloomPass owns a mip chain of targets that would otherwise
     // leak on every walk-mode teardown).
@@ -909,10 +876,6 @@ export class WalkRenderer {
   private rebuildWorld(scene: Scene3D): void {
     this.clearGroup(this.worldGroup);
     const g = this.worldGroup;
-    // Recede-able emissive accents are re-collected each rebuild (the shared
-    // materials persist; the meshes don't). applyWorldDim at the end applies the
-    // current focus state to the freshly built lights/emissive/fog.
-    this.worldEmissive = [];
 
     // Troweled-concrete ground under everything. PlaneGeometry UVs are 0..1;
     // rescale them to metres so the shared concrete texture tiles at real-world
@@ -966,60 +929,15 @@ export class WalkRenderer {
       const ceil = new THREE.Mesh(flatGeo(scene.footprintRing, scene.ceilingM + 0.02), getMaterial("ceilingTile"));
       ceil.castShadow = false;
       g.add(ceil);
-      this.addCeilingPanels(scene, g);
     }
 
+    // Base rig + visible luminaires + bounded zone lights (lighting.ts). This also
+    // supersedes the old emissive ceiling-panel grid and the pit pendants: the
+    // fittings ARE the panels now, and the gaming zone's weight-1.0 pendants win
+    // the real-light budget where the pit lights used to be hand-placed.
     this.addHouseLights(scene, g);
-    // R3 atmosphere: pit pendants (bounded warm PointLights) + neon signage
-    // valances (emissive geometry, no light objects).
-    this.addPitLights(scene, g);
+    // Neon signage valances (emissive geometry, no light objects).
     this.addSignage(scene, g);
-
-    // Apply the current camera-primary recede state to the freshly built lights,
-    // emissive accents and fog (persists across a world-only edit while focused).
-    this.applyWorldDim();
-  }
-
-  /** Sparse grid of small emissive quads on the ceiling so it reads as lit — no
-   *  light objects (that's R3), just bright geometry. Merged into one mesh under
-   *  the shared emissive panel material; capped at MAX_CEILING_PANELS. */
-  private addCeilingPanels(scene: Scene3D, group: THREE.Group): void {
-    const ring = scene.footprintRing;
-    if (!ring) return;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const [x, y] of ring) {
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-    }
-    const spanX = Math.max(maxX - minX, 1);
-    const spanY = Math.max(maxY - minY, 1);
-    const step = Math.max(CEILING_PANEL_STEP_M, Math.sqrt((spanX * spanY) / MAX_CEILING_PANELS));
-    const hy = scene.ceilingM - 0.03;
-    const quads: THREE.BufferGeometry[] = [];
-    for (let x = minX + step / 2; x <= maxX && quads.length < MAX_CEILING_PANELS; x += step) {
-      for (let y = minY + step / 2; y <= maxY && quads.length < MAX_CEILING_PANELS; y += step) {
-        if (!pointInRing([x, y], ring)) continue;
-        const q = new THREE.PlaneGeometry(0.7, 1.3);
-        q.rotateX(Math.PI / 2); // face down (−Y)
-        q.translate(x, hy, -y); // model (x,y) → three (x, ·, −y)
-        quads.push(q);
-      }
-    }
-    if (quads.length === 0) return;
-    const merged = mergeGeometries(quads, false);
-    quads.forEach((q) => q.dispose());
-    if (!merged) return;
-    const mesh = new THREE.Mesh(merged, this.panelMat);
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    group.add(mesh);
-    // Recede-able: the ceiling glow dims with the world when a camera is focused.
-    this.worldEmissive.push({ mat: this.panelMat, base: PANEL_EMISSIVE_I });
   }
 
   private addWalls(scene: Scene3D, group: THREE.Group): void {
@@ -1436,8 +1354,6 @@ export class WalkRenderer {
         mesh.castShadow = false;
         mesh.receiveShadow = false;
         group.add(mesh);
-        // Recede-able: dims with the world when a camera is focused.
-        this.worldEmissive.push({ mat, base: FX_BOTTLE_I });
       }
     }
   }
@@ -1456,109 +1372,20 @@ export class WalkRenderer {
     group.add(mesh);
   }
 
+  /** The whole lighting layer, delegated to lighting.ts: the always-on base rig,
+   *  the VISIBLE fittings (instanced per kind + colour temperature, laid out on
+   *  each room's own grid and aligned to its principal axis), and the bounded set
+   *  of real lights that shade the space — each taking its host zone's colour
+   *  temperature so a 2700 K bar and a 5000 K plant room read as different places.
+   *
+   *  Replaces the old rig wholesale. That one placed 8 INVISIBLE PointLights on a
+   *  footprint-wide grid that ignored rooms entirely, so every space in the venue
+   *  was lit identically by nothing the player could see. */
   private addHouseLights(scene: Scene3D, group: THREE.Group): void {
-    // Rebalanced for ACES tone mapping (which darkens/desaturates the raw image):
-    // raised so the space isn't muddy, but kept cool + dim so the green coverage
-    // cones and camera bodies stay the brightest, most saturated things in frame.
-    // Every recede-able light stamps its full intensity in userData.baseIntensity
-    // so applyWorldDim can scale it and restore it exactly (camera-primary focus).
-    const ambient = new THREE.AmbientLight(0x8090b0, 1.4);
-    ambient.userData.baseIntensity = 1.4;
-    const hemi = new THREE.HemisphereLight(0x46506e, 0x14161a, 1.9);
-    hemi.userData.baseIntensity = 1.9;
-    group.add(ambient, hemi);
-    // Soft overhead "house lighting" fill — a straight-down DirectionalLight has
-    // no distance falloff, so it lights every floor evenly and makes the floor
-    // materials actually read (the warm PointLights below sit just under the
-    // ceiling and only pool light directly beneath each). No shadow: the shadow
-    // budget belongs to the coverage cones. Kept cool + moderate so cameras/cones
-    // stay the brightest, most saturated things in frame (camera-primary).
-    const fill = new THREE.DirectionalLight(0xbcc6e0, 2.0);
-    fill.userData.baseIntensity = 2.0;
-    fill.position.set(0, 10, 0);
-    fill.target.position.set(0, 0, 0);
-    group.add(fill, fill.target);
-
-    const ring = scene.footprintRing;
-    const pts = ring ?? scene.floorPatches.flatMap((p) => p.ring);
-    if (pts.length === 0) return;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const [x, y] of pts) {
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-    }
-    // Sit the warm downlights lower than flush-to-ceiling so they wash the FLOOR,
-    // not just blast the ceiling tile 0.3 m above them.
-    const h = Math.min(scene.ceilingM - 0.3, scene.ceilingM * 0.7);
-    // Widen the grid step on large floors so the bounded light budget spreads
-    // evenly across the whole footprint instead of clustering in the min-corner
-    // (a plain cap fills row-major and bottom-left-biases). sqrt(area/budget)
-    // yields ≈budget cells; the HOUSE_LIGHT_STEP_M floor keeps small rooms from
-    // over-lighting. Range-55 lights overlap generously at these spacings.
-    const spanX = Math.max(maxX - minX, 1);
-    const spanY = Math.max(maxY - minY, 1);
-    const step = Math.max(HOUSE_LIGHT_STEP_M, Math.sqrt((spanX * spanY) / MAX_HOUSE_LIGHTS));
-    // Inverse-square-ish falloff means lifting a light from 2.24 m to 4.9 m costs
-    // the floor most of its light. Compensate by the same decay exponent so floor
-    // illuminance holds roughly constant as ceilings rise (1× at the 3.2 m default
-    // — legacy venues unchanged), capped so a freak ceiling can't blow out bloom.
-    const DECAY = 1.25;
-    const boost = Math.min(
-      HOUSE_LIGHT_MAX_BOOST,
-      Math.max(1, Math.pow(h / HOUSE_LIGHT_TUNED_H, DECAY)),
-    );
-    const intensity = 55 * boost;
-    const range = Math.max(60, h * 12);
-    let placed = 0;
-    for (let x = minX + step / 2; x <= maxX && placed < MAX_HOUSE_LIGHTS; x += step) {
-      for (let y = minY + step / 2; y <= maxY && placed < MAX_HOUSE_LIGHTS; y += step) {
-        if (ring && !pointInRing([x, y], ring)) continue;
-        const p = new THREE.PointLight(0xffd9a0, intensity, range, DECAY);
-        p.userData.baseIntensity = intensity;
-        p.position.copy(v3(x, y, h));
-        group.add(p);
-        placed++;
-      }
-    }
-  }
-
-  /** Pit pendants: cluster the gaming-table fixtures into pit regions (grid-bucket
-   *  their centroids at PIT_GRID_M) and drop ONE warm, shadow-free PointLight over
-   *  each of the densest MAX_PIT_LIGHTS pits at PIT_LIGHT_H, so the tables pool in
-   *  light as the room's focus. Bounded + shadow-free — merged into the forward
-   *  light budget (see MAX_HOUSE_LIGHTS). No-op on floors with no tables. */
-  private addPitLights(scene: Scene3D, group: THREE.Group): void {
-    const buckets = new Map<string, { x: number; y: number; n: number }>();
-    for (const p of scene.fixturePrisms) {
-      if (!PIT_TABLE_KINDS.has(p.kind as FixtureKind)) continue;
-      const c = centroid(p.ring);
-      if (!c) continue;
-      const key = `${Math.floor(c[0] / PIT_GRID_M)}:${Math.floor(c[1] / PIT_GRID_M)}`;
-      const b = buckets.get(key);
-      if (b) {
-        b.x += c[0];
-        b.y += c[1];
-        b.n++;
-      } else {
-        buckets.set(key, { x: c[0], y: c[1], n: 1 });
-      }
-    }
-    if (buckets.size === 0) return;
-    // Densest pits first, so a floor with more clusters than the cap lights the
-    // busiest tables rather than whichever bucket hashed first.
-    const pits = [...buckets.values()].sort((a, b) => b.n - a.n).slice(0, MAX_PIT_LIGHTS);
-    const h = Math.min(PIT_LIGHT_H, scene.ceilingM - 0.2);
-    for (const pit of pits) {
-      const light = new THREE.PointLight(PIT_LIGHT_COLOR, PIT_LIGHT_INTENSITY, PIT_LIGHT_RANGE, PIT_LIGHT_DECAY);
-      light.userData.baseIntensity = PIT_LIGHT_INTENSITY;
-      light.position.copy(v3(pit.x / pit.n, pit.y / pit.n, h));
-      group.add(light);
-    }
+    for (const o of buildBaseRig()) group.add(o);
+    const { meshes, lights } = buildLighting(scene.floorPatches, scene.ceilingM);
+    for (const m of meshes) group.add(m);
+    for (const l of lights) group.add(l);
   }
 
   /** Neon signage: a thin emissive valance along the top of every functional
@@ -1605,7 +1432,6 @@ export class WalkRenderer {
       mesh.castShadow = false;
       mesh.receiveShadow = false;
       group.add(mesh);
-      this.worldEmissive.push({ mat, base: SIGNAGE_EMISSIVE_I });
     }
   }
 
@@ -1667,34 +1493,6 @@ export class WalkRenderer {
     group.add(stools);
   }
 
-  /** Camera-primary world-recede. Scales every recede-able light to its stored
-   *  base × the focus factor, deepens the fog, and dims the signage/ceiling
-   *  emissive — or restores all three exactly when unfocused. Cheap: property
-   *  writes only, no rebuild, no allocation. The coverage spotlights and camera-
-   *  body emissive are out of scope and stay full. */
-  private applyWorldDim(): void {
-    const lf = this.focused ? FOCUS_LIGHT_SCALE : 1;
-    // Every stamped light is a DIRECT child of worldGroup, so a shallow walk
-    // suffices (this runs per-tick during a pose drag — no deep traverse).
-    for (const o of this.worldGroup.children) {
-      const base = o.userData.baseIntensity;
-      if (typeof base === "number" && (o as THREE.Light).isLight) {
-        (o as THREE.Light).intensity = base * lf;
-      }
-    }
-    const ef = this.focused ? FOCUS_EMISSIVE_SCALE : 1;
-    for (const e of this.worldEmissive) e.mat.emissiveIntensity = e.base * ef;
-    const fog = this.scene.fog;
-    if (fog instanceof THREE.FogExp2) {
-      fog.density = BASE_FOG_DENSITY * (this.focused ? FOCUS_FOG_SCALE : 1);
-    }
-  }
-
-  /** Toggle the world-recede on (a camera is selected) or off, then apply it. */
-  private setFocus(on: boolean): void {
-    this.focused = on;
-    this.applyWorldDim();
-  }
 
   private rebuildCameraBodies(scene: Scene3D): void {
     this.clearCameraBodies();
@@ -1781,9 +1579,8 @@ export class WalkRenderer {
 
   private applySelection(): void {
     this.clearGroup(this.frustumGroup);
-    // Camera-primary: a selected camera makes the rest of the world recede (dim
-    // lights, deepen fog, dim signage) so the lit cone + emphasized body dominate.
-    this.setFocus(this.selectedId != null);
+    // VENUE-PRIMARY: selecting a camera no longer dims the building. Emphasis is
+    // carried entirely by the camera's own body material and its gizmo.
     // Emphasise the selected camera body by swapping its shared material pointer
     // to the bright selection material (mutating emissiveIntensity would hit the
     // ONE shared base material and light every camera). Cheap: a pointer swap
@@ -1862,7 +1659,21 @@ export class WalkRenderer {
   }
 
   private addCoverageLight(pose: SceneCameraPose): void {
-    const spot = new THREE.SpotLight(0x39ff88, 30, pose.rangeM, 0.5, 0.3, 0);
+    // VENUE-PRIMARY re-tune, solved rather than guessed — same trap as the house
+    // rig, one step worse. `decay: 0` means NO distance falloff, so within the cone
+    // irradiance IS the intensity, and a lit floor of albedo A returns
+    // intensity·A/π. The shipped value of 30 therefore returned ≈2.9 linear: nearly
+    // 3× overexposed on its own, invisible only because the old rig dimmed the
+    // whole world to 40% around it. Raising it for a bright venue (the obvious
+    // move, and wrong) turned `nearby 8` into a solid green screen.
+    //
+    // Target instead: the cone should ADD roughly a third of a stop over the lit
+    // floor, so it reads as coverage tinting a space you can still see, and eight
+    // overlapping cones stay legible as eight cones.
+    //     intensity = L_target · π / A_ref = 0.42 · π / 0.3 ≈ 4.4
+    // Decay stays 0 on purpose: coverage is a binary "seen / not seen" claim, so
+    // the far edge of a sightline must read exactly as strongly as the near edge.
+    const spot = new THREE.SpotLight(0x39ff88, 4.4, pose.rangeM, 0.5, 0.22, 0);
     spot.castShadow = true;
     const sm = this.shadowMapSizeForQuality();
     spot.shadow.mapSize.set(sm, sm);
