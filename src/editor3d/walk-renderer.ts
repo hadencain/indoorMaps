@@ -21,6 +21,7 @@ import { buildBaseRig, buildLighting, disposeLighting } from "./lighting";
 import { buildWalls, disposeArchitecture } from "./architecture";
 import { buildCeilings, ceilingSpecFor, disposeCeilings, getDeckMaterial } from "./ceilings";
 import { buildVertical, disposeVertical } from "./vertical";
+import { buildProps, disposeProps, hash01 } from "./props";
 import { BloomPipeline } from "./post";
 import {
   EYE_M,
@@ -121,6 +122,10 @@ const NEON_FNB = 0xffb060; // food & retail — warm
 // depth, not the murk that used to hide an under-lit world.
 const BASE_FOG_DENSITY = 0.0021;
 const FOG_COLOR = 0x2a3038;
+
+/** Scratch colour for per-instance tinting — reused so the fixture loop never
+ *  allocates a THREE.Color per instance. */
+const TINT = new THREE.Color();
 
 // model metre-space [x, y] (x-east, y-north) -> three (x, h, -y), Y-up.
 const v3 = (x: number, y: number, h: number): THREE.Vector3 => new THREE.Vector3(x, h, -y);
@@ -863,6 +868,7 @@ export class WalkRenderer {
     disposeArchitecture();
     disposeCeilings();
     disposeVertical();
+    disposeProps();
     this.signTexture?.dispose();
     this.signTexture = null;
     // R4: free the bloom composer + all its passes/render targets before the
@@ -934,6 +940,19 @@ export class WalkRenderer {
 
     // R3 props: stools ringed around the card tables (one InstancedMesh total).
     this.addStools(scene, g);
+
+    // Phase D set dressing (props.ts): ceiling services on the grid, amenity
+    // cabinets/pylons/exit signs from the venue's OWN amenity points, bins, and
+    // queue stanchions at counters. All derived from existing data, all instanced.
+    for (const m of buildProps(
+      scene.floorPatches,
+      scene.amenities,
+      scene.fixturePrisms,
+      (p) => Math.min(ceilingSpecFor(p.category, p.id).preferredM, scene.ceilingM),
+      (p) => ceilingSpecFor(p.category, p.id).system !== "exposed",
+    ).meshes) {
+      g.add(m);
+    }
 
     // Ceiling — acoustic tile (DoubleSide baked into the material). castShadow OFF
     // so coverage lights aren't killed by the plane they hang from (spike-proven).
@@ -1083,6 +1102,18 @@ export class WalkRenderer {
       q.setFromAxisAngle(up, frame.angleRad);
       m.compose(pos, q, scl);
       body.setMatrixAt(n, m);
+      // Per-instance tint. A bank of 40 slot cabinets rendered from one canonical
+      // model is 40 pixel-identical clones, and the eye reads a repeating field
+      // faster than it reads any single object in it — the clone pattern was more
+      // visible than the model detail. A small deterministic value/warmth shift per
+      // fixture id breaks it up at zero geometry cost (instanceColor MULTIPLIES the
+      // material, so this modulates the baked vertex colours rather than replacing
+      // them). Keyed by id, so a rebuild never reshuffles the pattern.
+      const h1 = hash01(p.id);
+      const h2 = hash01(`${p.id}:w`);
+      const v = 0.88 + h1 * 0.24; // value
+      const warm = (h2 - 0.5) * 0.06; // warm/cool drift
+      body.setColorAt(n, TINT.setRGB(v + warm, v, v - warm));
       if (emissive) emissive.setMatrixAt(n, m);
       n++;
     }
@@ -1094,6 +1125,7 @@ export class WalkRenderer {
     }
     body.count = n;
     body.instanceMatrix.needsUpdate = true;
+    if (body.instanceColor) body.instanceColor.needsUpdate = true;
     body.castShadow = true;
     body.receiveShadow = true;
     group.add(body);

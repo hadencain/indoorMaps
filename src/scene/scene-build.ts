@@ -9,7 +9,15 @@
 // grep-audited): three.js, React, MapLibre, the zustand store. Only pure
 // sibling modules (types / render tables / coverage constants / geo).
 
-import type { Building, CameraKind, Category, MetreXY, OpeningStyle, Unit } from "../types";
+import type {
+  AmenityKind,
+  Building,
+  CameraKind,
+  Category,
+  MetreXY,
+  OpeningStyle,
+  Unit,
+} from "../types";
 import {
   DEFAULT_FIXTURE_HEIGHT_M,
   FIXTURE_HEIGHT_M,
@@ -150,6 +158,17 @@ export interface SceneCameraPose {
   mount: "ceiling" | "wall" | "column";
 }
 
+/** A point-of-interest marker resolved for the 3D scene. Amenities are already
+ *  authored in every venue (exits, ATMs, info desks, first aid) and produced NO
+ *  geometry at all — they were a 2D badge and nothing else. They are the cheapest
+ *  honest density in the building, because the positions are real data rather
+ *  than scattered decoration. */
+export interface SceneAmenity {
+  id: string;
+  kind: AmenityKind;
+  at: MetreXY;
+}
+
 /** Everything the 3D renderer needs for one floor, in local metres.
  *  `footprintRing` is null when the ordinal has no usable footprint polygon
  *  (no slab, no exterior envelope). */
@@ -162,6 +181,7 @@ export interface Scene3D {
   slabPrisms: ScenePrism[];
   structurePrisms: ScenePrism[];
   fixturePrisms: ScenePrism[];
+  amenities: SceneAmenity[];
   cameras: SceneCameraPose[];
 }
 
@@ -489,6 +509,12 @@ export function build3dScene(b: Building, ordinal: number): Scene3D {
     fixturePrisms.push({ id: f.id, kind: f.kind, ring: f.polygon, baseM: 0, topM });
   }
 
+  const amenities: SceneAmenity[] = [];
+  for (const a of b.amenities ?? []) {
+    if (a.ordinal !== ordinal) continue;
+    amenities.push({ id: a.id, kind: a.kind, at: a.at });
+  }
+
   const cameras: SceneCameraPose[] = [];
   for (const c of b.cameras) {
     if (c.ordinal !== ordinal) continue;
@@ -522,6 +548,7 @@ export function build3dScene(b: Building, ordinal: number): Scene3D {
     slabPrisms,
     structurePrisms,
     fixturePrisms,
+    amenities,
     cameras,
   };
 }

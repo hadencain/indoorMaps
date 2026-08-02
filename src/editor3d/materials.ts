@@ -206,8 +206,8 @@ const BUILDERS: Record<MaterialName, () => MatSpec> = {
   // read as a hole. Still the darkest surface in the venue, just not a void.
   carpet: () => {
     const S = 512;
-    const base: Rgb = [52, 42, 58];
-    const accent: Rgb = [78, 62, 88];
+    const base: Rgb = [58, 40, 40];
+    const accent: Rgb = [92, 66, 50];
     const map = paint(S, (_px, _py, u, v) => {
       const grain = fbmTiled(u * 24, v * 24, 24, 4);
       const lattice = Math.abs(Math.sin(u * Math.PI * 4) * Math.sin(v * Math.PI * 4));
