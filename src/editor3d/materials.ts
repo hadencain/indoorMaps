@@ -29,6 +29,7 @@ export type MaterialName =
   | "wallPaint"
   | "ceilingTile"
   | "brushedMetal"
+  | "glass"
   | "darkGlass";
 
 // ---- deterministic value noise ---------------------------------------------
@@ -386,6 +387,24 @@ const BUILDERS: Record<MaterialName, () => MatSpec> = {
     return { map, roughnessMap, color: 0xffffff, roughness: 0.45, metalness: 0.85, repeat: 1 };
   },
 
+  // Clear architectural glazing for shopfronts and vision panels. Nearly
+  // colourless and very smooth, so almost all of its read comes from the
+  // environment map's reflection — which is exactly why it only started looking
+  // like glass once env.ts existed. Transparency is set on the material (below),
+  // not in the texture, so the pane still takes a specular highlight.
+  glass: () => {
+    const S = 128;
+    const base: Rgb = [176, 190, 196];
+    const map = paint(S, (_px, _py, u, v) => {
+      // Very faint large-scale unevenness — real float glass is not perfectly flat,
+      // and a dead-flat pane reads as a hole rather than as glazing.
+      const n = fbmTiled(u * 3, v * 3, 3, 2);
+      const s = 0.97 + n * 0.06;
+      return [base[0] * s, base[1] * s, base[2] * s];
+    });
+    return { map, color: 0xffffff, roughness: 0.05, metalness: 0, repeat: 1 / 3 };
+  },
+
   // Smoked dark glass — for later dome caps / screens. Near-black, low roughness,
   // partly metallic so it reflects. Exposed now, unused in R1.
   darkGlass: () => {
@@ -416,14 +435,22 @@ function toTexture(canvas: HTMLCanvasElement, srgb: boolean, repeat: number): TH
 
 function buildMaterial(name: MaterialName): THREE.MeshStandardMaterial {
   const s = BUILDERS[name]();
+  const isGlass = name === "glass";
   const mat = new THREE.MeshStandardMaterial({
     color: s.color ?? 0xffffff,
+    // Glazing is drawn from both sides (you see a shopfront from the concourse and
+    // from inside the shop), never writes depth (so what's behind it still draws),
+    // and never casts — a shadow-casting transparent pane would darken the very
+    // interior it's meant to reveal.
+    transparent: isGlass,
+    opacity: isGlass ? 0.22 : 1,
+    depthWrite: !isGlass,
     map: toTexture(s.map, true, s.repeat),
     normalMap: s.normal ? toTexture(s.normal, false, s.repeat) : null,
     roughnessMap: s.roughnessMap ? toTexture(s.roughnessMap, false, s.repeat) : null,
     roughness: s.roughness,
     metalness: s.metalness,
-    side: s.side ?? THREE.FrontSide,
+    side: s.side ?? (isGlass ? THREE.DoubleSide : THREE.FrontSide),
     emissive: new THREE.Color(s.emissive ?? 0x000000),
   });
   if (mat.normalMap && s.normalScale != null) mat.normalScale.set(s.normalScale, s.normalScale);
@@ -481,6 +508,31 @@ export function materialNameForCategory(category: Category, id?: string): Materi
 /** Shared material for a floor category (see materialNameForCategory). */
 export function materialForCategory(category: Category, id?: string): THREE.MeshStandardMaterial {
   return getMaterial(materialNameForCategory(category, id));
+}
+
+// Wall finish → material family. Distinct from the FLOOR table above: a restroom
+// has a tiled floor AND tiled walls, but a storage room's concrete floor sits
+// under painted block, and the building envelope is concrete on both. A single
+// wallPaint everywhere was one of the reasons every space read the same.
+const FINISH_MATERIAL: Record<string, MaterialName> = {
+  envelope: "concrete",
+  restroom: "tile",
+  storage: "concrete",
+  mechanical: "concrete",
+  stairs: "concrete",
+  elevator: "brushedMetal",
+  retail: "wallPaint",
+  lobby: "marble",
+  room: "wallPaint",
+  office: "wallPaint",
+  corridor: "wallPaint",
+  outside: "concrete",
+};
+
+/** Shared material for a wall finish key (SceneWall.finish — a unit Category, or
+ *  "envelope" for the building outline). */
+export function materialForWallFinish(finish: string): THREE.MeshStandardMaterial {
+  return getMaterial(FINISH_MATERIAL[finish] ?? "wallPaint");
 }
 
 // ---- emissive (signage / neon) materials -----------------------------------

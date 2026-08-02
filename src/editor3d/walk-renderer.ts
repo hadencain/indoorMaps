@@ -18,10 +18,10 @@ import { disposeMaterials, getEmissiveMaterial, getMaterial, materialForCategory
 import { disposeFixtureModels, getFixtureModel, planFitScale } from "./fixtures";
 import { disposeEnvironment, getEnvironment } from "./env";
 import { buildBaseRig, buildLighting, disposeLighting } from "./lighting";
+import { buildWalls, disposeArchitecture } from "./architecture";
 import { BloomPipeline } from "./post";
 import {
   EYE_M,
-  WALL_THICKNESS_M,
   type Scene3D,
   type SceneCameraPose,
   type ScenePrism,
@@ -82,7 +82,6 @@ const AUTO_FRAME_MS_BUDGET = 28; // median locked frame time (ms) above which Hi
 // house cut buys headroom against that ~28 worst case — where the 9 shadow spots
 // dominate cost — rather than trading against an imaginary sub-20 static budget.
 const MAX_SHADOW_LIGHTS = 9; // hard cap on shadow-casting coverage spotlights
-const BASEBOARD_H = 0.12; // baseboard trim height, metres (spec R1)
 
 // Card-table kinds that get a ring of stools.
 const STOOL_TABLE_KINDS: ReadonlySet<FixtureKind> = new Set<FixtureKind>([
@@ -545,6 +544,12 @@ export class WalkRenderer {
     metalness: 0.2,
   });
 
+  /** The current rebuild's shopfront-signage atlas, held so the NEXT rebuild can
+   *  free it. clearGroup disposes geometry and non-shared materials but cannot
+   *  reach a texture referenced through a material's emissiveMap, so without this
+   *  every world rebuild would leak a 2048² canvas texture. */
+  private signTexture: THREE.CanvasTexture | null = null;
+
   private readonly raycaster = new THREE.Raycaster();
   private readonly reticle = new THREE.Vector2(0, 0);
   private readonly keys = new Set<string>();
@@ -853,6 +858,9 @@ export class WalkRenderer {
     // the PMREM environment target. Same contract — shared, so freed only here.
     disposeLighting();
     disposeEnvironment();
+    disposeArchitecture();
+    this.signTexture?.dispose();
+    this.signTexture = null;
     // R4: free the bloom composer + all its passes/render targets before the
     // renderer (UnrealBloomPass owns a mip chain of targets that would otherwise
     // leak on every walk-mode teardown).
@@ -940,45 +948,21 @@ export class WalkRenderer {
     this.addSignage(scene, g);
   }
 
+  /** Walls, delegated to architecture.ts: hole-free walls stay instanced per
+   *  finish, walls carrying an opening are built as spans around the hole, and
+   *  every opening gets its furniture (lining + leaf, or mullions + glazing + a
+   *  lettered signage band). Also emits the baseboard and cornice trim.
+   *
+   *  The sign atlas texture is per-rebuild, so it is stashed and disposed with the
+   *  rest of the world on the next rebuild — clearGroup only frees geometry and
+   *  non-shared materials, and a CanvasTexture referenced by a material's
+   *  emissiveMap would otherwise leak one 2048² texture per rebuild. */
   private addWalls(scene: Scene3D, group: THREE.Group): void {
-    const segs = scene.wallSegs;
-    if (segs.length === 0) return;
-    // Wall boxes (unit box scaled to len × height × thickness) and a matching
-    // baseboard box (short, slightly proud of the wall face) share one per-segment
-    // transform — one InstancedMesh each, both with shared materials.
-    const wallProto = new THREE.BoxGeometry(1, 1, WALL_THICKNESS_M);
-    const baseProto = new THREE.BoxGeometry(1, 1, WALL_THICKNESS_M * 1.15);
-    const walls = new THREE.InstancedMesh(wallProto, getMaterial("wallPaint"), segs.length);
-    const bases = new THREE.InstancedMesh(baseProto, getMaterial("woodPanel"), segs.length);
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
-    let n = 0;
-    for (const s of segs) {
-      const dx = s.b[0] - s.a[0];
-      const dy = s.b[1] - s.a[1];
-      const len = Math.hypot(dx, dy);
-      if (len < 1e-6) continue;
-      const top = s.topM;
-      const cx = (s.a[0] + s.b[0]) / 2;
-      const cy = (s.a[1] + s.b[1]) / 2;
-      // model heading atan2(dy,dx); in three (-y) space the yaw about +Y matches.
-      q.setFromAxisAngle(up, Math.atan2(dy, dx));
-      m.compose(v3(cx, cy, top / 2), q, new THREE.Vector3(len, top, 1));
-      walls.setMatrixAt(n, m);
-      m.compose(v3(cx, cy, BASEBOARD_H / 2), q, new THREE.Vector3(len, BASEBOARD_H, 1));
-      bases.setMatrixAt(n, m);
-      n++;
-    }
-    walls.count = n;
-    bases.count = n;
-    walls.instanceMatrix.needsUpdate = true;
-    bases.instanceMatrix.needsUpdate = true;
-    walls.castShadow = true;
-    walls.receiveShadow = true;
-    bases.castShadow = true;
-    bases.receiveShadow = true;
-    group.add(walls, bases);
+    if (scene.wallSegs.length === 0) return;
+    const { meshes, signTexture } = buildWalls(scene.wallSegs);
+    for (const m of meshes) group.add(m);
+    this.signTexture?.dispose();
+    this.signTexture = signTexture;
   }
 
   private addPrismGroup(
