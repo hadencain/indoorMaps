@@ -331,9 +331,13 @@ function rouletteTable(): RawModel {
   // Radial frets between the pockets.
   for (let i = 0; i < 16; i++) {
     const a = (i / 16) * Math.PI * 2;
-    const g = box(0.105, 0.016, 0.008, wx + Math.cos(a) * 0.068, 0.962, Math.sin(a) * 0.068, METAL);
+    // ORDER MATTERS: build at the origin, ROTATE, then translate into place.
+    // Translating first and rotating after spins the fret about the world origin
+    // rather than its own centre, which flings all sixteen of them outward — the
+    // exact "spider lying on the table" this rebuild was meant to remove.
+    const g = box(0.09, 0.014, 0.008, 0, 0, 0, METAL);
     g.rotateY(-a);
-    g.translate(0, 0, 0);
+    g.translate(wx + Math.cos(a) * 0.075, 0.962, Math.sin(a) * 0.075);
     metal.push(g);
   }
   metal.push(cyl(0.035, 0.05, 0.08, 12, wx, 0.995, 0, METAL)); // turret
