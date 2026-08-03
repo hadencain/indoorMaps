@@ -27,6 +27,11 @@ const TARGET_RISER_M = 0.175;
 const MIN_GOING_M = 0.24;
 /** Handrail height above the nosing line, metres. */
 const RAIL_H = 0.95;
+/** Bounds on what counts as a stair CORE. Beyond these a `stairs`-tagged unit is
+ *  an escalator hall, a ramp, or a back-of-house circulation run — none of which a
+ *  straight-flight builder should fill. */
+const MAX_CORE_LENGTH_M = 16;
+const MAX_CORE_WIDTH_M = 8;
 
 interface Frame {
   cx: number;
@@ -118,12 +123,18 @@ function frameBox(
 function buildFlight(
   f: Frame,
   riseM: number,
+  ceilingM: number,
   treads: THREE.BufferGeometry[],
   metal: THREE.BufferGeometry[],
-): void {
+): boolean {
   const n = Math.max(3, Math.round(riseM / TARGET_RISER_M));
   const riser = riseM / n;
   const runAvail = Math.max(1, f.lengthM - 0.6); // leave a landing at the top
+  // A flight must FIT. At a 7 m storey this wants 40 treads, and 40 treads at the
+  // minimum going need 9.6 m of run — so a short core cannot hold one flight and
+  // would need a switchback, which this builder does not model. Emitting a
+  // squashed 40-tread ladder anyway is worse than emitting nothing, so bail.
+  if (n * MIN_GOING_M > runAvail) return false;
   const going = Math.max(MIN_GOING_M, runAvail / n);
   const halfW = Math.max(0.5, Math.min(f.widthM / 2 - 0.12, 1.1));
   const u0 = -f.lengthM / 2 + 0.3;
@@ -140,17 +151,24 @@ function buildFlight(
   // Stringers down each side, and a handrail above them following the pitch.
   const topY = riseM;
   const runEnd = u0 + n * going;
+  // The top-landing rail sits at topY + RAIL_H, which at a full-storey rise is
+  // ABOVE the ceiling — it poked through the slab into the floor above. Clamp
+  // every rail under it.
+  const railCap = ceilingM - 0.1;
   for (const side of [-1, 1]) {
     const v = side * halfW;
     // The rail is a thin box spanning the run; it is drawn horizontal at the
     // midpoint height rather than raked, because a raked box needs a rotation
     // about the run-perpendicular axis that this frame deliberately does not
     // carry — and at handrail scale the difference is invisible while walking.
-    frameBox(metal, f, u0, runEnd, v - 0.04, v + 0.04, topY / 2 + RAIL_H - 0.03, topY / 2 + RAIL_H + 0.03);
-    frameBox(metal, f, runEnd, f.lengthM / 2, v - 0.04, v + 0.04, topY + RAIL_H - 0.03, topY + RAIL_H + 0.03);
+    const midRail = Math.min(topY / 2 + RAIL_H, railCap);
+    const topRail = Math.min(topY + RAIL_H, railCap);
+    frameBox(metal, f, u0, runEnd, v - 0.04, v + 0.04, midRail - 0.03, midRail + 0.03);
+    frameBox(metal, f, runEnd, f.lengthM / 2, v - 0.04, v + 0.04, topRail - 0.03, topRail + 0.03);
   }
   // Top landing.
   frameBox(treads, f, runEnd, f.lengthM / 2, -halfW, halfW, 0, topY);
+  return true;
 }
 
 /** Elevator doors: a centre-parting pair set into the longest wall, with a call
@@ -189,8 +207,14 @@ export function buildVertical(patches: SceneFloorPatch[], riseM: number): Vertic
     // whole hall would emit a 60 m flight, which is worse than emitting nothing.
     if (!f || f.lengthM < 1.5 || f.widthM < 0.9) continue;
     if (patch.category === "stairs") {
-      if (f.lengthM > 30) continue;
-      buildFlight(f, Math.max(2.4, riseM), treads, metal);
+      // A STAIR CORE, not any space that happens to be tagged `stairs`. The casino
+      // labels a 16x24 m escalator hall and a 12x52 m back-of-house run this way,
+      // and a stair flight built into either is the thing that reads as scaffolding
+      // standing in the middle of a room. Real cores are narrow and not very long;
+      // anything outside that is some other kind of vertical space, and this
+      // builder has nothing honest to put in it.
+      if (f.lengthM > MAX_CORE_LENGTH_M || f.widthM > MAX_CORE_WIDTH_M) continue;
+      buildFlight(f, Math.max(2.4, riseM), riseM, treads, metal);
     } else if (patch.category === "elevator") {
       if (f.lengthM > 12) continue;
       buildElevatorDoors(f, metal);

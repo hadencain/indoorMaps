@@ -43,8 +43,11 @@ const CORNICE_H = 0.16;
 /** How far trim stands proud of the wall face. */
 const TRIM_PROUD = 0.02;
 
-/** Depth of a door/opening reveal lining, metres. */
-const LINING_D = 0.06;
+/** How far the reveal lining wraps around the hole edge, metres. */
+const REVEAL_T = 0.04;
+/** Architrave width and how far it stands proud of each wall face, metres. */
+const CASING_W = 0.11;
+const CASING_PROUD = 0.022;
 /** Door leaf thickness, metres. */
 const LEAF_T = 0.045;
 /** Storefront mullion spacing, metres — the bay rhythm of a glazed shopfront. */
@@ -288,10 +291,29 @@ function addLining(
 ): void {
   const x0 = h.atM - h.widthM / 2;
   const x1 = h.atM + h.widthM / 2;
-  const d = WALL_THICKNESS_M + LINING_D;
-  localBox(parts, m, len, x0 - 0.05, x0, h.sillM, h.headM + 0.05, d);
-  localBox(parts, m, len, x1, x1 + 0.05, h.sillM, h.headM + 0.05, d);
-  localBox(parts, m, len, x0 - 0.05, x1 + 0.05, h.headM, h.headM + 0.05, d);
+
+  // REVEAL: line the inside faces of the hole across the wall's full thickness.
+  // Without this the opening is a zero-thickness cut and you see the wall's paper
+  // edge — the single reason doorways read as cutouts in card rather than as
+  // holes through something solid. This is the part that gives an opening depth.
+  const rd = WALL_THICKNESS_M * 0.98;
+  localBox(parts, m, len, x0 - REVEAL_T, x0, h.sillM, h.headM, rd);
+  localBox(parts, m, len, x1, x1 + REVEAL_T, h.sillM, h.headM, rd);
+  localBox(parts, m, len, x0 - REVEAL_T, x1 + REVEAL_T, h.headM - REVEAL_T, h.headM, rd);
+
+  // CASING: architrave standing proud of BOTH wall faces, wide enough to catch a
+  // highlight. The old lining was 5 cm wide and barely proud of the wall, so at
+  // any distance it collapsed to a black line around a hole.
+  const cw = CASING_W;
+  const cd = WALL_THICKNESS_M + CASING_PROUD * 2;
+  localBox(parts, m, len, x0 - cw, x0, h.sillM, h.headM + cw, cd);
+  localBox(parts, m, len, x1, x1 + cw, h.sillM, h.headM + cw, cd);
+  localBox(parts, m, len, x0 - cw, x1 + cw, h.headM, h.headM + cw, cd);
+
+  // THRESHOLD: a flat sill across the opening. Real doorways have a floor
+  // transition; without one the two floor finishes butt against each other in
+  // mid-air under the frame.
+  localBox(parts, m, len, x0, x1, h.sillM, h.sillM + 0.015, cd);
 }
 
 /** One or two door leaves filling the hole, hung on the host-unit side. */
