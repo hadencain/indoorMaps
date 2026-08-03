@@ -34,6 +34,7 @@
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import type { FixtureKind } from "../types";
 
 export type FixtureFit = "bbox" | "length";
@@ -45,7 +46,9 @@ export type FixtureFit = "bbox" | "length";
  *  the canonical bounding-box height (metres for "bbox", unit for "length"). */
 export interface FixtureModel {
   geometry: THREE.BufferGeometry;
-  material: THREE.Material;
+  /** One material, or an array indexed by the geometry's groups when the model
+   *  uses more than one material class. InstancedMesh accepts both. */
+  material: THREE.Material | THREE.Material[];
   emissiveGeometry?: THREE.BufferGeometry;
   emissiveMaterial?: THREE.Material;
   fit: FixtureFit;
@@ -118,7 +121,7 @@ const STAGE_DECK = 0x1b1920;
 // bodies stay the brightest, most saturated things in frame (camera-primary,
 // the spec's core constraint). The human tunes intensities after screenshots.
 const SCREEN = 0x6fa8c8; // slot screen — a lit LCD, not a neon panel (was over-saturated cyan)
-const SCREEN_I = 0.55;
+const SCREEN_I = 1.35; // a slot screen is a bright backlit panel, not an ambient tint
 const BOTTLE = 0xffb060; // back-bar bottle glow — warm amber, tiny area
 const BOTTLE_I = 0.7;
 const STAGE_LIGHT = 0xffd39a; // truss lamps — warm
@@ -146,6 +149,29 @@ function colored(geo: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
 
 function box(w: number, h: number, d: number, x: number, y: number, z: number, hex: number): THREE.BufferGeometry {
   const g = new THREE.BoxGeometry(w, h, d);
+  g.translate(x, y, z);
+  return colored(g, hex);
+}
+
+/** A CHAMFERED box. A perfectly sharp 90-degree edge is one of the strongest
+ *  "this is CG" cues there is: real manufactured edges are broken, and that break
+ *  catches a highlight which is what tells the eye the object has mass. The radius
+ *  is clamped well under the smallest dimension so a thin part degrades to a plain
+ *  box instead of collapsing into itself. Segments stay at 1 — a chamfer only
+ *  needs to exist, not to be round. */
+function bbox(
+  w: number,
+  h: number,
+  d: number,
+  x: number,
+  y: number,
+  z: number,
+  hex: number,
+  radius = 0.012,
+): THREE.BufferGeometry {
+  const r = Math.min(radius, Math.min(w, h, d) * 0.32);
+  if (r <= 1e-4) return box(w, h, d, x, y, z, hex);
+  const g = new RoundedBoxGeometry(w, h, d, 1, r);
   g.translate(x, y, z);
   return colored(g, hex);
 }
@@ -213,8 +239,26 @@ function racetrack(
 
 // ---- raw model spec ----------------------------------------------------------
 
+// A fixture's parts, split by MATERIAL CLASS. `body` is the matte default;
+// anything placed in one of the other buckets shades with its own
+// roughness/metalness instead.
+//
+// THE PROBLEM THIS SOLVES: every fixture in the venue shared ONE vertex-coloured
+// material at a single roughness and metalness, so a green felt bed, a chrome
+// rail, a timber apron and a glass screen all shaded identically — the tables and
+// slot cabinets read as flat-shaded primitives with paint on them no matter how
+// much geometric detail they gained. Colour alone cannot say "this is fabric and
+// that is metal"; the specular response has to differ.
+//
+// An InstancedMesh takes a material ARRAY when its geometry carries groups, so
+// this stays one InstancedMesh per kind — a few draw calls instead of one, not a
+// mesh per fixture.
 interface RawModel {
   body: THREE.BufferGeometry[];
+  metal?: THREE.BufferGeometry[];
+  felt?: THREE.BufferGeometry[];
+  timber?: THREE.BufferGeometry[];
+  glass?: THREE.BufferGeometry[];
   emissive?: THREE.BufferGeometry[];
   emissiveColor?: number;
   emissiveIntensity?: number;
@@ -225,37 +269,79 @@ interface RawModel {
  *  Fixed real height ≈0.9 m, "bbox" fit. */
 function cardTable(ends: 1 | 2, feltDepth: number, apronDepth: number): RawModel {
   const body: THREE.BufferGeometry[] = [];
-  // Stability foot + pedestal.
-  body.push(box(0.5, 0.05, 0.4, 0, 0.025, 0, METAL_DARK));
-  body.push(box(0.34, 0.72, 0.3, 0, 0.41, 0, WOOD_DARK));
-  // Wooden apron (the table body / rail) then the felt inset on top.
-  body.push(...racetrack(0.98, apronDepth, 0.12, 0.82, WOOD, ends));
-  body.push(...racetrack(0.9, feltDepth, 0.04, 0.9, FELT, ends));
-  // Padded leather bumper along the two long edges.
-  body.push(box(0.86, 0.05, 0.05, 0, 0.9, feltDepth / 2, LEATHER));
-  body.push(box(0.86, 0.05, 0.05, 0, 0.9, -feltDepth / 2, LEATHER));
-  // Chip tray at the −X (dealer) end.
-  body.push(box(0.22, 0.05, 0.09, -0.34, 0.93, 0, CHIP_TRAY));
-  return { body, fit: "bbox" };
+  const metal: THREE.BufferGeometry[] = [];
+  const felt: THREE.BufferGeometry[] = [];
+  const timber: THREE.BufferGeometry[] = [];
+
+  // Pedestal: chromed column on a weighted base, not a bare box.
+  metal.push(cyl(0.3, 0.34, 0.06, 20, 0, 0.03, 0, METAL_DARK));
+  metal.push(cyl(0.11, 0.13, 0.62, 16, 0, 0.4, 0, METAL));
+  metal.push(cyl(0.2, 0.2, 0.05, 16, 0, 0.74, 0, METAL_DARK));
+
+  // Apron in timber, with a chamfer so the edge catches light.
+  for (const g of racetrack(0.98, apronDepth, 0.13, 0.82, WOOD, ends)) timber.push(g);
+  // Felt bed, inset and slightly proud of the apron's inner edge.
+  for (const g of racetrack(0.9, feltDepth, 0.035, 0.895, FELT, ends)) felt.push(g);
+
+  // Padded leather armrest bolster running the customer edges — a rounded tube,
+  // which is what actually reads as upholstery rather than a square rib.
+  timber.push(cyl(0.045, 0.045, 0.88, 10, 0, 0.9, feltDepth / 2, LEATHER, "x"));
+  if (ends === 2) timber.push(cyl(0.045, 0.045, 0.88, 10, 0, 0.9, -feltDepth / 2, LEATHER, "x"));
+
+  // Chip tray: a recessed metal well with divider ribs, replacing the flat black
+  // rectangle that read as a hole punched in the felt.
+  metal.push(bbox(0.24, 0.045, 0.1, -0.34, 0.918, 0, CHIP_TRAY, 0.008));
+  for (let i = 0; i < 4; i++) {
+    metal.push(box(0.006, 0.03, 0.085, -0.41 + i * 0.045, 0.935, 0, METAL));
+  }
+  // Dealer-side drop slot + card shoe.
+  metal.push(bbox(0.05, 0.02, 0.05, -0.24, 0.915, 0.14, METAL_DARK, 0.006));
+  body.push(bbox(0.1, 0.07, 0.13, -0.28, 0.935, -0.16, STONE, 0.012));
+
+  return { body, metal, felt, timber, fit: "bbox" };
 }
 
 function rouletteTable(): RawModel {
   const body: THREE.BufferGeometry[] = [];
-  body.push(box(0.5, 0.05, 0.4, -0.1, 0.025, 0, METAL_DARK));
-  body.push(box(0.34, 0.72, 0.3, -0.1, 0.41, 0, WOOD_DARK));
-  // Oval felt betting layout on the −X two-thirds.
-  body.push(...racetrack(0.6, 0.56, 0.12, 0.82, WOOD, 2));
-  const felt = racetrack(0.54, 0.5, 0.04, 0.9, FELT, 2);
-  for (const g of felt) g.translate(-0.1, 0, 0);
-  body.push(...felt);
-  // Wheel assembly at the +X end (kept inside the normalized ±0.5 footprint box).
-  const wx = 0.32;
-  body.push(cyl(0.17, 0.17, 0.06, 20, wx, 0.9, 0, WOOD, "y")); // bowl rim
-  body.push(cyl(0.14, 0.14, 0.08, 20, wx, 0.95, 0, WOOD_DARK, "y")); // wheel head
-  body.push(cyl(0.05, 0.05, 0.11, 12, wx, 0.97, 0, METAL, "y")); // hub
-  body.push(box(0.26, 0.02, 0.02, wx, 1.0, 0, METAL)); // spokes
-  body.push(box(0.02, 0.02, 0.26, wx, 1.0, 0, METAL));
-  return { body, fit: "bbox" };
+  const metal: THREE.BufferGeometry[] = [];
+  const felt: THREE.BufferGeometry[] = [];
+  const timber: THREE.BufferGeometry[] = [];
+
+  metal.push(cyl(0.3, 0.34, 0.06, 20, -0.1, 0.03, 0, METAL_DARK));
+  metal.push(cyl(0.11, 0.13, 0.62, 16, -0.1, 0.4, 0, METAL));
+
+  // Betting layout on the −X two-thirds.
+  for (const g of racetrack(0.6, 0.56, 0.13, 0.82, WOOD, 2)) timber.push(g);
+  const bed = racetrack(0.54, 0.5, 0.035, 0.895, FELT, 2);
+  for (const g of bed) {
+    g.translate(-0.1, 0, 0);
+    felt.push(g);
+  }
+
+  // THE WHEEL. The old one was a stack of discs with two crossed BOXES for
+  // spokes, which from any angle read as a white spider lying on the table. A
+  // roulette wheel is a bowl: a wide outer rim, a coned track falling inward, a
+  // turret at the centre, and radial frets — so build that, and build the frets
+  // as a real radial fan instead of two crossbars.
+  const wx = 0.3;
+  timber.push(cyl(0.2, 0.21, 0.07, 28, wx, 0.855, 0, WOOD_DARK)); // bowl rim
+  timber.push(cyl(0.185, 0.2, 0.05, 28, wx, 0.915, 0, WOOD)); // outer track, coned
+  felt.push(cyl(0.15, 0.185, 0.03, 28, wx, 0.928, 0, FELT)); // ball track
+  metal.push(cyl(0.125, 0.125, 0.035, 28, wx, 0.948, 0, METAL_DARK)); // wheel head
+  // Radial frets between the pockets.
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    const g = box(0.105, 0.016, 0.008, wx + Math.cos(a) * 0.068, 0.962, Math.sin(a) * 0.068, METAL);
+    g.rotateY(-a);
+    g.translate(0, 0, 0);
+    metal.push(g);
+  }
+  metal.push(cyl(0.035, 0.05, 0.08, 12, wx, 0.995, 0, METAL)); // turret
+  metal.push(cyl(0.012, 0.012, 0.13, 8, wx, 1.03, 0, METAL)); // spindle
+  metal.push(box(0.16, 0.012, 0.012, wx, 1.06, 0, METAL_DARK)); // turret handles
+  metal.push(box(0.012, 0.012, 0.16, wx, 1.06, 0, METAL_DARK));
+
+  return { body, metal, felt, timber, fit: "bbox" };
 }
 
 function crapsTable(): RawModel {
@@ -291,18 +377,56 @@ function moneyWheel(): RawModel {
 
 function slotMachine(): RawModel {
   const body: THREE.BufferGeometry[] = [];
-  // Real cabinet height ≈1.8 m WITH the topper — deliberately above the 1.7 m
-  // walk eye line. At the old 1.56 m the operator looked DOWN on a sea of
-  // cabinet tops and a slot bank read as low furniture instead of a machine row.
-  body.push(box(0.5, 0.55, 0.55, 0, 0.275, 0, METAL_DARK)); // base cabinet
-  body.push(box(0.56, 0.85, 0.5, 0, 0.975, 0, METAL)); // body
-  body.push(box(0.56, 0.06, 0.22, 0, 0.6, 0.28, METAL)); // button deck
-  body.push(box(0.5, 0.4, 0.18, 0, 1.6, 0, METAL_DARK)); // topper
+  const metal: THREE.BufferGeometry[] = [];
+
+  // NO glass cover pane over the screen. The `glass` material class is OPAQUE
+  // (transparency inside a merged, instanced geometry means per-fragment sort
+  // order nobody controls), so a pane in front of the lit face simply hid it and
+  // the machine rendered switched off. The bezel alone is what makes the emissive
+  // read as a screen rather than a decal; the pane was never doing that work.
+  //
+  // Real cabinet height ~1.8 m WITH the topper — deliberately above the 1.7 m
+  // walk eye line, so a bank reads as a row of machines rather than furniture.
+  //
+  // The previous model was four bare boxes and one flat emissive rectangle, which
+  // is why a bank of them read as grey blocks with a cyan sticker. What a slot
+  // cabinet actually has, and now does: a plinth set back from the body so it
+  // doesn't read as one extruded slab, a chamfered body, a raked button deck, a
+  // bezel AROUND the screen (the single biggest thing — an unframed emissive
+  // quad always looks like a decal), a glass cover over it, side trim, and a
+  // topper that overhangs.
+  body.push(bbox(0.46, 0.12, 0.5, 0, 0.06, 0, METAL_DARK, 0.02)); // plinth, inset
+  body.push(bbox(0.52, 0.5, 0.54, 0, 0.37, 0, METAL_DARK, 0.02)); // lower cabinet
+  body.push(bbox(0.56, 0.82, 0.5, 0, 1.0, 0, METAL, 0.025)); // upper body
+
+  // Raked button deck with a chromed lip.
+  body.push(bbox(0.54, 0.07, 0.24, 0, 0.63, 0.27, METAL_DARK, 0.012));
+  metal.push(cyl(0.016, 0.016, 0.5, 8, 0, 0.665, 0.375, METAL, "x"));
+  for (let i = 0; i < 5; i++) {
+    metal.push(cyl(0.026, 0.026, 0.018, 10, -0.18 + i * 0.09, 0.673, 0.3, METAL));
+  }
+
+  // Screen bezel + glass. The emissive face sits INSIDE this, so it reads as a
+  // lit panel behind glass rather than a painted rectangle.
+  metal.push(bbox(0.5, 0.6, 0.04, 0, 1.06, 0.25, METAL_DARK, 0.01));
+  // Belly-glass panel below the main screen.
+  metal.push(bbox(0.46, 0.24, 0.035, 0, 0.42, 0.27, METAL_DARK, 0.01));
+
+  // Side trim strips, and a topper that overhangs the body.
+  metal.push(box(0.02, 0.78, 0.04, -0.28, 1.0, 0.25, METAL));
+  metal.push(box(0.02, 0.78, 0.04, 0.28, 1.0, 0.25, METAL));
+  body.push(bbox(0.58, 0.34, 0.24, 0, 1.62, 0.02, METAL_DARK, 0.02)); // topper
+  metal.push(cyl(0.02, 0.02, 0.56, 8, 0, 1.79, 0.02, METAL, "x")); // topper cap rail
+
   const emissive: THREE.BufferGeometry[] = [];
-  emissive.push(ebox(0.46, 0.55, 0.03, 0, 1.05, 0.26)); // main screen
-  emissive.push(ebox(0.44, 0.1, 0.04, 0, 1.72, 0.09)); // topper light strip
-  emissive.push(ebox(0.5, 0.05, 0.03, 0, 0.06, 0.28)); // R3: base glow strip (slot-row floor wash)
-  return { body, emissive, emissiveColor: SCREEN, emissiveIntensity: SCREEN_I, fit: "bbox" };
+  // The lit faces must sit IN FRONT of their bezels, not inside them. The bezel is
+  // a solid slab spanning z 0.23..0.27, so an emissive quad at 0.262 was entirely
+  // buried by it and the screen rendered black — the machine looked switched off.
+  emissive.push(ebox(0.42, 0.5, 0.02, 0, 1.06, 0.272)); // main screen
+  emissive.push(ebox(0.4, 0.19, 0.02, 0, 0.42, 0.292)); // belly glass
+  emissive.push(ebox(0.5, 0.14, 0.03, 0, 1.7, 0.13)); // topper light band
+  emissive.push(ebox(0.46, 0.035, 0.03, 0, 0.03, 0.26)); // plinth floor wash
+  return { body, metal, emissive, emissiveColor: SCREEN, emissiveIntensity: SCREEN_I, fit: "bbox" };
 }
 
 function barCounter(): RawModel {
@@ -497,6 +621,44 @@ function getBodyMaterial(): THREE.MeshStandardMaterial {
   return bodyMaterial;
 }
 
+/** Material classes beyond the matte default. All vertex-coloured, so hue still
+ *  comes from the baked part colours — what differs is the SPECULAR RESPONSE,
+ *  which is the thing colour alone cannot express. */
+export type MatClass = "metal" | "felt" | "timber" | "glass";
+
+const CLASS_SPEC: Record<MatClass, { roughness: number; metalness: number }> = {
+  // Polished chrome/steel: rails, wheel hubs, pedestals, kick plates.
+  metal: { roughness: 0.22, metalness: 0.95 },
+  // Baize. Almost fully rough and fully dielectric — the whole point is that it
+  // kills the highlight the table apron beside it keeps.
+  felt: { roughness: 0.99, metalness: 0 },
+  // Lacquered hardwood: aprons, rails, cabinets.
+  timber: { roughness: 0.42, metalness: 0.04 },
+  // Screen glass / acrylic covers.
+  glass: { roughness: 0.08, metalness: 0.1 },
+};
+
+const classCache = new Map<MatClass, THREE.MeshStandardMaterial>();
+
+function getClassMaterial(cls: MatClass): THREE.MeshStandardMaterial {
+  let m = classCache.get(cls);
+  if (!m) {
+    const spec = CLASS_SPEC[cls];
+    if (!detailMap) buildDetailTextures();
+    m = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      // Felt gets no detail map: the map's brushed streaks read as scratches on
+      // something that should be uniformly matte.
+      map: cls === "felt" ? null : detailMap,
+      roughness: spec.roughness,
+      metalness: spec.metalness,
+    });
+    m.userData.shared = true;
+    classCache.set(cls, m);
+  }
+  return m;
+}
+
 const emissiveCache = new Map<string, THREE.MeshStandardMaterial>();
 
 /** Shared emissive material for a self-lit fixture part, cached by colour+level.
@@ -525,9 +687,41 @@ const registry = new Map<FixtureKind, FixtureModel>();
 
 function buildModel(kind: FixtureKind): FixtureModel {
   const raw = BUILDERS[kind]();
-  const geometry = mergeGeometries(raw.body, false);
+  // Merge each class into one geometry, then merge those WITH GROUPS so the
+  // result carries one group per class and can take a material array. Classes
+  // with no parts are skipped, so a fixture that never uses glass costs nothing.
+  const classes: Array<{ parts: THREE.BufferGeometry[]; mat: THREE.Material }> = [
+    { parts: raw.body, mat: getBodyMaterial() },
+    { parts: raw.metal ?? [], mat: getClassMaterial("metal") },
+    { parts: raw.felt ?? [], mat: getClassMaterial("felt") },
+    { parts: raw.timber ?? [], mat: getClassMaterial("timber") },
+    { parts: raw.glass ?? [], mat: getClassMaterial("glass") },
+  ].filter((c) => c.parts.length > 0);
+
+  const perClass: THREE.BufferGeometry[] = [];
+  const materials: THREE.Material[] = [];
+  for (const c of classes) {
+    // mergeGeometries REFUSES to mix indexed and non-indexed inputs, and the
+    // chamfered box (RoundedBoxGeometry) calls toNonIndexed() internally while
+    // Box/Cylinder/Sphere stay indexed — so a model that mixes plain and
+    // chamfered parts fails to merge at all. Normalise everything to non-indexed
+    // first: it costs some duplicated vertices on a geometry that is built ONCE
+    // and cached forever, which is the cheap side of this trade.
+    const flat = c.parts.map((g) => {
+      if (!g.index) return g;
+      const n = g.toNonIndexed();
+      g.dispose();
+      return n;
+    });
+    const merged = mergeGeometries(flat, false);
+    flat.forEach((g) => g.dispose());
+    if (!merged) continue;
+    perClass.push(merged);
+    materials.push(c.mat);
+  }
+  const geometry = perClass.length === 1 ? perClass[0] : mergeGeometries(perClass, true);
   if (!geometry) throw new Error(`fixture body merge failed: ${kind}`);
-  raw.body.forEach((g) => g.dispose());
+  if (perClass.length > 1) perClass.forEach((g) => g.dispose());
   // Normals come from the source primitives (Box/Cylinder/Sphere) and survive the
   // merge — no recompute (which would smooth across the hard box edges).
   geometry.computeBoundingBox();
@@ -539,7 +733,7 @@ function buildModel(kind: FixtureKind): FixtureModel {
 
   const model: FixtureModel = {
     geometry,
-    material: getBodyMaterial(),
+    material: materials.length === 1 ? materials[0] : materials,
     fit: raw.fit,
     height,
     spanX,
@@ -587,4 +781,6 @@ export function disposeFixtureModels(): void {
   detailRough = null;
   for (const m of emissiveCache.values()) m.dispose();
   emissiveCache.clear();
+  for (const m of classCache.values()) m.dispose();
+  classCache.clear();
 }
