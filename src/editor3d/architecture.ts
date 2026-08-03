@@ -165,13 +165,30 @@ function getTrimMaterial(): THREE.MeshStandardMaterial {
   return trimMat;
 }
 
-/** Dark anodised frame/mullion metal. */
+/** Shopfront mullion metal — genuinely dark anodised, which is right for glazing
+ *  where the glass carries the read. */
 function getFrameMaterial(): THREE.MeshStandardMaterial {
   if (!frameMat) {
     frameMat = new THREE.MeshStandardMaterial({ color: 0x30333a, roughness: 0.35, metalness: 0.85 });
     frameMat.userData.shared = true;
   }
   return frameMat;
+}
+
+let caseMat: THREE.MeshStandardMaterial | null = null;
+
+/** Door/opening casing. SEPARATE from the mullion metal, which it used to share.
+ *  At 0x30333a against a pale wall, every doorway collapsed at distance into a
+ *  black rectangle floating on the wall — it read as a hole cut in card, which is
+ *  the exact failure the reveal and casing were added to fix, just reintroduced
+ *  by the colour. Painted architrave slightly lighter than the wall reads as a
+ *  frame around an aperture instead. */
+function getCasingMaterial(): THREE.MeshStandardMaterial {
+  if (!caseMat) {
+    caseMat = new THREE.MeshStandardMaterial({ color: 0xe0dbd0, roughness: 0.5, metalness: 0.03 });
+    caseMat.userData.shared = true;
+  }
+  return caseMat;
 }
 
 /** Door leaf — a mid-tone timber-ish panel. */
@@ -389,6 +406,7 @@ export function buildWalls(walls: SceneWall[]): WallBuildResult {
   const holedByFinish = new Map<string, THREE.BufferGeometry[]>();
   const trimParts: THREE.BufferGeometry[] = [];
   const frameParts: THREE.BufferGeometry[] = [];
+  const casingParts: THREE.BufferGeometry[] = [];
   const leafParts: THREE.BufferGeometry[] = [];
   const glassParts: THREE.BufferGeometry[] = [];
   const signParts: THREE.BufferGeometry[] = [];
@@ -476,11 +494,11 @@ export function buildWalls(walls: SceneWall[]): WallBuildResult {
           }
         }
       } else if (h.style === "door" || h.style === "double") {
-        addLining(frameParts, m, len, h);
+        addLining(casingParts, m, len, h);
         addLeaves(leafParts, m, len, h);
       } else {
         // "opening" / "gate": a cased reveal, no leaf — you walk straight through.
-        addLining(frameParts, m, len, h);
+        addLining(casingParts, m, len, h);
       }
     }
   }
@@ -519,6 +537,7 @@ export function buildWalls(walls: SceneWall[]): WallBuildResult {
   }
   emitMerged(trimParts, getTrimMaterial(), out, { cast: false });
   emitMerged(frameParts, getFrameMaterial(), out);
+  emitMerged(casingParts, getCasingMaterial(), out);
   emitMerged(leafParts, getLeafMaterial(), out);
   // Glazing never casts: a shadow-casting transparent pane would darken the very
   // interior the shopfront exists to reveal.
@@ -553,6 +572,8 @@ export function disposeArchitecture(): void {
   trimMat = null;
   frameMat?.dispose();
   frameMat = null;
+  caseMat?.dispose();
+  caseMat = null;
   leafMat?.dispose();
   leafMat = null;
 }
