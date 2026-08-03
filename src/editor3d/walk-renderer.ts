@@ -825,6 +825,16 @@ export class WalkRenderer {
     for (const m of walls.meshes) g.add(m);
     if (walls.signTexture) this.neighbourSignTextures.push(walls.signTexture);
     for (const m of buildCeilings(scene.floorPatches, scene.ceilingM, scene.ceilingVoids)) g.add(m);
+    // The neighbour's LUMINAIRES, but not its lights. The fittings are emissive
+    // geometry, so they cost nothing against the forward-rendering light budget
+    // while making the level read as lit — without them an atrium is a hole onto
+    // a dark floor, which is less convincing than no atrium at all. Discarding
+    // `lights` is the whole point: a second floor's worth of real lights would
+    // blow the budget for a level you are only glimpsing.
+    const { meshes: fittings } = buildLighting(scene.floorPatches, scene.ceilingM, (p) =>
+      Math.min(ceilingSpecFor(p.category, p.id).preferredM, scene.ceilingM),
+    );
+    for (const m of fittings) g.add(m);
     this.neighbourGroup.add(g);
   }
 
