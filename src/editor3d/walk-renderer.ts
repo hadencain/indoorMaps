@@ -700,7 +700,13 @@ export class WalkRenderer {
       this.coverageGroup,
     );
 
-    this.camera = new THREE.PerspectiveCamera(75, 1, 0.05, 600);
+    // near/far bound the DEPTH PRECISION every screen-space pass reconstructs
+    // from, not just the clip planes. At 0.05/600 the ratio is 12000:1 and the
+    // ambient-occlusion pass could not resolve contact at all — its buffer came
+    // back nearly white. 0.15/400 is still far more range than any venue needs
+    // (the largest is ~550 m across, and fog has swallowed everything long before
+    // the far plane) and triples the precision where it matters.
+    this.camera = new THREE.PerspectiveCamera(75, 1, 0.15, 400);
     this.camera.position.copy(v3(0, 0, EYE_M));
 
     this.controls = new PointerLockControls(this.camera, this.renderer.domElement);
@@ -919,6 +925,9 @@ export class WalkRenderer {
   private applyQuality(q: RenderQuality): void {
     if (this.quality === q) return;
     this.quality = q;
+    // Ambient occlusion is the most expensive pass in the chain (a full
+    // depth+normal prepass plus a denoise), so Low sheds it entirely.
+    this.pipeline?.setAoEnabled(q !== "low");
     // Low mode must shed the DOMINANT costs, not just bloom: drop pixel ratio
     // (main lever) and shrink the coverage shadow maps. Bloom is additionally
     // skipped by the tick() render-path branch. High restores full fidelity.

@@ -179,11 +179,13 @@ function normalMapFromHeight(
 
 // ---- material specs ---------------------------------------------------------
 // Each family returns canvases + PBR params. `repeat` is the THREE texture.repeat
-// value. Floors/prisms/ceiling/ground carry metre-scale UVs (ShapeGeometry /
-// ExtrudeGeometry emit UVs equal to the metre coordinates; the ground plane's
-// UVs are rescaled to metres in the renderer), so repeat = 1/tileMetres. Walls
-// and baseboards use unit (0..1) box UVs, so those families (wallPaint, woodPanel)
-// use an absolute repeat instead.
+// value, and EVERY family now uses the same convention: repeat = 1/tileMetres,
+// because every surface carries metre-scale UVs. Floors/prisms/ceiling/ground get
+// them from ShapeGeometry/ExtrudeGeometry (whose UVs equal the metre coordinates);
+// walls and trim get them from architecture.ts's metreUvBox. Walls previously used
+// unit (0..1) box UVs with an absolute repeat, which stretched one texture tile
+// across a whole wall — a 3 m partition and a 60 m concourse wall ended up with
+// completely different apparent material scale.
 
 interface MatSpec {
   map: HTMLCanvasElement;
@@ -276,7 +278,7 @@ const BUILDERS: Record<MaterialName, () => MatSpec> = {
       const s = 0.8 + grain * 0.25;
       return [c[0] * s * seam, c[1] * s * seam, c[2] * s * seam];
     });
-    return { map, color: 0xffffff, roughness: 0.6, metalness: 0.05, repeat: 1 };
+    return { map, color: 0xffffff, roughness: 0.6, metalness: 0.05, repeat: 1 / 1.2 };
   },
 
   // Veined polished marble for lobby floors. Turbulent domain-warped veining;
@@ -357,7 +359,10 @@ const BUILDERS: Record<MaterialName, () => MatSpec> = {
       return [base[0] * s, base[1] * s, base[2] * s];
     });
     const roughnessMap = grayMap(S, (px, py) => 0.85 + fbmTiled((px / S) * 5, (py / S) * 5, 5, 2) * 0.1);
-    return { map, roughnessMap, color: 0xffffff, roughness: 0.9, metalness: 0, repeat: 1.6 };
+    // Walls now carry METRE UVs (architecture.ts metreUvBox), so repeat is a
+    // per-metre tiling exactly like the floor families — not the absolute value a
+    // unit-UV box needed. Painted plaster reads at a coarse scale, so tile slowly.
+    return { map, roughnessMap, color: 0xffffff, roughness: 0.9, metalness: 0, repeat: 1 / 2.5 };
   },
 
   // Acoustic ceiling tile grid — off-white speckled squares with a faint grout

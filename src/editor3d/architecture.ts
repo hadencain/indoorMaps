@@ -182,6 +182,43 @@ function getLeafMaterial(): THREE.MeshStandardMaterial {
 
 // ---- geometry helpers --------------------------------------------------------
 
+
+/**
+ * A box whose UVs are in METRES rather than 0..1 per face.
+ *
+ * THE BUG THIS FIXES: plain walls were one InstancedMesh of a UNIT box scaled to
+ * (length, height, thickness). BoxGeometry emits 0..1 UVs per face, and scaling
+ * the geometry does not touch UVs — so a single texture tile was stretched across
+ * the whole wall. A 3 m partition and a 60 m concourse wall therefore had wildly
+ * different apparent material scale, and the long ones read as untextured flat
+ * cardboard, which no amount of albedo detail could fix. Instancing cannot solve
+ * this (all instances share one geometry, so they share its UVs), hence the switch
+ * to merged per-wall geometry — still ONE draw call per finish, just with correct
+ * texel density everywhere.
+ *
+ * BoxGeometry lays vertices out four-per-face in the order +x, −x, +y, −y, +z, −z,
+ * and each face spans a different pair of the box's dimensions, so each gets its
+ * own scale rather than one global multiply.
+ */
+function metreUvBox(width: number, height: number, depth: number): THREE.BufferGeometry {
+  const g = new THREE.BoxGeometry(width, height, depth);
+  const uv = g.attributes.uv;
+  const faceScale: Array<[number, number]> = [
+    [depth, height], // +x
+    [depth, height], // -x
+    [width, depth], // +y
+    [width, depth], // -y
+    [width, height], // +z
+    [width, height], // -z
+  ];
+  for (let f = 0; f < 6; f++) {
+    const [su, sv] = faceScale[f];
+    for (let i = f * 4; i < f * 4 + 4; i++) uv.setXY(i, uv.getX(i) * su, uv.getY(i) * sv);
+  }
+  uv.needsUpdate = true;
+  return g;
+}
+
 /** World transform of a wall: local +X runs a→b, local Y is up from the floor,
  *  local Z is across the wall's thickness, origin at the wall's MIDPOINT — the
  *  same convention the instanced path uses, so both paths land identically. */
@@ -212,7 +249,7 @@ function localBox(
   const w = x1 - x0;
   const h = y1 - y0;
   if (w <= 1e-4 || h <= 1e-4) return;
-  const g = new THREE.BoxGeometry(w, h, depth);
+  const g = metreUvBox(w, h, depth);
   // Wall-local X is measured from the a-end, but the frame's origin is the wall
   // midpoint, hence the −len/2.
   g.translate((x0 + x1) / 2 - len / 2, (y0 + y1) / 2, zOff);
@@ -426,46 +463,32 @@ export function buildWalls(walls: SceneWall[]): WallBuildResult {
     }
   }
 
-  // ---- instanced hole-free walls --------------------------------------------
+  // ---- hole-free walls -------------------------------------------------------
+  // Merged per finish rather than instanced. Instancing shares ONE geometry across
+  // every wall, which means sharing its UVs — and that is precisely what stretched
+  // a single texture tile across a 60 m concourse wall. Merging costs a few
+  // thousand extra vertices per floor (nothing) and still produces exactly one
+  // draw call per finish, the same as the InstancedMesh did.
   for (const [finish, segs] of plainByFinish) {
-    const proto = new THREE.BoxGeometry(1, 1, WALL_THICKNESS_M);
-    const mesh = new THREE.InstancedMesh(proto, materialForWallFinish(finish), segs.length);
-    // Baseboard + cornice for the whole finish bucket, both instanced against the
-    // same per-segment transform.
-    const baseProto = new THREE.BoxGeometry(1, 1, WALL_THICKNESS_M + TRIM_PROUD);
-    const trim = new THREE.InstancedMesh(baseProto, getTrimMaterial(), segs.length * 2);
-    const m4 = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    let n = 0;
-    let t = 0;
-    for (const s of segs) {
-      const dx = s.b[0] - s.a[0];
-      const dy = s.b[1] - s.a[1];
-      const len = Math.hypot(dx, dy);
-      if (len < 1e-6) continue;
-      const cx = (s.a[0] + s.b[0]) / 2;
-      const cy = (s.a[1] + s.b[1]) / 2;
-      q.setFromAxisAngle(UP, Math.atan2(dy, dx));
-      m4.compose(new THREE.Vector3(cx, s.topM / 2, -cy), q, new THREE.Vector3(len, s.topM, 1));
-      mesh.setMatrixAt(n++, m4);
-      m4.compose(new THREE.Vector3(cx, BASEBOARD_H / 2, -cy), q, new THREE.Vector3(len, BASEBOARD_H, 1));
-      trim.setMatrixAt(t++, m4);
-      m4.compose(
-        new THREE.Vector3(cx, s.topM - CORNICE_H / 2, -cy),
-        q,
-        new THREE.Vector3(len, CORNICE_H, 1),
+    const wallParts: THREE.BufferGeometry[] = [];
+    for (const s2 of segs) {
+      const frame = wallFrame(s2);
+      if (!frame) continue;
+      const { m, len } = frame;
+      localBox(wallParts, m, len, 0, len, 0, s2.topM, WALL_THICKNESS_M);
+      localBox(trimParts, m, len, 0, len, 0, BASEBOARD_H, WALL_THICKNESS_M + TRIM_PROUD);
+      localBox(
+        trimParts,
+        m,
+        len,
+        0,
+        len,
+        s2.topM - CORNICE_H,
+        s2.topM,
+        WALL_THICKNESS_M + TRIM_PROUD,
       );
-      trim.setMatrixAt(t++, m4);
     }
-    mesh.count = n;
-    trim.count = t;
-    mesh.instanceMatrix.needsUpdate = true;
-    trim.instanceMatrix.needsUpdate = true;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    trim.castShadow = false;
-    trim.receiveShadow = true;
-    out.push(mesh, trim);
+    emitMerged(wallParts, materialForWallFinish(finish), out);
   }
 
   // ---- merged holed walls + furniture ---------------------------------------

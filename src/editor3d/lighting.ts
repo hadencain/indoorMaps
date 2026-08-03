@@ -351,6 +351,13 @@ export interface LightingBuild {
  *  fragments per light, so this is deliberately small — the environment map and
  *  the emissive fittings carry the rest. */
 const MAX_ZONE_LIGHTS = 10;
+/** How many of those also CAST. Nothing in the venue cast a shadow before this —
+ *  only the green coverage cones did — so every object in every render sat on the
+ *  floor with no contact and no cast at all, which no amount of material work can
+ *  compensate for. Shadow maps are the expensive part of a light, so only the few
+ *  highest-weighted lamps get one; the rest still shade, and ambient occlusion
+ *  (post.ts) supplies the short-range grounding everywhere else. */
+const MAX_SHADOW_CASTERS = 3;
 /** Minimum separation between real lights so the budget spreads across the floor
  *  instead of stacking inside one big room's fitting grid. */
 const LIGHT_MIN_SEP_M = 14;
@@ -468,7 +475,11 @@ export function buildLighting(
   const DECAY = 1.25;
   const TARGET_L = 0.3; // linear value a reference floor should read directly under a lamp
   const REF_ALBEDO = 0.3; // mid-grey; the venue floor materials sit near this
-  for (const p of finalPicks) {
+  // `finalPicks` is already ordered by weight x sqrt(area), so the first few are
+  // the lamps over the most important, largest spaces — exactly where a cast
+  // shadow buys the most.
+  for (let i = 0; i < finalPicks.length; i++) {
+    const p = finalPicks[i];
     // Solved PER LAMP against the height of the space it hangs in, so a 2.8 m
     // office and a 7 m gaming hall both land on target.
     const h = Math.max(2, p.ceilM - 0.4);
@@ -492,7 +503,22 @@ export function buildLighting(
     );
     light.position.set(p.x, h, -p.y);
     light.target.position.set(p.x, 0, -p.y);
-    light.castShadow = false;
+    if (i < MAX_SHADOW_CASTERS) {
+      light.castShadow = true;
+      light.shadow.mapSize.set(2048, 2048);
+      light.shadow.camera.near = 0.5;
+      light.shadow.camera.far = Math.max(20, h * 4);
+      // A wide cone over a big room spreads 2048 texels thin, so the bias has to
+      // be generous or the floor self-shadows into acne. normalBias handles the
+      // grazing angles a near-vertical lamp creates across a large flat plate.
+      light.shadow.bias = -0.0006;
+      light.shadow.normalBias = 0.05;
+      // Soften: a real luminaire is an area source, and a hard-edged shadow from
+      // a point is one of the tells this whole pass is trying to remove.
+      light.shadow.radius = 4;
+    } else {
+      light.castShadow = false;
+    }
     lights.push(light);
     // A SpotLight aims at its target's WORLD position, so the target must be in
     // the scene graph or every lamp silently aims at the origin instead.

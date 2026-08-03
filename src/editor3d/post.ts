@@ -1,59 +1,86 @@
-// R4 post-processing — an EffectComposer bloom pipeline for the walk renderer's
-// "High" quality path. Lives in src/editor3d/ with the rest of the three.js code
-// (bundle boundary is grep-auditable; the single-file viewer never imports this).
+// Post-processing for the walk renderer's High / Cinematic paths. Lives in
+// src/editor3d/ with the rest of the three.js code (bundle boundary is
+// grep-auditable; the single-file viewer never imports this).
 //
-// The bloom SERVES the camera-primary look: the bright things in the scene are the
-// green coverage-lit floor, the selected camera's emissive body, and the emissive
-// slot screens / neon signage. Thresholded bloom makes ONLY those bright regions
-// glow, so the coverage cones and cameras pop harder while the receded world does
-// not — bloom does not touch the coverage/camera logic, it just amplifies its read.
+// WHY THERE IS AN AO PASS NOW: the render read as flat-shaded no matter how good
+// the materials and light rig got, and the reason was that NOTHING grounded.
+// Every surface met every other surface at a uniformly lit seam — no darkening in
+// a corner, under a counter, behind a mullion, where a column meets the floor.
+// Ambient occlusion is the single largest "this is CG" tell, and it was the one
+// item the original realism spec called for (R1: "SSAO — contact shadows/AO the
+// procedural lighting can't fake") and never shipped. Bloom went in instead, which
+// makes bright things brighter and does nothing for the problem.
 //
 // Pass order + tone mapping (do NOT double tone-map):
-//   RenderPass  → renders the scene into the composer's internal HalfFloat render
-//                 target. Because that's a render target (not the screen), three
-//                 applies NEITHER tone mapping NOR sRGB here — the scene stays in
-//                 LINEAR HDR, which is exactly what UnrealBloomPass needs to
-//                 threshold real highlights.
-//   UnrealBloomPass → extracts + blurs the bright regions in linear HDR and screens
-//                 them back in.
-//   OutputPass  → LAST. Applies the renderer's ACESFilmicToneMapping + sRGB output
-//                 at the final blit to screen (it reads tone mapping + color space
-//                 off the renderer). This is the ONLY tone-map in the chain, so the
-//                 renderer keeps toneMapping = ACESFilmicToneMapping and we let
-//                 OutputPass do it — no double tone-map, no double sRGB.
+//   RenderPass  → renders into the composer's HalfFloat target. Because that's a
+//                 render target, three applies NEITHER tone mapping NOR sRGB — the
+//                 scene stays LINEAR HDR, which is what both later passes need.
+//   GTAOPass    → renders its own depth+normal prepass and multiplies ground-truth
+//                 ambient occlusion into the beauty. Must come BEFORE bloom, or the
+//                 bloom halo gets darkened by AO instead of the surfaces being
+//                 darkened before they bloom.
+//   UnrealBloomPass → extracts + blurs real highlights in linear HDR.
+//   OutputPass  → LAST. Applies the renderer's ACESFilmicToneMapping + sRGB at the
+//                 final blit. The ONLY tone-map in the chain.
 
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
-// Bloom tuning — exposed as named constants for the human to tune after screenshots.
-// Chosen so ONLY genuinely bright things bloom (emissive slot screens, neon
-// signage, camera-body emissive, the bright green coverage-lit floor), NOT the
-// whole scene: a high threshold keeps the dim, receded world matte.
-export const BLOOM_THRESHOLD = 0.95; // luminance above which a pixel contributes to bloom
-export const BLOOM_STRENGTH = 0.32; // overall bloom intensity (a controlled glow, not a whiteout)
-export const BLOOM_RADIUS = 0.5; // bloom spread across the mip chain
+// Bloom tuning — only genuinely bright things bloom (emissive fittings, signage,
+// screens, the coverage-lit floor), NOT the whole scene.
+export const BLOOM_THRESHOLD = 0.95;
+export const BLOOM_STRENGTH = 0.28;
+export const BLOOM_RADIUS = 0.5;
 
-/** Owns an EffectComposer bloom pipeline bound to one renderer/scene/camera.
- *  render() draws the composed (bloomed + tone-mapped) frame; setSize keeps the
- *  composer's render targets matched to the canvas; dispose frees the composer,
- *  every pass, and their render targets. The scene/camera are referenced by
- *  identity, so a floor rebuild (which swaps the scene's children but keeps the
- *  same THREE.Scene object) needs no re-wiring. */
+// AO tuning. `radius` is in WORLD METRES and is the parameter that matters most.
+// A first pass at 0.55 m — reasoning from skirting boards and table legs — produced
+// an almost pure-white AO buffer: at venue scale, where a gaming hall is 60 m across
+// and the camera routinely sees 40 m down a concourse, sub-metre occlusion covers a
+// fraction of a pixel and denoises away to nothing. These are ROOMS; the occlusion
+// that reads is the metre-scale kind — under a slot bank, along a wall base, in the
+// pocket where a column meets the floor.
+export const AO_RADIUS_M = 2.2;
+export const AO_DISTANCE_EXPONENT = 1.0;
+export const AO_THICKNESS = 1.0;
+export const AO_SCALE = 1.6;
+export const AO_SAMPLES = 16;
+/** How hard the AO is multiplied in. Below 1 keeps corners believable rather than
+ *  sooty — real interiors have bounce light filling their corners, which a
+ *  screen-space pass cannot know about, so a full-strength multiply always
+ *  over-darkens. */
+export const AO_BLEND = 0.85;
+
+/** Owns the composer chain bound to one renderer/scene/camera. `render()` draws
+ *  the composed frame; `setSize`/`setPixelRatio` keep the internal targets matched
+ *  to the canvas; `dispose` frees the composer, every pass, and their targets.
+ *  The scene/camera are referenced by identity, so a floor rebuild (which swaps
+ *  the scene's children but keeps the same THREE.Scene) needs no re-wiring. */
 export class BloomPipeline {
   private readonly composer: EffectComposer;
   private readonly renderPass: RenderPass;
+  private readonly gtaoPass: GTAOPass;
   private readonly bloomPass: UnrealBloomPass;
   private readonly outputPass: OutputPass;
 
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
     const size = renderer.getSize(new THREE.Vector2());
-    // No explicit render target: EffectComposer defaults its internal targets to
-    // HalfFloatType, giving the linear-HDR buffer the bloom threshold needs.
     this.composer = new EffectComposer(renderer);
     this.renderPass = new RenderPass(scene, camera);
+
+    this.gtaoPass = new GTAOPass(scene, camera, size.x, size.y);
+    this.gtaoPass.updateGtaoMaterial({
+      radius: AO_RADIUS_M,
+      distanceExponent: AO_DISTANCE_EXPONENT,
+      thickness: AO_THICKNESS,
+      scale: AO_SCALE,
+      samples: AO_SAMPLES,
+    });
+    this.gtaoPass.blendIntensity = AO_BLEND;
+
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(size.x, size.y),
       BLOOM_STRENGTH,
@@ -61,42 +88,50 @@ export class BloomPipeline {
       BLOOM_THRESHOLD,
     );
     this.outputPass = new OutputPass(); // LAST — applies ACES tone map + sRGB
+
     this.composer.addPass(this.renderPass);
+    this.composer.addPass(this.gtaoPass);
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(this.outputPass);
+  }
+
+  /** Toggle the AO pass. Low quality skips it entirely (it is the most expensive
+   *  pass in the chain — a full depth+normal prepass plus a denoise). */
+  setAoEnabled(on: boolean): void {
+    this.gtaoPass.enabled = on;
   }
 
   render(): void {
     this.composer.render();
   }
 
-  /** Match the composer (and thus every pass's internal targets) to the canvas.
-   *  EffectComposer.setSize resizes its read/write targets AND forwards to each
-   *  pass, so the bloom mip chain resizes with it — pass CSS pixels, exactly like
-   *  renderer.setSize (pixel ratio is applied internally). */
+  /** Match the composer (and every pass's internal targets) to the canvas. Pass
+   *  CSS pixels, exactly like renderer.setSize — pixel ratio is applied inside. */
   setSize(w: number, h: number): void {
     this.composer.setSize(w, h);
   }
 
-  /** Match the composer's cached pixel ratio to the renderer's (EffectComposer
-   *  snapshots it at construction, so a later renderer.setPixelRatio — e.g. the
-   *  quality valve dropping to 1 — must be mirrored here or the bloom targets
-   *  stay at the old resolution). */
+  /** Mirror a renderer.setPixelRatio change (EffectComposer snapshots the ratio at
+   *  construction, so the quality valve must push it through or the targets stay
+   *  at the old resolution). */
   setPixelRatio(pixelRatio: number): void {
     this.composer.setPixelRatio(pixelRatio);
   }
 
-  /** Repoint the RenderPass at a new camera. Unused today (the fp camera is never
-   *  swapped) but kept for safety if that ever changes. */
+  /** Repoint the passes at a new camera. Unused today (the fp camera is never
+   *  swapped) but kept so a future change can't silently leave AO on a stale one. */
   setCamera(camera: THREE.Camera): void {
     this.renderPass.camera = camera;
+    this.gtaoPass.camera = camera;
   }
 
-  /** Free the composer's render targets AND every pass's own targets/materials.
+  /** Free the composer's targets AND every pass's own targets/materials.
    *  EffectComposer.dispose only frees its two internal targets + copy pass, so
-   *  each added pass is disposed explicitly — UnrealBloomPass in particular owns a
-   *  chain of render targets that would otherwise leak on every walk-mode teardown. */
+   *  each pass is disposed explicitly — UnrealBloomPass owns a mip chain and
+   *  GTAOPass owns depth/normal/denoise targets that would otherwise leak on every
+   *  walk-mode teardown. */
   dispose(): void {
+    this.gtaoPass.dispose();
     this.bloomPass.dispose();
     this.outputPass.dispose();
     this.renderPass.dispose();
