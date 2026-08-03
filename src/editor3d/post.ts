@@ -20,8 +20,10 @@
 //                 bloom halo gets darkened by AO instead of the surfaces being
 //                 darkened before they bloom.
 //   UnrealBloomPass → extracts + blurs real highlights in linear HDR.
-//   OutputPass  → LAST. Applies the renderer's ACESFilmicToneMapping + sRGB at the
-//                 final blit. The ONLY tone-map in the chain.
+//   OutputPass  → applies the renderer's ACESFilmicToneMapping + sRGB. The ONLY
+//                 tone-map in the chain.
+//   GradePass   → LAST. Black point, contrast, saturation and vignette on the
+//                 tone-mapped sRGB image (see GradeShader).
 
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
@@ -29,6 +31,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 
 // Bloom tuning — only genuinely bright things bloom (emissive fittings, signage,
 // screens, the coverage-lit floor), NOT the whole scene.
@@ -54,6 +57,72 @@ export const AO_SAMPLES = 16;
  *  over-darkens. */
 export const AO_BLEND = 0.85;
 
+
+// ---- final grade -------------------------------------------------------------
+// Runs AFTER OutputPass, i.e. on tone-mapped sRGB pixels, which is where a grade
+// belongs: contrast applied in linear HDR fights the tone curve instead of
+// shaping it.
+//
+// WHY: even with AO and cast shadows the image sat milky — everything bunched in
+// the midtones, nothing approaching black, and a flat falloff to the frame edge.
+// ACES alone does not give a photograph's tonal range; a photograph has a black
+// point, a shoulder, and darker corners because real lenses vignette.
+//
+// Deliberately mild. This is a corrective grade, not a look: crushing it further
+// would hide the geometry and lighting work underneath, which is the actual
+// subject.
+const GRADE_CONTRAST = 1.14;
+const GRADE_SATURATION = 1.07;
+const GRADE_VIGNETTE = 0.34;
+const GRADE_BLACK_POINT = 0.012;
+
+const GradeShader = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    contrast: { value: GRADE_CONTRAST },
+    saturation: { value: GRADE_SATURATION },
+    vignette: { value: GRADE_VIGNETTE },
+    blackPoint: { value: GRADE_BLACK_POINT },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float contrast;
+    uniform float saturation;
+    uniform float vignette;
+    uniform float blackPoint;
+    varying vec2 vUv;
+
+    void main() {
+      vec4 tex = texture2D(tDiffuse, vUv);
+      vec3 c = tex.rgb;
+
+      // Black point: remap so the darkest values reach true black instead of
+      // floating at the fog/ambient floor, then contrast about mid grey.
+      c = max(c - blackPoint, 0.0) / (1.0 - blackPoint);
+      c = (c - 0.5) * contrast + 0.5;
+
+      // Saturation about Rec.709 luma.
+      float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      c = mix(vec3(luma), c, saturation);
+
+      // Vignette: smooth radial falloff from the frame centre, in UV space so it
+      // follows the aspect the user is actually looking at.
+      vec2 d = vUv - 0.5;
+      float r = dot(d, d);
+      c *= 1.0 - vignette * smoothstep(0.12, 0.62, r);
+
+      gl_FragColor = vec4(clamp(c, 0.0, 1.0), tex.a);
+    }
+  `,
+};
+
 /** Owns the composer chain bound to one renderer/scene/camera. `render()` draws
  *  the composed frame; `setSize`/`setPixelRatio` keep the internal targets matched
  *  to the canvas; `dispose` frees the composer, every pass, and their targets.
@@ -65,6 +134,7 @@ export class BloomPipeline {
   private readonly gtaoPass: GTAOPass;
   private readonly bloomPass: UnrealBloomPass;
   private readonly outputPass: OutputPass;
+  private readonly gradePass: ShaderPass;
 
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
     const size = renderer.getSize(new THREE.Vector2());
@@ -87,12 +157,15 @@ export class BloomPipeline {
       BLOOM_RADIUS,
       BLOOM_THRESHOLD,
     );
-    this.outputPass = new OutputPass(); // LAST — applies ACES tone map + sRGB
+    this.outputPass = new OutputPass(); // applies ACES tone map + sRGB
+    // LAST: grade on tone-mapped sRGB pixels.
+    this.gradePass = new ShaderPass(GradeShader);
 
     this.composer.addPass(this.renderPass);
     this.composer.addPass(this.gtaoPass);
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(this.outputPass);
+    this.composer.addPass(this.gradePass);
   }
 
   /** Toggle the AO pass. Low quality skips it entirely (it is the most expensive
@@ -133,6 +206,7 @@ export class BloomPipeline {
   dispose(): void {
     this.gtaoPass.dispose();
     this.bloomPass.dispose();
+    this.gradePass.dispose();
     this.outputPass.dispose();
     this.renderPass.dispose();
     this.composer.dispose();
