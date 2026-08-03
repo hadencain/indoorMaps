@@ -96,7 +96,20 @@ export default function WalkView() {
 
   // Rebuild the scene on any building edit or floor change (build3dScene is pure).
   useEffect(() => {
-    rendererRef.current?.setScene(build3dScene(building, ordinal));
+    const scene = build3dScene(building, ordinal);
+    rendererRef.current?.setScene(scene);
+
+    // Adjacent floors, but ONLY when this one has an atrium to see them through.
+    // A hole in a plate is the only way a neighbouring level becomes visible, so
+    // building them unconditionally would roughly double the scene cost for a view
+    // nobody can see. `voids` opens the floor downward, `ceilingVoids` opens it up.
+    const hasFloorHole = scene.voids.length > 0;
+    const hasCeilingHole = scene.ceilingVoids.length > 0;
+    const exists = (o: number): boolean => building.levels.some((l) => l.ordinal === o);
+    rendererRef.current?.setNeighbourScenes(
+      hasFloorHole && exists(ordinal - 1) ? build3dScene(building, ordinal - 1) : null,
+      hasCeilingHole && exists(ordinal + 1) ? build3dScene(building, ordinal + 1) : null,
+    );
   }, [building, ordinal]);
 
   useEffect(() => {

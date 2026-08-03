@@ -333,6 +333,23 @@ export interface Structure {
   round?: { center: MetreXY; radiusM: number };
 }
 
+/** A hole punched through one floor's slab — an atrium, a light well, the opening
+ *  a pair of escalators rises through. `ordinal` is the floor whose FLOOR PLATE is
+ *  cut (so a void on level 2 lets you look down into level 1, and gives level 1's
+ *  ceiling an opening to look up through).
+ *
+ *  VISUAL ONLY, exactly like Fixture: a void does not change the nav graph, is not
+ *  subtracted from coverage floor area, and never occludes a camera. It is the one
+ *  piece of venue architecture that genuinely cannot be derived — nothing in a
+ *  floor's unit polygons says "and this part isn't there" — which is why it needs
+ *  a field rather than a heuristic. Additive + optional; persistence stays v3. */
+export interface Void {
+  id: string;
+  ordinal: number;
+  /** Outline in local metres, open ring (Unit.polygon convention). */
+  polygon: MetreXY[];
+}
+
 /** The building outline for one floor — a floor-slab base + thick exterior wall,
  *  drawn beneath everything so the plan reads as an enclosed building. Visual
  *  only; coverage still measures the units. */
@@ -392,6 +409,8 @@ export interface Building {
   structures?: Structure[];
   /** Per-floor building outline (floor slab + exterior wall). Additive; visual. */
   footprints?: Footprint[];
+  /** Atria / light wells: holes through a floor's slab. Additive; visual. */
+  voids?: Void[];
   /** Point-of-interest markers (restrooms, ATMs, exits…). Additive; visual. */
   amenities?: Amenity[];
   /** Tenant businesses linked to units (IMDF occupant). Additive; defaults to []. */

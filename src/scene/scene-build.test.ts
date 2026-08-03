@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EYE_M,
+  SLAB_M,
   WALL_THICKNESS_M,
   build3dScene,
   defaultMountM,
@@ -270,6 +271,51 @@ describe("build3dScene walls + footprint", () => {
       ],
     });
     expect(build3dScene(b, 0).wallSegs.flatMap((w) => w.holes)).toHaveLength(0);
+  });
+
+  it("resolves a void onto its own floor AND the ceiling of the floor below", () => {
+    // A void is authored ONCE, on the plate it removes, but it opens two surfaces:
+    // that plate, and the ceiling underneath it. Both must resolve or an atrium is
+    // a hole in the floor with an intact ceiling stretched across it.
+    const hole: MetreXY[] = [
+      [2, 2],
+      [6, 2],
+      [6, 6],
+      [2, 6],
+    ];
+    const b = bld({
+      levels: [
+        { ordinal: 0, name: "G", ceilingM: 4 },
+        { ordinal: 1, name: "1", ceilingM: 5 },
+      ],
+      units: [unit(), unit({ id: "u2", ordinal: 1 })],
+      voids: [{ id: "v1", ordinal: 1, polygon: hole }],
+    });
+    // The floor the void belongs to: cut its own plate, nothing above it.
+    const upper = build3dScene(b, 1);
+    expect(upper.voids).toEqual([hole]);
+    expect(upper.ceilingVoids).toEqual([]);
+    // The floor below: plate intact, ceiling opened.
+    const lower = build3dScene(b, 0);
+    expect(lower.voids).toEqual([]);
+    expect(lower.ceilingVoids).toEqual([hole]);
+  });
+
+  it("exposes storey height as ceiling + slab, so a neighbour floor stacks right", () => {
+    const b = bld({ levels: [{ ordinal: 0, name: "G", ceilingM: 4 }], units: [unit()] });
+    expect(build3dScene(b, 0).storeyHeightM).toBeCloseTo(4 + SLAB_M, 9);
+  });
+
+  it("skips degenerate voids rather than emitting a collapsed hole", () => {
+    const b = bld({
+      units: [unit()],
+      voids: [
+        { id: "bad", ordinal: 0, polygon: [[1, 1], [2, 2]] }, // < 3 verts
+        { id: "zero", ordinal: 0, polygon: [[1, 1], [2, 1], [3, 1]] }, // ~zero area
+        { id: "ok", ordinal: 0, polygon: [[2, 2], [4, 2], [4, 4], [2, 4]] },
+      ],
+    });
+    expect(build3dScene(b, 0).voids).toEqual([[[2, 2], [4, 2], [4, 4], [2, 4]]]);
   });
 
   it("a corridor yields a low slab prism, not wall segs (OQ-6 divergence from 2D)", () => {

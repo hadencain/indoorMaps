@@ -69,13 +69,44 @@ export function ceilingSpecFor(category: Category, id?: string): CeilingSpec {
 
 // ---- geometry helpers --------------------------------------------------------
 
-/** A horizontal face from an open metre ring at height `h`, facing DOWN. */
-function ringPlane(ring: MetreXY[], h: number): THREE.BufferGeometry | null {
+/** Signed area of an open ring (positive = counter-clockwise). */
+function signedArea(ring: MetreXY[]): number {
+  let a = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x0, y0] = ring[i];
+    const [x1, y1] = ring[(i + 1) % ring.length];
+    a += x0 * y1 - x1 * y0;
+  }
+  return a / 2;
+}
+
+/** Every vertex of `inner` inside `outer`? Decides which atrium void belongs to
+ *  which ceiling. */
+function contains(outer: MetreXY[], inner: MetreXY[]): boolean {
+  for (const [x, y] of inner) if (!inRing(x, y, outer)) return false;
+  return true;
+}
+
+/** A horizontal face from an open metre ring at height `h`, facing DOWN, with any
+ *  `holes` inside it punched through. A hole path must wind OPPOSITE its outer
+ *  shape or the triangulator quietly fills it back in — which is indistinguishable
+ *  from the void feature simply not working. */
+function ringPlane(ring: MetreXY[], h: number, holes: MetreXY[][] = []): THREE.BufferGeometry | null {
   if (ring.length < 3) return null;
   const shape = new THREE.Shape();
   shape.moveTo(ring[0][0], ring[0][1]);
   for (let i = 1; i < ring.length; i++) shape.lineTo(ring[i][0], ring[i][1]);
   shape.closePath();
+  const outerCCW = signedArea(ring) > 0;
+  for (const hole of holes) {
+    if (hole.length < 3 || !contains(ring, hole)) continue;
+    const pts = signedArea(hole) > 0 === outerCCW ? [...hole].reverse() : hole;
+    const path = new THREE.Path();
+    path.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) path.lineTo(pts[i][0], pts[i][1]);
+    path.closePath();
+    shape.holes.push(path);
+  }
   const g = new THREE.ShapeGeometry(shape);
   // rotateX(−90°), NOT +90°: the model→three mapping is (x, y) → (x, ·, −y), and
   // only the negative rotation produces it. The positive one mirrors the plane to
@@ -168,8 +199,9 @@ function buildCoffered(
   h: number,
   kelvin: number,
   batches: Batches,
+  holes: MetreXY[][],
 ): void {
-  const plane = ringPlane(ring, h);
+  const plane = ringPlane(ring, h, holes);
   if (plane) batches.plaster.push(plane);
 
   const [minX, minY, maxX, maxY] = ringBBox(ring);
@@ -209,8 +241,8 @@ function buildCoffered(
 /** Exposed: NO finished ceiling. A concrete deck at the structural height, steel
  *  joists under it, and a duct run down the long axis. The single clearest way to
  *  say "you are behind the scenes now". */
-function buildExposed(ring: MetreXY[], structM: number, batches: Batches): void {
-  const deck = ringPlane(ring, structM);
+function buildExposed(ring: MetreXY[], structM: number, batches: Batches, holes: MetreXY[][]): void {
+  const deck = ringPlane(ring, structM, holes);
   if (deck) batches.deck.push(deck);
 
   const [minX, minY, maxX, maxY] = ringBBox(ring);
@@ -255,7 +287,11 @@ function buildExposed(ring: MetreXY[], structM: number, batches: Batches): void 
  * it sits lower. Batches are merged per material, so the whole floor's ceilings
  * cost a handful of draw calls.
  */
-export function buildCeilings(patches: SceneFloorPatch[], structM: number): THREE.Object3D[] {
+export function buildCeilings(
+  patches: SceneFloorPatch[],
+  structM: number,
+  holes: MetreXY[][] = [],
+): THREE.Object3D[] {
   const batches: Batches = { tile: [], plaster: [], deck: [], metal: [], cove: new Map() };
 
   for (const patch of patches) {
@@ -266,13 +302,13 @@ export function buildCeilings(patches: SceneFloorPatch[], structM: number): THRE
     if (h <= 0.6) continue;
 
     if (spec.system === "exposed") {
-      buildExposed(patch.ring, structM, batches);
+      buildExposed(patch.ring, structM, batches, holes);
       continue;
     }
     if (spec.system === "coffered") {
-      buildCoffered(patch.ring, h, zoneFor(patch.category, patch.id).kelvin, batches);
+      buildCoffered(patch.ring, h, zoneFor(patch.category, patch.id).kelvin, batches, holes);
     } else {
-      const plane = ringPlane(patch.ring, h);
+      const plane = ringPlane(patch.ring, h, holes);
       if (plane) batches.tile.push(plane);
     }
     // Close the step up to the structural soffit. Plaster, because a bulkhead is

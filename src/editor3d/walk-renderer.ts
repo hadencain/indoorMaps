@@ -286,14 +286,64 @@ function ringToShape(ring: MetreXY[]): THREE.Shape {
 }
 // ShapeGeometry lies in XY; rotateX(-90°) maps (x, y, 0) -> (x, 0, -y), exactly
 // the model->three mapping. All flat/extruded geometry goes through these two.
-function flatGeo(ring: MetreXY[], h: number): THREE.BufferGeometry {
-  const g = new THREE.ShapeGeometry(ringToShape(ring));
+/** Is every vertex of `inner` inside `outer`? Used to decide which atrium voids
+ *  belong to which floor patch. Vertex containment is enough here: venue voids are
+ *  authored as whole openings inside one space, never straddling a partition, and
+ *  a straddling void degrades to "cut from neither" rather than to broken geometry. */
+function ringContains(outer: MetreXY[], inner: MetreXY[]): boolean {
+  for (const [x, y] of inner) if (!pointInRing([x, y], outer)) return false;
+  return true;
+}
+
+/**
+ * A horizontal face from an open ring at height `h`, with any `holes` that fall
+ * inside it punched through.
+ *
+ * THREE.Shape supports holes natively, so an atrium needs no boolean-geometry
+ * pass — but a hole path must WIND OPPOSITE to its outer shape or the triangulator
+ * silently fills it back in, which looks exactly like the void feature not working
+ * at all. Hence the explicit signed-area comparison rather than trusting authored
+ * winding.
+ */
+/** `ring` as a THREE.Shape with every hole in `holes` that falls inside it added
+ *  as an interior path. Shared by the flat-plate and extruded-prism builders so a
+ *  void cuts BOTH — a corridor is a low slab prism as well as a floor patch, and
+ *  cutting only the patch leaves an intact 0.15 m plate stretched across the
+ *  atrium, which looks exactly like the void feature doing nothing. */
+function shapeWithHoles(ring: MetreXY[], holes: MetreXY[][]): THREE.Shape {
+  const shape = ringToShape(ring);
+  if (holes.length === 0) return shape;
+  const outerCCW = ringSignedArea(ring) > 0;
+  for (const hole of holes) {
+    if (hole.length < 3 || !ringContains(ring, hole)) continue;
+    const pts = ringSignedArea(hole) > 0 === outerCCW ? [...hole].reverse() : hole;
+    const path = new THREE.Path();
+    path.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) path.lineTo(pts[i][0], pts[i][1]);
+    path.closePath();
+    shape.holes.push(path);
+  }
+  return shape;
+}
+
+function flatGeo(ring: MetreXY[], h: number, holes: MetreXY[][] = []): THREE.BufferGeometry {
+  const g = new THREE.ShapeGeometry(shapeWithHoles(ring, holes));
   g.rotateX(-Math.PI / 2);
   g.translate(0, h, 0);
   return g;
 }
-function prismGeo(ring: MetreXY[], base: number, top: number): THREE.BufferGeometry {
-  const g = new THREE.ExtrudeGeometry(ringToShape(ring), { depth: top - base, bevelEnabled: false });
+function prismGeo(
+  ring: MetreXY[],
+  base: number,
+  top: number,
+  holes: MetreXY[][] = [],
+): THREE.BufferGeometry {
+  // ExtrudeGeometry carries a Shape's holes through, so an atrium also gets the
+  // slab's cut edge for free rather than a paper-thin opening.
+  const g = new THREE.ExtrudeGeometry(shapeWithHoles(ring, holes), {
+    depth: top - base,
+    bevelEnabled: false,
+  });
   g.rotateX(-Math.PI / 2); // extrusion +z becomes +y (up)
   g.translate(0, base, 0);
   return g;
@@ -499,6 +549,10 @@ export class WalkRenderer {
   // selected-camera gizmo (per selection); coverageGroup = spotlight cones (per
   // mode/selection/floor + throttled while moving).
   private readonly worldGroup = new THREE.Group();
+  /** Adjacent floors, drawn ONLY when this floor has an atrium to see them
+   *  through. Kept in its own group so it rebuilds independently of the world and
+   *  costs exactly nothing in the (overwhelmingly common) no-void case. */
+  private readonly neighbourGroup = new THREE.Group();
   private readonly camBodyGroup = new THREE.Group();
   private readonly frustumGroup = new THREE.Group();
   private readonly coverageGroup = new THREE.Group();
@@ -572,6 +626,8 @@ export class WalkRenderer {
   // the scope that actually changed (see the setScene comment). null ⇒ nothing
   // built yet, so the first scene rebuilds everything.
   private worldSig: string | null = null;
+  private neighbourSig: string | null = null;
+  private neighbourSignTextures: THREE.CanvasTexture[] = [];
   private cameraSig: string | null = null;
   private lastCoverageAt = 0;
   private readonly lastCoveragePos = new THREE.Vector3();
@@ -636,7 +692,13 @@ export class WalkRenderer {
     // is here for SPECULAR — giving metal and glass something to reflect — not to
     // be a third ambient term stacked on top of the ambient and hemisphere ones.
     this.scene.environmentIntensity = 0.55;
-    this.scene.add(this.worldGroup, this.camBodyGroup, this.frustumGroup, this.coverageGroup);
+    this.scene.add(
+      this.worldGroup,
+      this.neighbourGroup,
+      this.camBodyGroup,
+      this.frustumGroup,
+      this.coverageGroup,
+    );
 
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.05, 600);
     this.camera.position.copy(v3(0, 0, EYE_M));
@@ -699,6 +761,71 @@ export class WalkRenderer {
       this.applySelection();
       this.recomputeCoverage();
     }
+  }
+
+  /**
+   * Supply the floors immediately below and above, so an atrium opens onto a real
+   * level instead of onto nothing.
+   *
+   * The shell only builds these when the current floor actually has a void — a
+   * hole in a plate is the ONLY way a neighbouring floor becomes visible, so
+   * rendering them unconditionally would double the scene cost for a view nobody
+   * can see. Neighbours are drawn as shell only (plates, walls, ceilings): no
+   * lights, no props, no cameras, no coverage. They read as a dimmer adjacent
+   * level lit by the ambient and environment terms, which is what a level across
+   * an atrium actually looks like.
+   */
+  setNeighbourScenes(below: Scene3D | null, above: Scene3D | null): void {
+    const sig = `${below ? worldSignature(below) : ""}|${above ? worldSignature(above) : ""}`;
+    if (sig === this.neighbourSig) return;
+    this.neighbourSig = sig;
+    this.clearGroup(this.neighbourGroup);
+    // buildWalls mints a signage atlas per call, and clearGroup cannot reach a
+    // texture held through a material's emissiveMap — so the neighbours' atlases
+    // are tracked and freed explicitly, exactly like the world's.
+    for (const t of this.neighbourSignTextures) t.dispose();
+    this.neighbourSignTextures = [];
+    // A floor's plate sits at y=0 in its OWN scene, so the level below is offset
+    // by ITS storey height (its ceiling + slab), not by this floor's.
+    if (below) this.addNeighbour(below, -below.storeyHeightM);
+    if (above && this.sceneData) this.addNeighbour(above, this.sceneData.storeyHeightM);
+  }
+
+  /** Shell-only build of one adjacent floor, offset vertically by `yOffset`. */
+  private addNeighbour(scene: Scene3D, yOffset: number): void {
+    const g = new THREE.Group();
+    g.position.y = yOffset;
+    if (scene.footprintRing) {
+      const slab = new THREE.Mesh(flatGeo(scene.footprintRing, 0, scene.voids), getMaterial("concrete"));
+      slab.receiveShadow = true;
+      g.add(slab);
+    }
+    for (const patch of scene.floorPatches) {
+      if (patch.ring.length < 3) continue;
+      const mesh = new THREE.Mesh(
+        flatGeo(patch.ring, 0.02, scene.voids),
+        materialForCategory(patch.category, patch.id),
+      );
+      mesh.receiveShadow = true;
+      g.add(mesh);
+    }
+    // Circulation slabs are floor PLATE, so a neighbour's atrium must cut them
+    // too — otherwise the level below an opening shows an intact corridor plate
+    // exactly where the hole should be.
+    for (const p of scene.slabPrisms) {
+      if (p.topM <= p.baseM || p.ring.length < 3) continue;
+      const mesh = new THREE.Mesh(
+        prismGeo(p.ring, p.baseM, p.topM, scene.voids),
+        materialForCategory(p.kind as Category),
+      );
+      mesh.receiveShadow = true;
+      g.add(mesh);
+    }
+    const walls = buildWalls(scene.wallSegs);
+    for (const m of walls.meshes) g.add(m);
+    if (walls.signTexture) this.neighbourSignTextures.push(walls.signTexture);
+    for (const m of buildCeilings(scene.floorPatches, scene.ceilingM, scene.ceilingVoids)) g.add(m);
+    this.neighbourGroup.add(g);
   }
 
   setSelectedCamera(id: string | null): void {
@@ -886,6 +1013,7 @@ export class WalkRenderer {
     if (this.controls.isLocked) this.controls.unlock();
     this.controls.dispose();
     this.clearGroup(this.worldGroup);
+    this.clearGroup(this.neighbourGroup);
     this.clearCameraBodies(); // shared geo/mat — don't dispose per body
     this.clearGroup(this.frustumGroup);
     this.clearGroup(this.coverageGroup);
@@ -916,6 +1044,8 @@ export class WalkRenderer {
     disposeEnvironment();
     disposeArchitecture();
     disposeCeilings();
+    for (const t of this.neighbourSignTextures) t.dispose();
+    this.neighbourSignTextures = [];
     disposeVertical();
     disposeProps();
     this.signTexture?.dispose();
@@ -944,22 +1074,26 @@ export class WalkRenderer {
     this.clearGroup(this.worldGroup);
     const g = this.worldGroup;
 
-    // Troweled-concrete ground under everything. PlaneGeometry UVs are 0..1;
-    // rescale them to metres so the shared concrete texture tiles at real-world
-    // scale like the metre-UV floor/prism geometry.
-    const groundGeo = new THREE.PlaneGeometry(2400, 2400);
-    const guv = groundGeo.attributes.uv;
-    for (let i = 0; i < guv.count; i++) guv.setXY(i, guv.getX(i) * 2400, guv.getY(i) * 2400);
-    guv.needsUpdate = true;
-    const ground = new THREE.Mesh(groundGeo, getMaterial("concrete"));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.04;
+    // Troweled-concrete ground under everything, built as a ring rather than a
+    // PlaneGeometry so an atrium can be punched through it. It sits only 4 cm under
+    // the slab, so without the cut it is the FIRST thing visible through a void —
+    // an atrium that reads as a shallow grey tray instead of an opening onto the
+    // level below. ShapeGeometry emits UVs equal to the vertex metre coordinates,
+    // which is exactly the metre-scale tiling the old plane had to rescale for.
+    const GROUND_HALF = 1200;
+    const groundRing: MetreXY[] = [
+      [-GROUND_HALF, -GROUND_HALF],
+      [GROUND_HALF, -GROUND_HALF],
+      [GROUND_HALF, GROUND_HALF],
+      [-GROUND_HALF, GROUND_HALF],
+    ];
+    const ground = new THREE.Mesh(flatGeo(groundRing, -0.04, scene.voids), getMaterial("concrete"));
     ground.receiveShadow = true;
     g.add(ground);
 
     // Footprint slab (concrete beneath the unit floors).
     if (scene.footprintRing) {
-      const slab = new THREE.Mesh(flatGeo(scene.footprintRing, 0), getMaterial("concrete"));
+      const slab = new THREE.Mesh(flatGeo(scene.footprintRing, 0, scene.voids), getMaterial("concrete"));
       slab.receiveShadow = true;
       g.add(slab);
     }
@@ -969,7 +1103,10 @@ export class WalkRenderer {
     // into gaming-carpet / F&B-wood / BOH-concrete.
     for (const patch of scene.floorPatches) {
       if (patch.ring.length < 3) continue;
-      const mesh = new THREE.Mesh(flatGeo(patch.ring, 0.02), materialForCategory(patch.category, patch.id));
+      const mesh = new THREE.Mesh(
+        flatGeo(patch.ring, 0.02, scene.voids),
+        materialForCategory(patch.category, patch.id),
+      );
       mesh.receiveShadow = true;
       g.add(mesh);
     }
@@ -980,7 +1117,7 @@ export class WalkRenderer {
     // Extruded prisms, merged per kind, each drawn with a shared material:
     //  · circulation/lobby low slabs → the category's stone/carpet floor material
     //  · structural columns/obstacles → concrete
-    this.addPrismGroup(scene.slabPrisms, (k) => materialForCategory(k as Category), g);
+    this.addPrismGroup(scene.slabPrisms, (k) => materialForCategory(k as Category), g, scene.voids);
     this.addPrismGroup(scene.structurePrisms, () => getMaterial("concrete"), g);
 
     // Fixtures — R2: detailed parametric models, instanced per kind (one or two
@@ -1013,13 +1150,13 @@ export class WalkRenderer {
     // ceiling at H, nothing in between anywhere.
     if (scene.footprintRing) {
       const deck = new THREE.Mesh(
-        flatGeo(scene.footprintRing, scene.ceilingM + 0.02),
+        flatGeo(scene.footprintRing, scene.ceilingM + 0.02, scene.ceilingVoids),
         getDeckMaterial(),
       );
       deck.castShadow = false;
       g.add(deck);
     }
-    for (const m of buildCeilings(scene.floorPatches, scene.ceilingM)) g.add(m);
+    for (const m of buildCeilings(scene.floorPatches, scene.ceilingM, scene.ceilingVoids)) g.add(m);
 
     // Stair flights + lift doors (vertical.ts). Stair and elevator units used to
     // render as ordinary rooms — a stairwell with a flat floor.
@@ -1055,12 +1192,13 @@ export class WalkRenderer {
     prisms: ScenePrism[],
     matFor: (kind: string) => THREE.MeshStandardMaterial,
     group: THREE.Group,
+    holes: MetreXY[][] = [],
   ): void {
     const byKind = new Map<string, THREE.BufferGeometry[]>();
     for (const p of prisms) {
       if (p.topM <= p.baseM || p.ring.length < 3) continue;
       const arr = byKind.get(p.kind) ?? [];
-      arr.push(prismGeo(p.ring, p.baseM, p.topM));
+      arr.push(prismGeo(p.ring, p.baseM, p.topM, holes));
       byKind.set(p.kind, arr);
     }
     for (const [kind, geos] of byKind) {

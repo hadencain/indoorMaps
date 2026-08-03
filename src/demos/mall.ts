@@ -4,7 +4,14 @@ import type { Building, Camera, Fixture } from "../types";
 //   $env:GEN="1"; npx vitest run scratch/_scratch-gen-mall.test.ts).
 // Program: ord0: fill 100.0%  units 60  {"corridor":2,"retail":48,"lobby":1,"office":1,"restroom":2,"storage":1,"mechanical":1,"stairs":3,"elevator":1} | ord1: fill 100.0%  units 50  {"corridor":2,"retail":37,"room":3,"restroom":2,"storage":1,"mechanical":1,"stairs":3,"elevator":1} | ord2: fill 100.0%  units 60  {"corridor":2,"retail":46,"room":4,"restroom":2,"storage":1,"mechanical":1,"stairs":3,"elevator":1} | ord3: fill 100.0%  units 46  {"corridor":2,"office":21,"retail":1,"mechanical":3,"restroom":2,"storage":13,"stairs":3,"elevator":1}
 // Plant: ord0: corners 183, fill 33, multi 6 -> 222 cams | single 94%, >=2 78% | ord1: corners 155, fill 37, multi 6 -> 198 cams | single 95%, >=2 76% | ord2: corners 186, fill 37, multi 5 -> 228 cams | single 95%, >=2 76% | ord3: corners 158, fill 20, multi 6 -> 184 cams | single 95%, >=2 82%
-// demoRev 2 — bumping this retires stale localStorage saves of older mall geometry.
+// demoRev 3 — bumping this retires stale localStorage saves of older mall geometry.
+// v3 adds the ATRIUM: two full-height voids cut through the upper plates over The
+// Galleria, west and east of the central vertical cores. Voids are the one piece of
+// venue architecture that cannot be derived — nothing in a floor's unit polygons
+// says "and this part isn't there" — so unlike opening style they are authored.
+// Geometry: The Galleria spans x 60..260, y 40..60 on every level, with bites out
+// of y 40..52 at x 146..158 and x 162..170 for the cores; both slots sit clear of
+// those and inset from the shopfront lines so the balcony edge stays walkable.
 const _cameras0: Camera[] = [
   {"id":"cam-plz-s","ordinal":0,"at":[168,-12],"heading":0,"fovDeg":360,"rangeM":22,"kind":"dome","name":"South Plaza · Dome","streamRef":"rtsp://10.70.200.1/main"},
   {"id":"cam-plz-w","ordinal":0,"at":[-12,50],"heading":0,"fovDeg":360,"rangeM":22,"kind":"dome","name":"West Plaza · Dome","streamRef":"rtsp://10.70.200.2/main"},
@@ -1729,7 +1736,7 @@ const _fixtures2: Fixture[] = [
 ];
 export const mallBuilding: Building = {
   origin: [-115.0228,36.1147],
-  demoRev: 2,
+  demoRev: 3,
   levels: [
     {"ordinal":0,"name":"Level 1","ceilingM":4.5},
     {"ordinal":1,"name":"Level 2","ceilingM":4.5},
@@ -2195,6 +2202,14 @@ export const mallBuilding: Building = {
     {"ordinal":1,"polygon":[[0,0],[320,0],[320,100],[0,100]]},
     {"ordinal":2,"polygon":[[0,0],[320,0],[320,100],[0,100]]},
     {"ordinal":3,"polygon":[[0,0],[320,0],[320,100],[0,100]]},
+  ],
+  voids: [
+    {"id":"void-w-1","ordinal":1,"polygon":[[80,46],[140,46],[140,56],[80,56]]},
+    {"id":"void-e-1","ordinal":1,"polygon":[[190,46],[250,46],[250,56],[190,56]]},
+    {"id":"void-w-2","ordinal":2,"polygon":[[80,46],[140,46],[140,56],[80,56]]},
+    {"id":"void-e-2","ordinal":2,"polygon":[[190,46],[250,46],[250,56],[190,56]]},
+    {"id":"void-w-3","ordinal":3,"polygon":[[80,46],[140,46],[140,56],[80,56]]},
+    {"id":"void-e-3","ordinal":3,"polygon":[[190,46],[250,46],[250,56],[190,56]]},
   ],
   fixtures: [..._fixtures0, ..._fixtures1, ..._fixtures2],
   amenities: [

@@ -169,6 +169,12 @@ export interface SceneAmenity {
   at: MetreXY;
 }
 
+/** Slab thickness between a floor's ceiling and the floor plate above it, metres.
+ *  The data model stores ceilings, not slab levels, so floor-to-floor is derived:
+ *  storeyHeightM = this level's ceiling + SLAB_M. Needed the moment more than one
+ *  floor is on screen at once. */
+export const SLAB_M = 0.45;
+
 /** Everything the 3D renderer needs for one floor, in local metres.
  *  `footprintRing` is null when the ordinal has no usable footprint polygon
  *  (no slab, no exterior envelope). */
@@ -183,6 +189,18 @@ export interface Scene3D {
   fixturePrisms: ScenePrism[];
   amenities: SceneAmenity[];
   cameras: SceneCameraPose[];
+  /** Atrium / light-well outlines cut through THIS floor's plate. The renderer
+   *  subtracts them from the floor patches and the slab, and from the ceiling of
+   *  the floor below. Empty for every venue that has none. */
+  voids: MetreXY[][];
+  /** Voids belonging to the floor ABOVE, which cut THIS floor's ceiling. A void is
+   *  authored once, on the plate it removes, but it opens two surfaces: the plate
+   *  itself and the ceiling under it. Resolving both here keeps the renderer from
+   *  needing the whole Building. */
+  ceilingVoids: MetreXY[][];
+  /** Floor-to-floor rise of this level: ceilingM + SLAB_M. The offset a
+   *  neighbouring floor is drawn at when a void makes it visible. */
+  storeyHeightM: number;
 }
 
 /** True when `ring` cannot form a real face: fewer than 3 vertices or ~zero
@@ -509,6 +527,18 @@ export function build3dScene(b: Building, ordinal: number): Scene3D {
     fixturePrisms.push({ id: f.id, kind: f.kind, ring: f.polygon, baseM: 0, topM });
   }
 
+  const voids: MetreXY[][] = [];
+  for (const v of b.voids ?? []) {
+    if (v.ordinal !== ordinal || degenerate(v.polygon)) continue;
+    voids.push(v.polygon);
+  }
+
+  const ceilingVoids: MetreXY[][] = [];
+  for (const v of b.voids ?? []) {
+    if (v.ordinal !== ordinal + 1 || degenerate(v.polygon)) continue;
+    ceilingVoids.push(v.polygon);
+  }
+
   const amenities: SceneAmenity[] = [];
   for (const a of b.amenities ?? []) {
     if (a.ordinal !== ordinal) continue;
@@ -550,5 +580,8 @@ export function build3dScene(b: Building, ordinal: number): Scene3D {
     fixturePrisms,
     amenities,
     cameras,
+    voids,
+    ceilingVoids,
+    storeyHeightM: ceilingM + SLAB_M,
   };
 }
