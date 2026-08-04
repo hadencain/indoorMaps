@@ -1940,6 +1940,12 @@ button.wide.ghost {
   display: block;
   background: #05070a;
 }
+/* Pinned to the painted picture inside .wiz-imgbox (object-fit: contain
+   letterboxes), so calibration marks sit on the pixels they measured. */
+.wiz-calpaint {
+  position: absolute;
+  pointer-events: none;
+}
 .wiz-calsvg {
   position: absolute;
   inset: 0;
@@ -2833,6 +2839,21 @@ button.wide.ghost {
   z-index: 6;
   font-size: 12px;
   /* Must clear the shortcuts band (bottom: 16px, up to two wrapped lines). */
+  /* The card sits ON the map. Only its controls may take the pointer — the body
+     must never swallow a draw aimed at the plan underneath it. */
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.setup-guide button {
+  pointer-events: auto;
+}
+/* Armed drawing tool: fade out of the way and stop taking clicks entirely, so
+   the lower-left corner of the plan is both visible and traceable. */
+.setup-guide.yielding {
+  opacity: 0.16;
+}
+.setup-guide.yielding button {
+  pointer-events: none;
 }
 .setup-guide-head {
   display: flex;
