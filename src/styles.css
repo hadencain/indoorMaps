@@ -3229,3 +3229,48 @@ button.wide.ghost {
   font: 10px/1.5 var(--mono, ui-monospace, monospace);
   letter-spacing: 0.05em;
 }
+
+/* Feed-wall plan strip: the INDEX, not the subject. Drag to place a followed
+   subject; the wall reorders live, which is the camera handoff. */
+.feedwall-plan {
+  flex: 0 0 168px;
+  width: 100%;
+  background: #080b0f;
+  border-top: 1px solid var(--line);
+  cursor: crosshair;
+  touch-action: none;
+}
+.fwp-unit { fill: #1a222c; stroke: #2b3644; stroke-width: 0.35; }
+.fwp-corridor, .fwp-lobby { fill: #232e3a; }
+.fwp-outside { fill: #0d1218; }
+.fwp-cam { fill: #4a5666; }
+.fwp-cam.sees { fill: #39ff88; }
+.fwp-subject { fill: #ffb54d; stroke: #0b0e12; stroke-width: 0.4; }
+.feedwall-tile.best { border-color: #39ff88; box-shadow: inset 0 0 0 1px #39ff88; }
+.feedwall-follow {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted, #7d8590);
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.feedwall-follow.on { color: #ffb54d; border-color: #ffb54d; }
+.feedwall-blind {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  justify-items: center;
+  background: rgba(5, 7, 10, 0.92);
+  pointer-events: none;
+}
+.feedwall-blind-tag {
+  color: #ff6b6b;
+  font: 13px/1.4 var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.18em;
+}
+.feedwall-blind-sub {
+  color: var(--muted, #7d8590);
+  font: 11px/1.4 var(--mono, ui-monospace, monospace);
+}
