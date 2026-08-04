@@ -4,7 +4,7 @@ import type { Building, Camera, Fixture } from "../types";
 //   $env:GEN="1"; npx vitest run scratch/_scratch-gen-casino.test.ts).
 // Program: ord0: fill 100.0%  units 65  {"corridor":3,"lobby":1,"room":18,"retail":20,"restroom":4,"storage":12,"mechanical":3,"stairs":2,"office":1,"elevator":1} | ord1: fill 100.0%  units 72  {"corridor":3,"lobby":2,"room":11,"office":16,"restroom":6,"storage":14,"mechanical":3,"retail":14,"stairs":2,"elevator":1}
 // Plant: ord0: corners 203, fill 22, multi 24 -> 249 cams | single 95%, >=2 89% | ord1: corners 222, fill 25, multi 25 -> 272 cams | single 94%, >=2 88%
-// demoRev 3 — bumping this retires stale localStorage saves of older casino geometry.
+// demoRev 4 — bumping this retires stale localStorage saves of older casino geometry.
 const _cameras0: Camera[] = [
   {"id":"cam-lot-s1","ordinal":0,"at":[22,-29],"heading":0,"fovDeg":360,"rangeM":34,"kind":"ptz","name":"Lot S · Pole 1","streamRef":"rtsp://10.60.200.1/main","mount":"column"},
   {"id":"cam-lot-s2","ordinal":0,"at":[56,-29],"heading":0,"fovDeg":360,"rangeM":34,"kind":"ptz","name":"Lot S · Pole 2","streamRef":"rtsp://10.60.200.2/main","mount":"column"},
@@ -2543,7 +2543,7 @@ const _fixtures6: Fixture[] = [
 ];
 export const casinoBuilding: Building = {
   origin: [-115.1728,36.1147],
-  demoRev: 3,
+  demoRev: 4,
   levels: [
     {"ordinal":0,"name":"Casino Floor","ceilingM":5.6},
     {"ordinal":1,"name":"Mezzanine","ceilingM":4.5},
@@ -3030,6 +3030,12 @@ export const casinoBuilding: Building = {
     {"id":"st-1-145","ordinal":1,"kind":"column","polygon":[[143.7,83.7],[144.3,83.7],[144.3,84.3],[143.7,84.3]],"round":{"center":[144,84],"radiusM":0.3}},
     {"id":"st-1-146","ordinal":1,"kind":"column","polygon":[[143.7,95.7],[144.3,95.7],[144.3,96.3],[143.7,96.3]],"round":{"center":[144,96],"radiusM":0.3}},
     {"id":"st-1-147","ordinal":1,"kind":"column","polygon":[[143.7,107.7],[144.3,107.7],[144.3,108.3],[143.7,108.3]],"round":{"center":[144,108],"radiusM":0.3}},
+    {"id":"bulk-1","ordinal":0,"kind":"obstacle","polygon":[[36.6,26.4],[38.4,26.4],[38.4,64.8],[36.6,64.8]],"baseM":3.4,"heightM":5.6},
+    {"id":"bulk-2","ordinal":0,"kind":"obstacle","polygon":[[74.1,26.4],[75.9,26.4],[75.9,64.8],[74.1,64.8]],"baseM":3.4,"heightM":5.6},
+    {"id":"bulk-3","ordinal":0,"kind":"obstacle","polygon":[[111.6,26.4],[113.4,26.4],[113.4,64.8],[111.6,64.8]],"baseM":3.4,"heightM":5.6},
+    {"id":"bulk-4","ordinal":0,"kind":"obstacle","polygon":[[55.35,79.2],[57.15,79.2],[57.15,117.6],[55.35,117.6]],"baseM":3.4,"heightM":5.6},
+    {"id":"bulk-5","ordinal":0,"kind":"obstacle","polygon":[[92.85,79.2],[94.65,79.2],[94.65,117.6],[92.85,117.6]],"baseM":3.4,"heightM":5.6},
+    {"id":"bulk-6","ordinal":0,"kind":"obstacle","polygon":[[130.35,79.2],[132.15,79.2],[132.15,117.6],[130.35,117.6]],"baseM":3.4,"heightM":5.6},
   ],
   incidents: [],
   patrols: [
