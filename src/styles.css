@@ -1031,6 +1031,30 @@ button.wide.ghost {
   cursor: pointer;
   user-select: none;
 }
+/* A LIVE synthetic feed: the venue rendered from this camera's pose. The canvas
+   fills the surface; the scanline + corner stamp overlay it, so the framing
+   furniture is identical whether the tile shows a render or the inert
+   placeholder. Not a button — you look at a feed, you don't click it. */
+.camera-feed.live {
+  cursor: default;
+  background: #05070a;
+}
+.camera-feed-canvas {
+  position: absolute;
+  inset: 0;
+}
+.camera-feed-canvas canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+.camera-feed.live .camera-feed-corner {
+  z-index: 2;
+}
+.camera-feed.live .camera-feed-scan {
+  z-index: 1;
+}
+
 .camera-feed:hover {
   border-color: var(--accent);
 }

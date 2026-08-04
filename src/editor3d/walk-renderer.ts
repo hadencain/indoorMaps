@@ -32,6 +32,11 @@ import {
 
 /** What the renderer reports back up to the (store-aware) WalkView shell. */
 export interface WalkRendererOpts {
+  /** FEED MODE. The renderer builds the same world, but the camera is parked at a
+   *  supplied pose instead of being driven by input: no pointer lock, no WASD, no
+   *  picking. This is what lets a camera window show what its camera actually
+   *  SEES rather than a placeholder — the venue model doubles as the feed. */
+  feed?: boolean;
   /** A locked-mode crosshair click resolved to a camera under the reticle (or
    *  null for empty space). The shell routes it to the store's setSelectedCamera. */
   onPickCamera(id: string | null): void;
@@ -638,6 +643,7 @@ export class WalkRenderer {
   // the GTX 1650 target). Kept in sync with coverageGroup's children.
   private readonly coverageLights = new Map<string, THREE.SpotLight>();
   private raf: number | null = null;
+  private feedPose: SceneCameraPose | null = null;
 
   // R4 quality valve. `quality` selects the render path in tick(): "high" runs the
   // bloom composer, "low" a plain forward render. The pipeline is built once and
@@ -756,7 +762,9 @@ export class WalkRenderer {
     // respawning would teleport the player during a held pose gesture.
     if (this.spawnedOrdinal !== scene.ordinal) {
       this.spawnedOrdinal = scene.ordinal;
-      this.spawn(scene);
+      // Feed mode's camera is owned by setFeedPose; spawning would yank it to a
+      // hall entrance the moment the floor rebuilt.
+      if (!this.opts.feed) this.spawn(scene);
     }
 
     // The selection gizmo and coverage cones follow the camera poses; only a
@@ -842,6 +850,23 @@ export class WalkRenderer {
     );
     for (const m of fittings) g.add(m);
     this.neighbourGroup.add(g);
+  }
+
+  /** Park the view at a CCTV pose (feed mode). Applies the stored angle
+   *  conventions exactly: heading from +x CCW, tilt BELOW horizontal, roll CW
+   *  along the view direction — the same poseQuaternion the selection gizmo uses,
+   *  so the feed and the frustum can never disagree about where a camera looks.
+   *  The vertical FOV drives the projection, which is what makes the framing
+   *  honest rather than decorative. */
+  setFeedPose(pose: SceneCameraPose | null): void {
+    this.feedPose = pose;
+    if (!pose) return;
+    this.camera.position.copy(v3(pose.at[0], pose.at[1], pose.mountM));
+    this.camera.quaternion.copy(poseQuaternion(pose.headingDeg, pose.tiltDeg, pose.rollDeg));
+    // A dome sees everything below it; there is no meaningful single frame, so
+    // show the widest honest view rather than pretending it has a heading.
+    this.camera.fov = pose.kind === "dome" ? 110 : Math.min(140, Math.max(20, pose.vfovDeg));
+    this.camera.updateProjectionMatrix();
   }
 
   setSelectedCamera(id: string | null): void {
@@ -1954,7 +1979,13 @@ export class WalkRenderer {
     this.raf = requestAnimationFrame(this.tick);
     const dt = Math.min(this.clock.getDelta(), 0.05);
 
-    if (this.controls.isLocked) {
+    if (this.opts.feed) {
+      const p = this.feedPose;
+      if (p) {
+        this.camera.position.copy(v3(p.at[0], p.at[1], p.mountM));
+        this.camera.quaternion.copy(poseQuaternion(p.headingDeg, p.tiltDeg, p.rollDeg));
+      }
+    } else if (this.controls.isLocked) {
       const fast = this.keys.has("ControlLeft") || this.keys.has("ControlRight");
       const sp = fast ? RUN_SPEED : WALK_SPEED;
       const f = (this.keys.has("KeyW") ? 1 : 0) - (this.keys.has("KeyS") ? 1 : 0);
