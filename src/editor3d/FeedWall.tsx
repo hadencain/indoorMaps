@@ -15,7 +15,15 @@ import { polygonArea } from "../geo";
 import { useVisibility } from "../ui/visibility";
 import { WalkRenderer } from "./walk-renderer";
 import PtzJoystick from "./PtzJoystick";
+import { distM } from "../geo";
+import { WALK_MPS } from "../route-smooth";
 import type { MetreXY } from "../types";
+
+/** Advance the shadow subject at most every this many metres of guard travel.
+ *  Each step re-ranks every camera on the floor (same cost as one drag tick on
+ *  the plan strip); per-frame would burn that 60x/sec for sub-pixel movement.
+ *  Matches PROBE_STEP_M in the map's PatrolPlayback. */
+const SHADOW_STEP_M = 1.2;
 
 /** Tiles per page. Past this the tiles are too small to read AND each one still
  *  costs a full scene draw — 16 tiles is 16x the geometry per frame. A floor
@@ -71,6 +79,65 @@ export default function FeedWall() {
   // operator actually runs — not "show me camera 12" but "who can see THIS", and
   // then keeping eyes on it as it moves. Null until the operator drops a subject.
   const [subject, setSubject] = useState<MetreXY | null>(null);
+
+  // PATROL SHADOWING: the same subject, driven along a guard route instead of
+  // by the operator's hand. The wall reorders as the guard walks, so the
+  // camera-to-camera handoff a tour requires happens by itself — and a stretch
+  // of route nothing covers shows as NO COVERAGE, which is a finding about the
+  // patrol, not a rendering failure.
+  const [shadowId, setShadowId] = useState<string | null>(null);
+  const shadowPatrol = shadowId
+    ? (building.patrols ?? []).find((p) => p.id === shadowId && p.ordinal === ordinal) ?? null
+    : null;
+
+  useEffect(() => {
+    if (!shadowPatrol || shadowPatrol.points.length < 2) return;
+    const pts = shadowPatrol.points;
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + distM(pts[i - 1], pts[i]));
+    const total = cum[cum.length - 1];
+    if (total <= 0) return;
+    let dist = 0;
+    let last = performance.now();
+    let sinceStep = Infinity; // place the subject immediately on start
+    let raf = 0;
+    const tick = (t: number) => {
+      raf = requestAnimationFrame(tick);
+      const dt = Math.min(0.1, (t - last) / 1000);
+      last = t;
+      dist += WALK_MPS * dt;
+      sinceStep += WALK_MPS * dt;
+      if (sinceStep < SHADOW_STEP_M) return;
+      sinceStep = 0;
+      // Ping-pong: out and back, like a real tour on an open path.
+      const lap = dist % (2 * total);
+      const d = lap <= total ? lap : 2 * total - lap;
+      let i = 1;
+      while (i < cum.length - 1 && cum[i] < d) i++;
+      const seg = cum[i] - cum[i - 1];
+      const f = seg > 0 ? (d - cum[i - 1]) / seg : 0;
+      setSubject([
+        pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f,
+        pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f,
+      ]);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [shadowPatrol]);
+
+  // A floor switch orphans the route (patrols are single-floor); stop cleanly
+  // rather than shadowing a path that is no longer on screen.
+  useEffect(() => {
+    if (shadowId && !shadowPatrol) {
+      setShadowId(null);
+      setSubject(null);
+    }
+  }, [shadowId, shadowPatrol]);
+
+  const stopShadow = useCallback(() => {
+    setShadowId(null);
+    setSubject(null);
+  }, []);
 
   // Best-view-first for the subject, derived live from the SAME occlusion-clipped
   // rings the 2D coverage layer draws — so the wall's ordering and the map's
@@ -193,6 +260,7 @@ export default function FeedWall() {
         return;
       }
       if (cam.ordinal !== ordinal) setOrdinal(cam.ordinal);
+      setShadowId(null);
       setSubject(null);
       setSoloId(cam.id);
       setDialMsg(`${num} · ${cam.name}`);
@@ -320,6 +388,7 @@ export default function FeedWall() {
       const fy = (e.clientY - r.top) / r.height;
       // SVG y grows downward, metre y grows north — flip, or dragging up moves
       // the subject south and the ranking follows the wrong cameras.
+      setShadowId(null); // a hand on the plan takes over from the guard route
       setSubject([
         bounds.minX + fx * (bounds.maxX - bounds.minX),
         bounds.maxY - fy * (bounds.maxY - bounds.minY),
@@ -381,11 +450,15 @@ export default function FeedWall() {
             )}
             <button
               className={subject ? "feedwall-follow on" : "feedwall-follow"}
-              onClick={() => setSubject(null)}
+              onClick={stopShadow}
               disabled={!subject}
-              title="Clear the followed subject"
+              title={shadowPatrol ? "Stop shadowing the patrol" : "Clear the followed subject"}
             >
-              {subject ? "following · clear" : "drag on the plan to follow"}
+              {shadowPatrol
+                ? `shadowing ${shadowPatrol.name} · stop`
+                : subject
+                  ? "following · clear"
+                  : "drag on the plan to follow"}
             </button>
           </>
         )}
@@ -417,6 +490,7 @@ export default function FeedWall() {
                 onClick={() => {
                   setWallId(w.id);
                   setSoloId(null);
+                  setShadowId(null);
                   setSubject(null);
                 }}
                 title={w.name}
@@ -437,6 +511,67 @@ export default function FeedWall() {
         >
           + New wall
         </button>
+
+        {/* SHADOW A PATROL: the wall follows the guard route, handing off
+            camera to camera by itself. Single-floor routes, current floor. */}
+        {(building.patrols ?? []).some((p) => p.ordinal === ordinal) && (
+          <>
+            <div className="feedwall-rail-sep">Shadow patrol</div>
+            {(building.patrols ?? [])
+              .filter((p) => p.ordinal === ordinal)
+              .map((p) => (
+                <button
+                  key={p.id}
+                  className={`feedwall-rail-item${p.id === shadowId ? " on" : ""}`}
+                  onClick={() => {
+                    if (p.id === shadowId) {
+                      stopShadow();
+                    } else {
+                      setSoloId(null);
+                      setShadowId(p.id);
+                      setDialMsg(`shadowing ${p.name}`);
+                    }
+                  }}
+                  title={p.id === shadowId ? "Stop shadowing" : `Shadow ${p.name} — the wall follows the guard`}
+                >
+                  <span className="fwr-name">{p.id === shadowId ? "◼ " : "▶ "}{p.name}</span>
+                  <span className="fwr-n">{p.points.length}pt</span>
+                </button>
+              ))}
+          </>
+        )}
+
+        {/* INCIDENT RECALL: click an incident and the wall reorders to the
+            cameras that see that spot — i.e. the ones whose footage to pull.
+            All floors listed; recalling one on another floor switches to it. */}
+        {(building.incidents ?? []).length > 0 && (
+          <>
+            <div className="feedwall-rail-sep">Incidents</div>
+            {(building.incidents ?? []).map((inc) => {
+              const lv = building.levels.find((l) => l.ordinal === inc.ordinal);
+              return (
+                <button
+                  key={inc.id}
+                  className="feedwall-rail-item"
+                  onClick={() => {
+                    if (inc.ordinal !== ordinal) setOrdinal(inc.ordinal);
+                    setSoloId(null);
+                    setShadowId(null);
+                    setSubject(inc.at);
+                    setDialMsg(`recall · ${inc.kind}${inc.note ? ` · ${inc.note}` : ""}`);
+                  }}
+                  title={`Show the cameras that see this ${inc.kind}${lv ? ` (${lv.name})` : ""}`}
+                >
+                  <span className="fwr-name">
+                    {inc.kind}
+                    {inc.note ? ` · ${inc.note}` : ""}
+                  </span>
+                  <span className="fwr-n">{lv?.name ?? `L${inc.ordinal}`}</span>
+                </button>
+              );
+            })}
+          </>
+        )}
       </div>
 
       <div className="feedwall-stage">
