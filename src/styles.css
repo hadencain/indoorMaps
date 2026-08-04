@@ -3453,6 +3453,15 @@ button.wide.ghost {
 }
 .fwp-del:hover { color: #ff6b6b; border-color: #ff6b6b; }
 .fwp-empty { color: var(--muted, #7d8590); font-style: italic; }
+.fwp-name-input {
+  background: #05070a;
+  border: 1px solid var(--accent, #39ff88);
+  color: #e6ebf0;
+  font: inherit;
+  padding: 1px 4px;
+  width: 110px;
+}
+.fwp-name-input.new { padding: 3px 8px; }
 .fwp-add {
   background: transparent;
   border: 1px dashed var(--line);

@@ -40,6 +40,8 @@ export default function FeedWall() {
   const setFeedWall = useStore((s) => s.setFeedWall);
   const addCameraView = useStore((s) => s.addCameraView);
   const setOrdinal = useStore((s) => s.setOrdinal);
+  const mode = useStore((s) => s.mode);
+  const setMode = useStore((s) => s.setMode);
   const ensureCameraNumbers = useStore((s) => s.ensureCameraNumbers);
   const setCameraAim = useStore((s) => s.setCameraAim);
   const saveCameraPreset = useStore((s) => s.saveCameraPreset);
@@ -48,6 +50,11 @@ export default function FeedWall() {
   /** Digits typed for a camera call-up, VMS style: 4 2 Enter. */
   const [dial, setDial] = useState("");
   const [dialMsg, setDialMsg] = useState<string | null>(null);
+  /** Preset naming: "new" = the save-input is open, else a preset id being
+   *  renamed. The window keypad handler skips INPUT targets, so typing a name
+   *  never dials a camera. */
+  const [namingId, setNamingId] = useState<"new" | string | null>(null);
+  const renameCameraPreset = useStore((s) => s.renameCameraPreset);
   const [wallId, setWallId] = useState<string>("all");
   const [page, setPage] = useState(0);
   // Fullscreen a single camera. Double-click a tile to enter, double-click the
@@ -382,8 +389,14 @@ export default function FeedWall() {
             </button>
           </>
         )}
-        <button className="feedwall-exit" onClick={() => setFeedWall(false)}>
-          Exit wall
+        {/* In operator mode the wall IS the mode, so leaving it means leaving
+            the mode (back to the Display map) — setFeedWall(false) alone would
+            strand a wall-less "operator" mode with nothing on it. */}
+        <button
+          className="feedwall-exit"
+          onClick={() => (mode === "operator" ? setMode("display") : setFeedWall(false))}
+        >
+          {mode === "operator" ? "To map" : "Exit wall"}
         </button>
       </div>
 
@@ -452,21 +465,50 @@ export default function FeedWall() {
             <span className="fwp-head">Presets</span>
             {presets.map((p) => (
               <span key={p.id} className={`fwp-item${p.slot === 1 ? " home" : ""}`}>
-                <button
-                  className="fwp-recall"
-                  onClick={() => {
-                    recallCameraPreset(soloCam.id, p.slot);
-                    setDialMsg(`${p.slot} · ${p.name}`);
-                  }}
-                  title={
-                    p.slot === 1
-                      ? "Home — the aim this camera was authored with (Ctrl+1, or H)"
-                      : `Recall "${p.name}" (Ctrl+${p.slot})`
-                  }
-                >
-                  <span className="fwp-slot">{p.slot}</span>
-                  {p.name}
-                </button>
+                {namingId === p.id ? (
+                  // Replaces the whole recall button while renaming — an input
+                  // inside a <button> is invalid HTML and steals its clicks.
+                  <input
+                    className="fwp-name-input"
+                    autoFocus
+                    defaultValue={p.name}
+                    onFocus={(e) => e.target.select()}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") {
+                        renameCameraPreset(soloCam.id, p.id, e.currentTarget.value);
+                        setNamingId(null);
+                      } else if (e.key === "Escape") setNamingId(null);
+                    }}
+                    onBlur={(e) => {
+                      renameCameraPreset(soloCam.id, p.id, e.currentTarget.value);
+                      setNamingId(null);
+                    }}
+                  />
+                ) : (
+                  <button
+                    className="fwp-recall"
+                    onClick={() => {
+                      recallCameraPreset(soloCam.id, p.slot);
+                      setDialMsg(`${p.slot} · ${p.name}`);
+                    }}
+                    onDoubleClick={(e) => {
+                      // Home keeps its name — renaming it would hide what the
+                      // slot IS. Everything else renames on double-click.
+                      if (p.slot === 1) return;
+                      e.stopPropagation();
+                      setNamingId(p.id);
+                    }}
+                    title={
+                      p.slot === 1
+                        ? "Home — the aim this camera was authored with (Ctrl+1, or H)"
+                        : `Recall "${p.name}" (Ctrl+${p.slot}) · double-click to rename`
+                    }
+                  >
+                    <span className="fwp-slot">{p.slot}</span>
+                    {p.name}
+                  </button>
+                )}
                 {p.slot !== 1 && (
                   <button
                     className="fwp-del"
@@ -479,16 +521,30 @@ export default function FeedWall() {
               </span>
             ))}
             {presets.length === 0 && <span className="fwp-empty">move the camera to set Home</span>}
-            <button
-              className="fwp-add"
-              title="Save the current aim as a preset"
-              onClick={() => {
-                const slot = saveCameraPreset(soloCam.id, "");
-                setDialMsg(slot ? `saved preset ${slot}` : "all nine slots are full");
-              }}
-            >
-              + Save this shot
-            </button>
+            {namingId === "new" ? (
+              <input
+                className="fwp-name-input new"
+                autoFocus
+                placeholder="name this shot…"
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") {
+                    const slot = saveCameraPreset(soloCam.id, e.currentTarget.value);
+                    setDialMsg(slot ? `saved ${slot} · ${e.currentTarget.value.trim() || `Preset ${slot}`}` : "all nine slots are full");
+                    setNamingId(null);
+                  } else if (e.key === "Escape") setNamingId(null);
+                }}
+                onBlur={() => setNamingId(null)}
+              />
+            ) : (
+              <button
+                className="fwp-add"
+                title="Save the current aim as a named preset"
+                onClick={() => setNamingId("new")}
+              >
+                + Save this shot
+              </button>
+            )}
           </div>
         )}
         {/* A followed subject standing where nothing sees it must SAY so. The wall

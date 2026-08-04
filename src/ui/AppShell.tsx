@@ -85,7 +85,10 @@ export default function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo]);
 
-  const display = mode === "display";
+  // Operator shares display's read-only shell (no tool rail, operator panel on
+  // the right); the feed wall raised by setMode covers the map as the primary
+  // surface. Everything the wall does not cover stays the display console.
+  const display = mode === "display" || mode === "operator";
   return (
     <div className={display ? "shell display" : "shell"}>
       <TopBar />

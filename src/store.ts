@@ -82,7 +82,11 @@ export type Tool =
 /** The two top-level surfaces. `edit` is the authoring tool (draw/place/wire);
  *  `display` is the read-only operator console the security team runs on routine
  *  — no editing chrome, click-to-camera as the default interaction. */
-export type Mode = "edit" | "display";
+/** Top-bar surfaces. `edit` = authoring, `display` = read-only map console,
+ *  `operator` = the feed wall as the PRIMARY surface (wall first, plan as
+ *  index) — monitoring is a mode, not a view toggle buried in the map's
+ *  view controls. */
+export type Mode = "edit" | "display" | "operator";
 
 export const ALL_AMENITY_KINDS: AmenityKind[] = [
   "restroom", "atm", "exit", "info", "firstaid",
@@ -131,7 +135,7 @@ function loadDisplay(): { mode: Mode; amenityFilter: AmenityFilter; propertyId: 
         propertyId?: unknown;
         view3d?: unknown;
       };
-      if (p.mode === "display" || p.mode === "edit") base.mode = p.mode;
+      if (p.mode === "display" || p.mode === "edit" || p.mode === "operator") base.mode = p.mode;
       if (p.amenityFilter && typeof p.amenityFilter === "object")
         for (const k of ALL_AMENITY_KINDS)
           if (typeof p.amenityFilter[k] === "boolean") base.amenityFilter[k] = p.amenityFilter[k] as boolean;
@@ -480,6 +484,15 @@ interface State {
   deleteCameraPreset: (id: string, presetId: string) => void;
   /** Put the camera back on a saved aim. No-op if the slot is empty. */
   recallCameraPreset: (id: string, slot: number) => void;
+  /** Apply a catalogue model's specs to every UNRATED camera (no resolutionMP)
+   *  of the same kind on one floor, in ONE undo entry. Kind-matched because
+   *  bulk-turning a dome into a bullet silently rewrites its coverage
+   *  semantics; rating what is already there does not. */
+  applyModelToUnrated: (
+    ordinal: number,
+    kind: CameraKind,
+    patch: { model: string; fovDeg: number; resolutionMP: number; rangeM: number },
+  ) => number;
   addCameraToView: (viewId: string, camId: string) => void;
   removeCameraFromView: (viewId: string, camId: string) => void;
   moveCameraInView: (viewId: string, camId: string, dir: -1 | 1) => void;
@@ -571,12 +584,13 @@ export const useStore = create<State>((set, get) => {
     building: loadBuilding(DISPLAY0.propertyId),
     past: [],
     future: [],
-    activeTool: DISPLAY0.mode === "display" ? "inspect" : "select",
+    activeTool: DISPLAY0.mode === "edit" ? "select" : "inspect",
     mode: DISPLAY0.mode,
     amenityFilter: DISPLAY0.amenityFilter,
     view3d: DISPLAY0.view3d,
     walkMode: false,
-    feedWall: false,
+    // Reopening the app in operator mode reopens it ON the wall.
+    feedWall: DISPLAY0.mode === "operator",
     highlightedPatrolId: null,
     selectedId: null,
     selectedIds: [],
@@ -625,14 +639,19 @@ export const useStore = create<State>((set, get) => {
         suggestions: t === "camera" ? s.suggestions : null,
         suggestStats: t === "camera" ? s.suggestStats : null,
       })),
-    // Switching surface. Entering display forces the inspect interaction
-    // (click-to-camera) and drops any authoring selection/draft; returning to
+    // Switching surface. Entering display or operator forces the inspect
+    // interaction (click-to-camera) and drops any authoring selection/draft;
+    // operator ADDITIONALLY raises the feed wall — the wall IS the mode's
+    // primary surface, not a toggle the operator must also find. Returning to
     // edit resets to the select tool and clears display-only transient state.
+    // Leaving operator always lowers the wall, so display/edit come back as
+    // the map they were, not with a leftover wall covering them.
     setMode: (m) =>
       set(() =>
-        m === "display"
+        m === "display" || m === "operator"
           ? {
               mode: m,
+              feedWall: m === "operator",
               activeTool: "inspect",
               selectedId: null,
               selectedIds: [],
@@ -647,6 +666,7 @@ export const useStore = create<State>((set, get) => {
             }
           : {
               mode: m,
+              feedWall: false,
               activeTool: "select",
               probe: null,
               selectedCameraId: null,
@@ -1550,6 +1570,19 @@ export const useStore = create<State>((set, get) => {
           c.id === id ? { ...c, presets: (c.presets ?? []).filter((p) => p.id !== presetId) } : c,
         ),
       })),
+
+    applyModelToUnrated: (ordinal, kind, patch) => {
+      const hit = get().building.cameras.filter(
+        (c) => c.ordinal === ordinal && c.kind === kind && !c.resolutionMP,
+      );
+      if (hit.length === 0) return 0;
+      const ids = new Set(hit.map((c) => c.id));
+      commit((b) => ({
+        ...b,
+        cameras: b.cameras.map((c) => (ids.has(c.id) ? { ...c, ...patch } : c)),
+      }));
+      return hit.length;
+    },
 
     recallCameraPreset: (id, slot) =>
       commit((b) => ({
