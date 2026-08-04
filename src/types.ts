@@ -52,6 +52,16 @@ export interface Unit {
   polygon: MetreXY[];
 }
 
+/** How an opening is BUILT, as distinct from what it CONNECTS (`kind`). Routing
+ *  and the nav graph care only about `kind`; this drives the 3D architecture —
+ *  how wide the hole in the wall is, how tall, and what furniture fills it.
+ *  - "door"       single leaf in a frame (offices, restrooms, back of house)
+ *  - "double"     pair of leaves (entrances, service corridors)
+ *  - "opening"    cased opening, no leaf — one room flowing into another
+ *  - "storefront" full-height glazed shopfront with mullions and a signage band
+ *  - "gate"       wide unglazed portal (loading, concourse threshold) */
+export type OpeningStyle = "door" | "double" | "opening" | "storefront" | "gate";
+
 /** A door or entrance. `at` is a point on the owning unit's wall.
  *  - "door"     (default): connects `unit` to the corridor on the same ordinal.
  *  - "entrance": connects `unit` to the nearest outside area on the same ordinal
@@ -64,6 +74,19 @@ export interface Opening {
   unit: string;
   at: MetreXY;
   kind?: "door" | "entrance";
+  /** Construction style. Absent ⇒ DERIVED from `kind` plus the host unit's
+   *  category (see `resolveOpeningStyle`, render.ts) — a retail unit's door
+   *  becomes a storefront, an office's stays a single leaf. Deriving rather than
+   *  requiring the field is what lets every shipped venue and every existing save
+   *  gain real architecture with no data migration. Optional + additive:
+   *  persistence stays v3. */
+  style?: OpeningStyle;
+  /** Clear width of the hole, metres. Absent ⇒ the style's default, clamped to
+   *  leave a jamb at each end of the host wall. */
+  widthM?: number;
+  /** Head height of the hole above the floor, metres. Absent ⇒ the style's
+   *  default, clamped under the level ceiling. */
+  heightM?: number;
 }
 
 /** A stair/elevator run connecting two units across ordinals. */
@@ -310,6 +333,23 @@ export interface Structure {
   round?: { center: MetreXY; radiusM: number };
 }
 
+/** A hole punched through one floor's slab — an atrium, a light well, the opening
+ *  a pair of escalators rises through. `ordinal` is the floor whose FLOOR PLATE is
+ *  cut (so a void on level 2 lets you look down into level 1, and gives level 1's
+ *  ceiling an opening to look up through).
+ *
+ *  VISUAL ONLY, exactly like Fixture: a void does not change the nav graph, is not
+ *  subtracted from coverage floor area, and never occludes a camera. It is the one
+ *  piece of venue architecture that genuinely cannot be derived — nothing in a
+ *  floor's unit polygons says "and this part isn't there" — which is why it needs
+ *  a field rather than a heuristic. Additive + optional; persistence stays v3. */
+export interface Void {
+  id: string;
+  ordinal: number;
+  /** Outline in local metres, open ring (Unit.polygon convention). */
+  polygon: MetreXY[];
+}
+
 /** The building outline for one floor — a floor-slab base + thick exterior wall,
  *  drawn beneath everything so the plan reads as an enclosed building. Visual
  *  only; coverage still measures the units. */
@@ -369,6 +409,8 @@ export interface Building {
   structures?: Structure[];
   /** Per-floor building outline (floor slab + exterior wall). Additive; visual. */
   footprints?: Footprint[];
+  /** Atria / light wells: holes through a floor's slab. Additive; visual. */
+  voids?: Void[];
   /** Point-of-interest markers (restrooms, ATMs, exits…). Additive; visual. */
   amenities?: Amenity[];
   /** Tenant businesses linked to units (IMDF occupant). Additive; defaults to []. */

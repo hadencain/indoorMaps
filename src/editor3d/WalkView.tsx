@@ -96,7 +96,20 @@ export default function WalkView() {
 
   // Rebuild the scene on any building edit or floor change (build3dScene is pure).
   useEffect(() => {
-    rendererRef.current?.setScene(build3dScene(building, ordinal));
+    const scene = build3dScene(building, ordinal);
+    rendererRef.current?.setScene(scene);
+
+    // Adjacent floors, but ONLY when this one has an atrium to see them through.
+    // A hole in a plate is the only way a neighbouring level becomes visible, so
+    // building them unconditionally would roughly double the scene cost for a view
+    // nobody can see. `voids` opens the floor downward, `ceilingVoids` opens it up.
+    const hasFloorHole = scene.voids.length > 0;
+    const hasCeilingHole = scene.ceilingVoids.length > 0;
+    const exists = (o: number): boolean => building.levels.some((l) => l.ordinal === o);
+    rendererRef.current?.setNeighbourScenes(
+      hasFloorHole && exists(ordinal - 1) ? build3dScene(building, ordinal - 1) : null,
+      hasCeilingHole && exists(ordinal + 1) ? build3dScene(building, ordinal + 1) : null,
+    );
   }, [building, ordinal]);
 
   useEffect(() => {
@@ -136,10 +149,35 @@ export default function WalkView() {
   // renderer may also auto-fall-back to Low, which syncs this label via onQualityChange.
   const cycleQuality = () =>
     setQuality((q) => {
-      const next: RenderQuality = q === "high" ? "low" : "high";
+      const next: RenderQuality = q === "high" ? "cinematic" : q === "cinematic" ? "low" : "high";
       rendererRef.current?.setQuality(next);
       return next;
     });
+
+  // PHOTO MODE: render one supersampled frame and save it. The capture is a
+  // still, so it is not bound by the interactive frame budget — the renderer
+  // pushes to cinematic settings for that one frame and restores itself after.
+  const [shooting, setShooting] = useState(false);
+  const takePhoto = async () => {
+    const r = rendererRef.current;
+    if (!r || shooting) return;
+    setShooting(true);
+    try {
+      const blob = await r.capturePhoto();
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const floor = sortedLevels.find((l) => l.ordinal === ordinal)?.name ?? `level-${ordinal}`;
+      a.href = url;
+      a.download = `${floor.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-render.png`;
+      a.click();
+      // Revoke on the next frame: revoking synchronously can beat the download
+      // in some browsers and save a zero-byte file.
+      requestAnimationFrame(() => URL.revokeObjectURL(url));
+    } finally {
+      setShooting(false);
+    }
+  };
 
   const camId = selectedCam?.id ?? "";
   const mountVal = selectedCam
@@ -179,8 +217,16 @@ export default function WalkView() {
         <button className="walk-cov" onClick={cycleCoverage} title="Cycle coverage cones">
           {COVERAGE_LABEL[coverageMode]}
         </button>
-        <button className="walk-cov" onClick={cycleQuality} title="Toggle render quality (bloom)">
+        <button className="walk-cov" onClick={cycleQuality} title="Cycle render quality">
           {`quality · ${quality}`}
+        </button>
+        <button
+          className="walk-cov"
+          onClick={takePhoto}
+          disabled={shooting}
+          title="Save a supersampled render of this view"
+        >
+          {shooting ? "rendering…" : "photo"}
         </button>
         <button className="walk-exit" onClick={() => setWalkMode(false)} title="Exit walk mode">
           Exit walk

@@ -29,6 +29,7 @@ export type MaterialName =
   | "wallPaint"
   | "ceilingTile"
   | "brushedMetal"
+  | "glass"
   | "darkGlass";
 
 // ---- deterministic value noise ---------------------------------------------
@@ -178,11 +179,13 @@ function normalMapFromHeight(
 
 // ---- material specs ---------------------------------------------------------
 // Each family returns canvases + PBR params. `repeat` is the THREE texture.repeat
-// value. Floors/prisms/ceiling/ground carry metre-scale UVs (ShapeGeometry /
-// ExtrudeGeometry emit UVs equal to the metre coordinates; the ground plane's
-// UVs are rescaled to metres in the renderer), so repeat = 1/tileMetres. Walls
-// and baseboards use unit (0..1) box UVs, so those families (wallPaint, woodPanel)
-// use an absolute repeat instead.
+// value, and EVERY family now uses the same convention: repeat = 1/tileMetres,
+// because every surface carries metre-scale UVs. Floors/prisms/ceiling/ground get
+// them from ShapeGeometry/ExtrudeGeometry (whose UVs equal the metre coordinates);
+// walls and trim get them from architecture.ts's metreUvBox. Walls previously used
+// unit (0..1) box UVs with an absolute repeat, which stretched one texture tile
+// across a whole wall — a 3 m partition and a 60 m concourse wall ended up with
+// completely different apparent material scale.
 
 interface MatSpec {
   map: HTMLCanvasElement;
@@ -198,12 +201,15 @@ interface MatSpec {
 }
 
 const BUILDERS: Record<MaterialName, () => MatSpec> = {
-  // Low-key dark casino carpet: a subtle two-tone diamond lattice + fine grain.
-  // Deliberately desaturated and dark so the floor recedes under the cameras.
+  // Patterned casino carpet: a two-tone diamond lattice + fine grain.
+  // Lifted out of near-black (was 26,22,30): that value was chosen when the whole
+  // world was dimmed for the camera-primary look, and under a properly lit ceiling
+  // it inverted the natural contrast of a room — a bright soffit over a floor that
+  // read as a hole. Still the darkest surface in the venue, just not a void.
   carpet: () => {
     const S = 512;
-    const base: Rgb = [26, 22, 30];
-    const accent: Rgb = [42, 35, 50];
+    const base: Rgb = [58, 40, 40];
+    const accent: Rgb = [92, 66, 50];
     const map = paint(S, (_px, _py, u, v) => {
       const grain = fbmTiled(u * 24, v * 24, 24, 4);
       const lattice = Math.abs(Math.sin(u * Math.PI * 4) * Math.sin(v * Math.PI * 4));
@@ -212,7 +218,10 @@ const BUILDERS: Record<MaterialName, () => MatSpec> = {
       const s = 0.82 + grain * 0.32;
       return [c[0] * s, c[1] * s, c[2] * s];
     });
-    return { map, color: 0xffffff, roughness: 0.97, metalness: 0, repeat: 1 / 3 };
+    // Tile every 1.4 m, not every 3 m. At the old scale the lattice motif was
+    // ~1.5 m across and read as blotches on the floor rather than as a pattern
+    // woven into it — carpet detail is a thing you see at your feet.
+    return { map, color: 0xffffff, roughness: 0.97, metalness: 0, repeat: 1 / 1.4 };
   },
 
   // Even green baize (table felt) — fine even nap. Exposed now for R2 tables.
@@ -269,7 +278,7 @@ const BUILDERS: Record<MaterialName, () => MatSpec> = {
       const s = 0.8 + grain * 0.25;
       return [c[0] * s * seam, c[1] * s * seam, c[2] * s * seam];
     });
-    return { map, color: 0xffffff, roughness: 0.6, metalness: 0.05, repeat: 1 };
+    return { map, color: 0xffffff, roughness: 0.6, metalness: 0.05, repeat: 1 / 1.2 };
   },
 
   // Veined polished marble for lobby floors. Turbulent domain-warped veining;
@@ -350,7 +359,10 @@ const BUILDERS: Record<MaterialName, () => MatSpec> = {
       return [base[0] * s, base[1] * s, base[2] * s];
     });
     const roughnessMap = grayMap(S, (px, py) => 0.85 + fbmTiled((px / S) * 5, (py / S) * 5, 5, 2) * 0.1);
-    return { map, roughnessMap, color: 0xffffff, roughness: 0.9, metalness: 0, repeat: 1.6 };
+    // Walls now carry METRE UVs (architecture.ts metreUvBox), so repeat is a
+    // per-metre tiling exactly like the floor families — not the absolute value a
+    // unit-UV box needed. Painted plaster reads at a coarse scale, so tile slowly.
+    return { map, roughnessMap, color: 0xffffff, roughness: 0.9, metalness: 0, repeat: 1 / 2.5 };
   },
 
   // Acoustic ceiling tile grid — off-white speckled squares with a faint grout
@@ -386,6 +398,24 @@ const BUILDERS: Record<MaterialName, () => MatSpec> = {
     return { map, roughnessMap, color: 0xffffff, roughness: 0.45, metalness: 0.85, repeat: 1 };
   },
 
+  // Clear architectural glazing for shopfronts and vision panels. Nearly
+  // colourless and very smooth, so almost all of its read comes from the
+  // environment map's reflection — which is exactly why it only started looking
+  // like glass once env.ts existed. Transparency is set on the material (below),
+  // not in the texture, so the pane still takes a specular highlight.
+  glass: () => {
+    const S = 128;
+    const base: Rgb = [176, 190, 196];
+    const map = paint(S, (_px, _py, u, v) => {
+      // Very faint large-scale unevenness — real float glass is not perfectly flat,
+      // and a dead-flat pane reads as a hole rather than as glazing.
+      const n = fbmTiled(u * 3, v * 3, 3, 2);
+      const s = 0.97 + n * 0.06;
+      return [base[0] * s, base[1] * s, base[2] * s];
+    });
+    return { map, color: 0xffffff, roughness: 0.05, metalness: 0, repeat: 1 / 3 };
+  },
+
   // Smoked dark glass — for later dome caps / screens. Near-black, low roughness,
   // partly metallic so it reflects. Exposed now, unused in R1.
   darkGlass: () => {
@@ -416,14 +446,22 @@ function toTexture(canvas: HTMLCanvasElement, srgb: boolean, repeat: number): TH
 
 function buildMaterial(name: MaterialName): THREE.MeshStandardMaterial {
   const s = BUILDERS[name]();
+  const isGlass = name === "glass";
   const mat = new THREE.MeshStandardMaterial({
     color: s.color ?? 0xffffff,
+    // Glazing is drawn from both sides (you see a shopfront from the concourse and
+    // from inside the shop), never writes depth (so what's behind it still draws),
+    // and never casts — a shadow-casting transparent pane would darken the very
+    // interior it's meant to reveal.
+    transparent: isGlass,
+    opacity: isGlass ? 0.22 : 1,
+    depthWrite: !isGlass,
     map: toTexture(s.map, true, s.repeat),
     normalMap: s.normal ? toTexture(s.normal, false, s.repeat) : null,
     roughnessMap: s.roughnessMap ? toTexture(s.roughnessMap, false, s.repeat) : null,
     roughness: s.roughness,
     metalness: s.metalness,
-    side: s.side ?? THREE.FrontSide,
+    side: s.side ?? (isGlass ? THREE.DoubleSide : THREE.FrontSide),
     emissive: new THREE.Color(s.emissive ?? 0x000000),
   });
   if (mat.normalMap && s.normalScale != null) mat.normalScale.set(s.normalScale, s.normalScale);
@@ -481,6 +519,31 @@ export function materialNameForCategory(category: Category, id?: string): Materi
 /** Shared material for a floor category (see materialNameForCategory). */
 export function materialForCategory(category: Category, id?: string): THREE.MeshStandardMaterial {
   return getMaterial(materialNameForCategory(category, id));
+}
+
+// Wall finish → material family. Distinct from the FLOOR table above: a restroom
+// has a tiled floor AND tiled walls, but a storage room's concrete floor sits
+// under painted block, and the building envelope is concrete on both. A single
+// wallPaint everywhere was one of the reasons every space read the same.
+const FINISH_MATERIAL: Record<string, MaterialName> = {
+  envelope: "concrete",
+  restroom: "tile",
+  storage: "concrete",
+  mechanical: "concrete",
+  stairs: "concrete",
+  elevator: "brushedMetal",
+  retail: "wallPaint",
+  lobby: "marble",
+  room: "wallPaint",
+  office: "wallPaint",
+  corridor: "wallPaint",
+  outside: "concrete",
+};
+
+/** Shared material for a wall finish key (SceneWall.finish — a unit Category, or
+ *  "envelope" for the building outline). */
+export function materialForWallFinish(finish: string): THREE.MeshStandardMaterial {
+  return getMaterial(FINISH_MATERIAL[finish] ?? "wallPaint");
 }
 
 // ---- emissive (signage / neon) materials -----------------------------------

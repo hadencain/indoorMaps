@@ -1,4 +1,4 @@
-import type { Building, Category, Graph, LngLat, MetreXY } from "./types";
+import type { Building, Category, Graph, LngLat, MetreXY, OpeningStyle } from "./types";
 import { polygonRing, distM, m2ll, bbox, pointsToLL } from "./geo";
 import { functionBucket } from "./categories";
 import { occupantNamesByUnit } from "./occupants";
@@ -56,6 +56,54 @@ export function resolveStructureExtent(
 ): { baseM: number; topM: number } {
   const topM = Math.max(0, Math.min(heightM ?? Infinity, ceilingM));
   return { topM, baseM: Math.min(Math.max(baseM ?? 0, 0), topM) };
+}
+
+// ---- opening construction (display-only synthesis, same rationale as UNIT_HEIGHT_M)
+
+/** Clear width and head height for each opening style, metres. Real-world door
+ *  schedule numbers: a single leaf is ~0.9 m clear at 2.1 m head, a double is
+ *  1.8 m, a mall shopfront runs the bay. */
+export const OPENING_SIZE_M: Record<OpeningStyle, { widthM: number; heightM: number }> = {
+  door: { widthM: 0.95, heightM: 2.1 },
+  double: { widthM: 1.8, heightM: 2.25 },
+  opening: { widthM: 2.6, heightM: 2.6 },
+  storefront: { widthM: 6.5, heightM: 3.0 },
+  gate: { widthM: 3.4, heightM: 2.8 },
+};
+
+/**
+ * How an opening should be BUILT when the data doesn't say.
+ *
+ * `Opening.kind` records what the opening CONNECTS (door to a corridor, entrance
+ * to outside) and is what routing consumes. `Opening.style` records how it is
+ * CONSTRUCTED, and is display-only. Deriving the second from the first plus the
+ * host unit's category is what lets every shipped venue and every existing save
+ * gain real architecture — storefronts on the mall's retail bays, cased openings
+ * between the casino's halls, plain leaves on offices — with no data migration
+ * and no demo edit. An authored `style` always wins.
+ *
+ * A `retail` unit reads as a shopfront because that is what a retail unit facing
+ * a concourse IS; a `room` or `lobby` gets a cased opening because a 1 m leaf into
+ * a 60 m gaming hall is the tell that a building was generated rather than
+ * designed; everything else gets a real door.
+ */
+export function resolveOpeningStyle(
+  style: OpeningStyle | undefined,
+  kind: "door" | "entrance" | undefined,
+  hostCategory: Category | undefined,
+): OpeningStyle {
+  if (style) return style;
+  if (kind === "entrance") return "double";
+  switch (hostCategory) {
+    case "retail":
+      return "storefront";
+    case "room":
+    case "lobby":
+    case "corridor":
+      return "opening";
+    default:
+      return "door";
+  }
 }
 
 // Fixture extrusion heights by kind (display-only synthesis, same rationale

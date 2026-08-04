@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EYE_M,
+  SLAB_M,
   WALL_THICKNESS_M,
   build3dScene,
   defaultMountM,
@@ -93,8 +94,8 @@ describe("build3dScene walls + footprint", () => {
     expect(s.wallSegs).toHaveLength(4);
     for (const w of s.wallSegs) expect(w.topM).toBe(4.5);
     // Open-ring edge convention: i -> (i+1)%n, including the closing edge.
-    expect(s.wallSegs[0]).toEqual({ a: [0, 0], b: [10, 0], topM: 4.5 });
-    expect(s.wallSegs[3]).toEqual({ a: [0, 10], b: [0, 0], topM: 4.5 });
+    expect(s.wallSegs[0]).toEqual({ a: [0, 0], b: [10, 0], topM: 4.5, finish: "room", holes: [] });
+    expect(s.wallSegs[3]).toEqual({ a: [0, 10], b: [0, 0], topM: 4.5, finish: "room", holes: [] });
     // The room is also a floor patch.
     expect(s.floorPatches).toEqual([{ id: "u1", category: "room", ring: SQUARE }]);
   });
@@ -114,7 +115,207 @@ describe("build3dScene walls + footprint", () => {
     const s = build3dScene(b, 0);
     expect(s.footprintRing).toEqual(fpRing);
     expect(s.wallSegs).toHaveLength(8); // 4 room edges + 4 envelope edges
-    expect(s.wallSegs[4]).toEqual({ a: [-1, -1], b: [12, -1], topM: 4.5 });
+    expect(s.wallSegs[4]).toEqual({
+      a: [-1, -1],
+      b: [12, -1],
+      topM: 4.5,
+      finish: "envelope",
+      holes: [],
+    });
+  });
+
+  it("merges the shared partition between two abutting rooms into ONE wall", () => {
+    // Two 10×10 rooms sharing the x=10 edge. Each pushes 4 edges; the shared one
+    // is the SAME undirected edge, so the floor must end up with 7 walls, not 8.
+    // Emitting it twice put two boxes in the same volume — doubled apparent
+    // thickness and z-fighting down every shared face in the building.
+    const east: MetreXY[] = [
+      [10, 0],
+      [20, 0],
+      [20, 10],
+      [10, 10],
+    ];
+    const b = bld({
+      units: [unit(), unit({ id: "u2", polygon: east })],
+    });
+    const s = build3dScene(b, 0);
+    expect(s.wallSegs).toHaveLength(7);
+    const shared = s.wallSegs.filter(
+      (w) =>
+        (w.a[0] === 10 && w.b[0] === 10) &&
+        Math.min(w.a[1], w.b[1]) === 0 &&
+        Math.max(w.a[1], w.b[1]) === 10,
+    );
+    expect(shared).toHaveLength(1);
+  });
+
+  it("the more specific finish wins a shared wall, and envelope outranks all", () => {
+    // A shop against a corridor must read as the shop's wall, not depend on which
+    // unit the build loop happened to reach first.
+    const east: MetreXY[] = [
+      [10, 0],
+      [20, 0],
+      [20, 10],
+      [10, 10],
+    ];
+    const b = bld({
+      units: [
+        unit({ id: "shop", category: "retail" }),
+        unit({ id: "hall", category: "office", polygon: east }),
+      ],
+    });
+    const shared = build3dScene(b, 0).wallSegs.find((w) => w.a[0] === 10 && w.b[0] === 10);
+    expect(shared?.finish).toBe("retail");
+
+    // The same edge also carried by the footprint ring becomes envelope.
+    const b2 = bld({
+      units: [unit({ category: "retail" })],
+      footprints: [{ ordinal: 0, polygon: SQUARE }],
+    });
+    for (const w of build3dScene(b2, 0).wallSegs) expect(w.finish).toBe("envelope");
+  });
+
+  it("cuts an opening into the nearest wall of its host unit, positioned along it", () => {
+    const b = bld({
+      levels: [{ ordinal: 0, name: "G", ceilingM: 4 }],
+      units: [unit({ category: "office" })],
+      openings: [{ id: "d1", unit: "u1", at: [3, 0] }],
+    });
+    const s = build3dScene(b, 0);
+    const holed = s.wallSegs.filter((w) => w.holes.length > 0);
+    expect(holed).toHaveLength(1);
+    // The south edge (0,0)->(10,0) is nearest; the door sits 3 m along it.
+    expect(holed[0].a).toEqual([0, 0]);
+    expect(holed[0].b).toEqual([10, 0]);
+    const h = holed[0].holes[0];
+    expect(h.atM).toBeCloseTo(3, 6);
+    // An office door derives the single-leaf style, not a shopfront.
+    expect(h.style).toBe("door");
+    expect(h.widthM).toBeCloseTo(0.95, 6);
+    expect(h.label).toBeUndefined();
+  });
+
+  it("derives a storefront for a retail unit and letters the occupant onto it", () => {
+    const b = bld({
+      levels: [{ ordinal: 0, name: "G", ceilingM: 4 }],
+      units: [unit({ category: "retail" })],
+      openings: [{ id: "d1", unit: "u1", at: [5, 0] }],
+      occupants: [{ id: "o1", name: "Sunglass Hut", unitId: "u1", category: "retail" }],
+    });
+    const h = build3dScene(b, 0).wallSegs.flatMap((w) => w.holes)[0];
+    expect(h.style).toBe("storefront");
+    expect(h.label).toBe("Sunglass Hut");
+    // A vacant retail unit still gets a shopfront, lettered with the unit name.
+    const vacant = bld({
+      levels: [{ ordinal: 0, name: "G", ceilingM: 4 }],
+      units: [unit({ category: "retail" })],
+      openings: [{ id: "d1", unit: "u1", at: [5, 0] }],
+    });
+    expect(build3dScene(vacant, 0).wallSegs.flatMap((w) => w.holes)[0].label).toBe("Room");
+  });
+
+  it("clamps a hole so it always leaves a jamb, and never breaches the ceiling", () => {
+    // A 6.5 m storefront default in a 10 m wall must still leave wall at each end,
+    // and a 3 m head under a 2.5 m ceiling must duck below it rather than cutting
+    // a hole through the slab above.
+    const b = bld({
+      levels: [{ ordinal: 0, name: "G", ceilingM: 2.5 }],
+      units: [unit({ category: "retail" })],
+      openings: [{ id: "d1", unit: "u1", at: [0.1, 0] }],
+    });
+    const w = build3dScene(b, 0).wallSegs.find((x) => x.holes.length > 0)!;
+    const h = w.holes[0];
+    expect(h.atM - h.widthM / 2).toBeGreaterThanOrEqual(0.35 - 1e-9);
+    expect(h.atM + h.widthM / 2).toBeLessThanOrEqual(10 - 0.35 + 1e-9);
+    expect(h.headM).toBeLessThan(2.5);
+
+    // An authored width wider than the wall can hold is clamped, not honoured.
+    const tight = bld({
+      units: [unit({ category: "office" })],
+      openings: [{ id: "d1", unit: "u1", at: [5, 0], widthM: 40 }],
+    });
+    const th = build3dScene(tight, 0).wallSegs.flatMap((x) => x.holes)[0];
+    expect(th.widthM).toBeCloseTo(10 - 0.7, 6);
+  });
+
+  it("an authored style overrides the derivation", () => {
+    const b = bld({
+      units: [unit({ category: "retail" })],
+      openings: [{ id: "d1", unit: "u1", at: [5, 0], style: "door" }],
+    });
+    expect(build3dScene(b, 0).wallSegs.flatMap((w) => w.holes)[0].style).toBe("door");
+  });
+
+  it("drops a second opening that would overlap one already cut into the wall", () => {
+    // Two doors 0.2 m apart would merge into a single hole that swallows the pier
+    // between them; the later one is skipped instead.
+    const b = bld({
+      units: [unit({ category: "office" })],
+      openings: [
+        { id: "d1", unit: "u1", at: [5, 0] },
+        { id: "d2", unit: "u1", at: [5.2, 0] },
+        { id: "d3", unit: "u1", at: [8, 0] },
+      ],
+    });
+    const holes = build3dScene(b, 0).wallSegs.flatMap((w) => w.holes);
+    expect(holes.map((h) => h.id)).toEqual(["d1", "d3"]);
+  });
+
+  it("skips openings on low-slab units, other floors, and missing units", () => {
+    const b = bld({
+      units: [unit({ category: "corridor" }), unit({ id: "up", ordinal: 1 })],
+      openings: [
+        { id: "d1", unit: "u1", at: [5, 0] }, // corridor: no wall to cut
+        { id: "d2", unit: "up", at: [5, 0] }, // another floor
+        { id: "d3", unit: "ghost", at: [5, 0] }, // no such unit
+      ],
+    });
+    expect(build3dScene(b, 0).wallSegs.flatMap((w) => w.holes)).toHaveLength(0);
+  });
+
+  it("resolves a void onto its own floor AND the ceiling of the floor below", () => {
+    // A void is authored ONCE, on the plate it removes, but it opens two surfaces:
+    // that plate, and the ceiling underneath it. Both must resolve or an atrium is
+    // a hole in the floor with an intact ceiling stretched across it.
+    const hole: MetreXY[] = [
+      [2, 2],
+      [6, 2],
+      [6, 6],
+      [2, 6],
+    ];
+    const b = bld({
+      levels: [
+        { ordinal: 0, name: "G", ceilingM: 4 },
+        { ordinal: 1, name: "1", ceilingM: 5 },
+      ],
+      units: [unit(), unit({ id: "u2", ordinal: 1 })],
+      voids: [{ id: "v1", ordinal: 1, polygon: hole }],
+    });
+    // The floor the void belongs to: cut its own plate, nothing above it.
+    const upper = build3dScene(b, 1);
+    expect(upper.voids).toEqual([hole]);
+    expect(upper.ceilingVoids).toEqual([]);
+    // The floor below: plate intact, ceiling opened.
+    const lower = build3dScene(b, 0);
+    expect(lower.voids).toEqual([]);
+    expect(lower.ceilingVoids).toEqual([hole]);
+  });
+
+  it("exposes storey height as ceiling + slab, so a neighbour floor stacks right", () => {
+    const b = bld({ levels: [{ ordinal: 0, name: "G", ceilingM: 4 }], units: [unit()] });
+    expect(build3dScene(b, 0).storeyHeightM).toBeCloseTo(4 + SLAB_M, 9);
+  });
+
+  it("skips degenerate voids rather than emitting a collapsed hole", () => {
+    const b = bld({
+      units: [unit()],
+      voids: [
+        { id: "bad", ordinal: 0, polygon: [[1, 1], [2, 2]] }, // < 3 verts
+        { id: "zero", ordinal: 0, polygon: [[1, 1], [2, 1], [3, 1]] }, // ~zero area
+        { id: "ok", ordinal: 0, polygon: [[2, 2], [4, 2], [4, 4], [2, 4]] },
+      ],
+    });
+    expect(build3dScene(b, 0).voids).toEqual([[[2, 2], [4, 2], [4, 4], [2, 4]]]);
   });
 
   it("a corridor yields a low slab prism, not wall segs (OQ-6 divergence from 2D)", () => {

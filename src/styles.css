@@ -1031,6 +1031,30 @@ button.wide.ghost {
   cursor: pointer;
   user-select: none;
 }
+/* A LIVE synthetic feed: the venue rendered from this camera's pose. The canvas
+   fills the surface; the scanline + corner stamp overlay it, so the framing
+   furniture is identical whether the tile shows a render or the inert
+   placeholder. Not a button — you look at a feed, you don't click it. */
+.camera-feed.live {
+  cursor: default;
+  background: #05070a;
+}
+.camera-feed-canvas {
+  position: absolute;
+  inset: 0;
+}
+.camera-feed-canvas canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+.camera-feed.live .camera-feed-corner {
+  z-index: 2;
+}
+.camera-feed.live .camera-feed-scan {
+  z-index: 1;
+}
+
 .camera-feed:hover {
   border-color: var(--accent);
 }
@@ -3147,4 +3171,61 @@ button.wide.ghost {
     linear-gradient(var(--accent), var(--accent)) center / 2px 14px no-repeat,
     linear-gradient(var(--accent), var(--accent)) center / 14px 2px no-repeat;
   opacity: 0.8;
+}
+
+/* ---- operator feed wall ---------------------------------------------------
+   Full-surface overlay over the map. One canvas holds every tile (the renderer
+   draws them as scissored viewports); .feedwall-grid is a LABEL layer only,
+   pointer-transparent, mirroring the renderer's row-major order so a caption
+   can never drift onto the wrong picture. */
+.feedwall {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: #05070a;
+}
+.feedwall-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--panel, #0d1117);
+  border-bottom: 1px solid var(--line);
+  font: 11px/1.4 var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.08em;
+}
+.feedwall-title { color: var(--accent, #39ff88); }
+.feedwall-count { color: var(--muted, #7d8590); margin-left: auto; }
+.feedwall-exit {
+  color: #ff6b6b;
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.feedwall-stage { position: relative; flex: 1; min-height: 0; }
+.feedwall-canvas { position: absolute; inset: 0; }
+.feedwall-canvas canvas { display: block; width: 100% !important; height: 100% !important; }
+.feedwall-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: 0;
+  pointer-events: none;
+}
+.feedwall-tile {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.feedwall-tag {
+  position: absolute;
+  left: 6px;
+  bottom: 5px;
+  padding: 1px 5px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #d7dde3;
+  font: 10px/1.5 var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.05em;
 }

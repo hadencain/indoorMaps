@@ -16,10 +16,15 @@ import { pointInRing } from "../coverage";
 import { polygonArea } from "../geo";
 import { disposeMaterials, getEmissiveMaterial, getMaterial, materialForCategory } from "./materials";
 import { disposeFixtureModels, getFixtureModel, planFitScale } from "./fixtures";
+import { disposeEnvironment, getEnvironment, getSky } from "./env";
+import { buildBaseRig, buildLighting, disposeLighting } from "./lighting";
+import { buildWalls, disposeArchitecture } from "./architecture";
+import { buildCeilings, ceilingSpecFor, disposeCeilings, getDeckMaterial } from "./ceilings";
+import { buildVertical, disposeVertical } from "./vertical";
+import { buildProps, disposeProps, hash01 } from "./props";
 import { BloomPipeline } from "./post";
 import {
   EYE_M,
-  WALL_THICKNESS_M,
   type Scene3D,
   type SceneCameraPose,
   type ScenePrism,
@@ -27,6 +32,11 @@ import {
 
 /** What the renderer reports back up to the (store-aware) WalkView shell. */
 export interface WalkRendererOpts {
+  /** FEED MODE. The renderer builds the same world, but the camera is parked at a
+   *  supplied pose instead of being driven by input: no pointer lock, no WASD, no
+   *  picking. This is what lets a camera window show what its camera actually
+   *  SEES rather than a placeholder — the venue model doubles as the feed. */
+  feed?: boolean;
   /** A locked-mode crosshair click resolved to a camera under the reticle (or
    *  null for empty space). The shell routes it to the store's setSelectedCamera. */
   onPickCamera(id: string | null): void;
@@ -36,9 +46,12 @@ export interface WalkRendererOpts {
   onQualityChange?(q: RenderQuality): void;
 }
 
-/** Render quality: "high" runs the bloom composer; "low" is a plain forward
- *  render (the perf valve for the GTX 1650 target). */
-export type RenderQuality = "high" | "low";
+/** Render quality.
+ *  - "low"       plain forward render at 1x — the perf valve for the GTX 1650
+ *  - "high"      bloom composer at display resolution; the interactive default
+ *  - "cinematic" supersampled with large shadow maps. Meant for standing still
+ *                and looking, and for the photo-mode capture; not for walking. */
+export type RenderQuality = "high" | "low" | "cinematic";
 
 /** Coverage-cone display policy. `selected` lights only the selected camera;
  *  `nearby` adds up to 8 cameras nearest the player (≤ 9 shadow casters total);
@@ -79,29 +92,9 @@ const AUTO_FRAME_MS_BUDGET = 28; // median locked frame time (ms) above which Hi
 // 1/0 coverage spots, so the static ~19 is the floor, not the ceiling.) The 12 → 8
 // house cut buys headroom against that ~28 worst case — where the 9 shadow spots
 // dominate cost — rather than trading against an imaginary sub-20 static budget.
-const MAX_HOUSE_LIGHTS = 8; // forward-rendering fill-rate budget for warm downlights
-const HOUSE_LIGHT_STEP_M = 22; // MINIMUM downlight grid spacing (widened per-floor to stay under the budget)
 const MAX_SHADOW_LIGHTS = 9; // hard cap on shadow-casting coverage spotlights
-const BASEBOARD_H = 0.12; // baseboard trim height, metres (spec R1)
-const CEILING_PANEL_STEP_M = 7; // recessed-light panel grid spacing, metres
-const MAX_CEILING_PANELS = 24; // cap on emissive ceiling panels (look-only, no lights)
-const PANEL_EMISSIVE_I = 2.2; // recessed ceiling-panel emissive level (recede-able)
 
-// R3 pit pendants: ONE warm shadow-free PointLight per gaming-table cluster so the
-// pits pool in light and read as the room's focus. Table centroids are grid-
-// bucketed (PIT_GRID_M) into pits; the densest MAX_PIT_LIGHTS pits get a pendant.
-const MAX_PIT_LIGHTS = 8;
-const PIT_GRID_M = 12; // bucket size for merging nearby tables into one pit light
-const PIT_LIGHT_H = 2.4; // pendant hang height, metres (clamped under the ceiling)
-const PIT_LIGHT_COLOR = 0xffbf7a; // warm pendant
-const PIT_LIGHT_INTENSITY = 50;
-const PIT_LIGHT_RANGE = 18;
-const PIT_LIGHT_DECAY = 1.6;
-
-// Table kinds that anchor a pit light, and (a subset) that get a ring of stools.
-const PIT_TABLE_KINDS: ReadonlySet<FixtureKind> = new Set<FixtureKind>([
-  "blackjack", "roulette", "baccarat", "poker", "craps", "wheel",
-]);
+// Card-table kinds that get a ring of stools.
 const STOOL_TABLE_KINDS: ReadonlySet<FixtureKind> = new Set<FixtureKind>([
   "blackjack", "roulette", "baccarat", "poker", "craps",
 ]);
@@ -111,6 +104,8 @@ const STOOL_GAP = 0.35; // gap outside the table footprint the stool ring sits a
 // R3 neon signage — thin emissive valance along the top of each functional room's
 // walls, coloured by function bucket (matches src/categories.ts functionBucket).
 // Modest intensity + small area so it never outshines the green coverage cones.
+// (House-light constants removed with the old rig — lighting.ts owns level, colour
+// temperature, fitting rhythm and the ceiling-height compensation now.)
 const SIGNAGE_H_BELOW_CEIL = 0.28; // valance drop below the ceiling, metres
 /** Storefront-fascia height, metres: where signage actually reads from eye level.
  *  Valances hang at the ceiling in ordinary rooms but must NOT ride a 7 m casino
@@ -118,12 +113,6 @@ const SIGNAGE_H_BELOW_CEIL = 0.28; // valance drop below the ceiling, metres
  *  no matter how tall the hall. At the 3.2 m default this is inert (2.92 < 3.0),
  *  so legacy venues render unchanged. */
 const SIGNAGE_FASCIA_H = 3.0;
-/** House-light height the base intensity was tuned at (the 3.2 m default ceiling
- *  × the 0.7 factor below). Taller ceilings lift the lights away from the floor,
- *  so intensity is compensated back up — otherwise open high-ceiling venues go
- *  murky, the exact regression fix f05fa11 landed for. */
-const HOUSE_LIGHT_TUNED_H = 3.2 * 0.7;
-const HOUSE_LIGHT_MAX_BOOST = 3;
 const SIGNAGE_VAL_H = 0.14; // valance strip height, metres
 const SIGNAGE_VAL_D = 0.05; // valance strip depth, metres
 const SIGNAGE_INSET_M = 0.08; // pull the strip inside the room so neighbours don't co-plane
@@ -133,13 +122,18 @@ const NEON_BAR = 0x3ad0e6; // bar / sportsbook — cyan
 const NEON_PREMIUM = 0xd94fce; // high-limit / poker / showroom — magenta
 const NEON_FNB = 0xffb060; // food & retail — warm
 
-// Camera-primary world-recede: when a camera is selected the world dims + the fog
-// deepens so the lit coverage cone + emphasized camera body dominate. Applied by
-// scaling stored base values (exact restore), never a rebuild.
-const BASE_FOG_DENSITY = 0.005;
-const FOCUS_LIGHT_SCALE = 0.4; // house/pit/ambient/hemi/fill dimmed to this on focus
-const FOCUS_FOG_SCALE = 1.5; // fog density deepened by this on focus
-const FOCUS_EMISSIVE_SCALE = 0.4; // signage + ceiling-panel glow dimmed to this on focus
+// VENUE-PRIMARY (AAA render pass, decision 1). The camera-primary world-recede —
+// which dimmed every light, deepened the fog and dulled the signage whenever a
+// camera was selected — is GONE. The venue is the subject; a selected camera is
+// emphasised by its own body material and gizmo, not by darkening the building
+// around it. Fog is now a light architectural haze that gives a 200 m concourse
+// depth, not the murk that used to hide an under-lit world.
+const BASE_FOG_DENSITY = 0.0021;
+const FOG_COLOR = 0x2a3038;
+
+/** Scratch colour for per-instance tinting — reused so the fixture loop never
+ *  allocates a THREE.Color per instance. */
+const TINT = new THREE.Color();
 
 // model metre-space [x, y] (x-east, y-north) -> three (x, h, -y), Y-up.
 const v3 = (x: number, y: number, h: number): THREE.Vector3 => new THREE.Vector3(x, h, -y);
@@ -297,14 +291,64 @@ function ringToShape(ring: MetreXY[]): THREE.Shape {
 }
 // ShapeGeometry lies in XY; rotateX(-90°) maps (x, y, 0) -> (x, 0, -y), exactly
 // the model->three mapping. All flat/extruded geometry goes through these two.
-function flatGeo(ring: MetreXY[], h: number): THREE.BufferGeometry {
-  const g = new THREE.ShapeGeometry(ringToShape(ring));
+/** Is every vertex of `inner` inside `outer`? Used to decide which atrium voids
+ *  belong to which floor patch. Vertex containment is enough here: venue voids are
+ *  authored as whole openings inside one space, never straddling a partition, and
+ *  a straddling void degrades to "cut from neither" rather than to broken geometry. */
+function ringContains(outer: MetreXY[], inner: MetreXY[]): boolean {
+  for (const [x, y] of inner) if (!pointInRing([x, y], outer)) return false;
+  return true;
+}
+
+/**
+ * A horizontal face from an open ring at height `h`, with any `holes` that fall
+ * inside it punched through.
+ *
+ * THREE.Shape supports holes natively, so an atrium needs no boolean-geometry
+ * pass — but a hole path must WIND OPPOSITE to its outer shape or the triangulator
+ * silently fills it back in, which looks exactly like the void feature not working
+ * at all. Hence the explicit signed-area comparison rather than trusting authored
+ * winding.
+ */
+/** `ring` as a THREE.Shape with every hole in `holes` that falls inside it added
+ *  as an interior path. Shared by the flat-plate and extruded-prism builders so a
+ *  void cuts BOTH — a corridor is a low slab prism as well as a floor patch, and
+ *  cutting only the patch leaves an intact 0.15 m plate stretched across the
+ *  atrium, which looks exactly like the void feature doing nothing. */
+function shapeWithHoles(ring: MetreXY[], holes: MetreXY[][]): THREE.Shape {
+  const shape = ringToShape(ring);
+  if (holes.length === 0) return shape;
+  const outerCCW = ringSignedArea(ring) > 0;
+  for (const hole of holes) {
+    if (hole.length < 3 || !ringContains(ring, hole)) continue;
+    const pts = ringSignedArea(hole) > 0 === outerCCW ? [...hole].reverse() : hole;
+    const path = new THREE.Path();
+    path.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) path.lineTo(pts[i][0], pts[i][1]);
+    path.closePath();
+    shape.holes.push(path);
+  }
+  return shape;
+}
+
+function flatGeo(ring: MetreXY[], h: number, holes: MetreXY[][] = []): THREE.BufferGeometry {
+  const g = new THREE.ShapeGeometry(shapeWithHoles(ring, holes));
   g.rotateX(-Math.PI / 2);
   g.translate(0, h, 0);
   return g;
 }
-function prismGeo(ring: MetreXY[], base: number, top: number): THREE.BufferGeometry {
-  const g = new THREE.ExtrudeGeometry(ringToShape(ring), { depth: top - base, bevelEnabled: false });
+function prismGeo(
+  ring: MetreXY[],
+  base: number,
+  top: number,
+  holes: MetreXY[][] = [],
+): THREE.BufferGeometry {
+  // ExtrudeGeometry carries a Shape's holes through, so an atrium also gets the
+  // slab's cut edge for free rather than a paper-thin opening.
+  const g = new THREE.ExtrudeGeometry(shapeWithHoles(ring, holes), {
+    depth: top - base,
+    bevelEnabled: false,
+  });
   g.rotateX(-Math.PI / 2); // extrusion +z becomes +y (up)
   g.translate(0, base, 0);
   return g;
@@ -510,6 +554,10 @@ export class WalkRenderer {
   // selected-camera gizmo (per selection); coverageGroup = spotlight cones (per
   // mode/selection/floor + throttled while moving).
   private readonly worldGroup = new THREE.Group();
+  /** Adjacent floors, drawn ONLY when this floor has an atrium to see them
+   *  through. Kept in its own group so it rebuilds independently of the world and
+   *  costs exactly nothing in the (overwhelmingly common) no-void case. */
+  private readonly neighbourGroup = new THREE.Group();
   private readonly camBodyGroup = new THREE.Group();
   private readonly frustumGroup = new THREE.Group();
   private readonly coverageGroup = new THREE.Group();
@@ -539,18 +587,6 @@ export class WalkRenderer {
     emissiveIntensity: 0.85,
   });
 
-  // Emissive recessed-light panels on the ceiling — a look-only "the ceiling is
-  // lit" read (the actual light objects arrive in R3). Shared across every panel
-  // in the merged mesh; tagged so clearGroup skips it and it's freed only in
-  // dispose().
-  private readonly panelMat = new THREE.MeshStandardMaterial({
-    color: 0x0b0b0d,
-    emissive: new THREE.Color(0xffe6c2),
-    emissiveIntensity: PANEL_EMISSIVE_I,
-    roughness: 1,
-    metalness: 0,
-  });
-
   // R3 props: one shared low-poly stool geometry + material, instanced per floor
   // (one InstancedMesh for every stool around every card table). Tagged shared so
   // clearGroup frees only the per-rebuild instance buffers; the geometry/material
@@ -577,14 +613,11 @@ export class WalkRenderer {
     metalness: 0.2,
   });
 
-  // R3 camera-primary world-recede state. `focused` is true while a camera is
-  // selected; applyWorldDim then scales every recede-able light (base stashed in
-  // userData.baseIntensity), deepens the fog, and dims the emissive accents listed
-  // in worldEmissive (each with its true base level for exact restore). The
-  // coverage spotlights (coverageGroup) and camera-body emissive are NEVER in
-  // scope — they stay full so the cone + selected body pop.
-  private focused = false;
-  private worldEmissive: Array<{ mat: THREE.MeshStandardMaterial; base: number }> = [];
+  /** The current rebuild's shopfront-signage atlas, held so the NEXT rebuild can
+   *  free it. clearGroup disposes geometry and non-shared materials but cannot
+   *  reach a texture referenced through a material's emissiveMap, so without this
+   *  every world rebuild would leak a 2048² canvas texture. */
+  private signTexture: THREE.CanvasTexture | null = null;
 
   private readonly raycaster = new THREE.Raycaster();
   private readonly reticle = new THREE.Vector2(0, 0);
@@ -598,6 +631,8 @@ export class WalkRenderer {
   // the scope that actually changed (see the setScene comment). null ⇒ nothing
   // built yet, so the first scene rebuilds everything.
   private worldSig: string | null = null;
+  private neighbourSig: string | null = null;
+  private neighbourSignTextures: THREE.CanvasTexture[] = [];
   private cameraSig: string | null = null;
   private lastCoverageAt = 0;
   private readonly lastCoveragePos = new THREE.Vector3();
@@ -608,6 +643,8 @@ export class WalkRenderer {
   // the GTX 1650 target). Kept in sync with coverageGroup's children.
   private readonly coverageLights = new Map<string, THREE.SpotLight>();
   private raf: number | null = null;
+  private feedPose: SceneCameraPose | null = null;
+  private feedPoses: SceneCameraPose[] = [];
 
   // R4 quality valve. `quality` selects the render path in tick(): "high" runs the
   // bloom composer, "low" a plain forward render. The pipeline is built once and
@@ -635,10 +672,11 @@ export class WalkRenderer {
     // highlights into a filmic range; sRGB output so the procedural albedo
     // textures (tagged SRGBColorSpace) decode correctly.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.3;
+    // Venue-primary: the rig itself now carries the level, so exposure comes back
+    // toward neutral. At the old 1.3 the brighter rig + IBL clipped highlights.
+    this.renderer.toneMappingExposure = 1.05;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
-    this.panelMat.userData.shared = true;
     this.stoolGeo.userData.shared = true;
     this.stoolMat.userData.shared = true;
     this.seatGeo.userData.shared = true;
@@ -646,14 +684,36 @@ export class WalkRenderer {
     this.fxMat.userData.shared = true;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0a0c10);
-    // Slightly thinner than the pre-realism 0.006 so the new procedural surfaces
-    // read, while the world still recedes into cool haze behind the cones. The
-    // camera-primary world-recede deepens this from the stored BASE_FOG_DENSITY.
-    this.scene.fog = new THREE.FogExp2(0x0a0c10, BASE_FOG_DENSITY);
-    this.scene.add(this.worldGroup, this.camBodyGroup, this.frustumGroup, this.coverageGroup);
+    // Sky, not a flat fill. Every opening in the building envelope — entrance,
+    // gate, shopfront on an outside wall — used to look out onto dead grey, which
+    // read as a void rather than as outside.
+    this.scene.background = getSky();
+    // A light architectural haze, matched to the background so distant geometry
+    // dissolves into it instead of silhouetting against a different colour.
+    this.scene.fog = new THREE.FogExp2(FOG_COLOR, BASE_FOG_DENSITY);
+    // Image-based lighting. Without this every metal, glass and polished-stone
+    // surface reflects pure black and reads as plastic — see env.ts. One PMREM
+    // build, shared for the life of the module.
+    this.scene.environment = getEnvironment(this.renderer);
+    // Part of the same illumination budget as the base rig (lighting.ts): the IBL
+    // is here for SPECULAR — giving metal and glass something to reflect — not to
+    // be a third ambient term stacked on top of the ambient and hemisphere ones.
+    this.scene.environmentIntensity = 0.55;
+    this.scene.add(
+      this.worldGroup,
+      this.neighbourGroup,
+      this.camBodyGroup,
+      this.frustumGroup,
+      this.coverageGroup,
+    );
 
-    this.camera = new THREE.PerspectiveCamera(75, 1, 0.05, 600);
+    // near/far bound the DEPTH PRECISION every screen-space pass reconstructs
+    // from, not just the clip planes. At 0.05/600 the ratio is 12000:1 and the
+    // ambient-occlusion pass could not resolve contact at all — its buffer came
+    // back nearly white. 0.15/400 is still far more range than any venue needs
+    // (the largest is ~550 m across, and fog has swallowed everything long before
+    // the far plane) and triples the precision where it matters.
+    this.camera = new THREE.PerspectiveCamera(75, 1, 0.15, 400);
     this.camera.position.copy(v3(0, 0, EYE_M));
 
     this.controls = new PointerLockControls(this.camera, this.renderer.domElement);
@@ -703,7 +763,9 @@ export class WalkRenderer {
     // respawning would teleport the player during a held pose gesture.
     if (this.spawnedOrdinal !== scene.ordinal) {
       this.spawnedOrdinal = scene.ordinal;
-      this.spawn(scene);
+      // Feed mode's camera is owned by setFeedPose; spawning would yank it to a
+      // hall entrance the moment the floor rebuilt.
+      if (!this.opts.feed) this.spawn(scene);
     }
 
     // The selection gizmo and coverage cones follow the camera poses; only a
@@ -716,6 +778,112 @@ export class WalkRenderer {
     }
   }
 
+  /**
+   * Supply the floors immediately below and above, so an atrium opens onto a real
+   * level instead of onto nothing.
+   *
+   * The shell only builds these when the current floor actually has a void — a
+   * hole in a plate is the ONLY way a neighbouring floor becomes visible, so
+   * rendering them unconditionally would double the scene cost for a view nobody
+   * can see. Neighbours are drawn as shell only (plates, walls, ceilings): no
+   * lights, no props, no cameras, no coverage. They read as a dimmer adjacent
+   * level lit by the ambient and environment terms, which is what a level across
+   * an atrium actually looks like.
+   */
+  setNeighbourScenes(below: Scene3D | null, above: Scene3D | null): void {
+    const sig = `${below ? worldSignature(below) : ""}|${above ? worldSignature(above) : ""}`;
+    if (sig === this.neighbourSig) return;
+    this.neighbourSig = sig;
+    this.clearGroup(this.neighbourGroup);
+    // buildWalls mints a signage atlas per call, and clearGroup cannot reach a
+    // texture held through a material's emissiveMap — so the neighbours' atlases
+    // are tracked and freed explicitly, exactly like the world's.
+    for (const t of this.neighbourSignTextures) t.dispose();
+    this.neighbourSignTextures = [];
+    // A floor's plate sits at y=0 in its OWN scene, so the level below is offset
+    // by ITS storey height (its ceiling + slab), not by this floor's.
+    if (below) this.addNeighbour(below, -below.storeyHeightM);
+    if (above && this.sceneData) this.addNeighbour(above, this.sceneData.storeyHeightM);
+  }
+
+  /** Shell-only build of one adjacent floor, offset vertically by `yOffset`. */
+  private addNeighbour(scene: Scene3D, yOffset: number): void {
+    const g = new THREE.Group();
+    g.position.y = yOffset;
+    if (scene.footprintRing) {
+      const slab = new THREE.Mesh(flatGeo(scene.footprintRing, 0, scene.voids), getMaterial("concrete"));
+      slab.receiveShadow = true;
+      g.add(slab);
+    }
+    for (const patch of scene.floorPatches) {
+      if (patch.ring.length < 3) continue;
+      const mesh = new THREE.Mesh(
+        flatGeo(patch.ring, 0.02, scene.voids),
+        materialForCategory(patch.category, patch.id),
+      );
+      mesh.receiveShadow = true;
+      g.add(mesh);
+    }
+    // Circulation slabs are floor PLATE, so a neighbour's atrium must cut them
+    // too — otherwise the level below an opening shows an intact corridor plate
+    // exactly where the hole should be.
+    for (const p of scene.slabPrisms) {
+      if (p.topM <= p.baseM || p.ring.length < 3) continue;
+      const mesh = new THREE.Mesh(
+        prismGeo(p.ring, p.baseM, p.topM, scene.voids),
+        materialForCategory(p.kind as Category),
+      );
+      mesh.receiveShadow = true;
+      g.add(mesh);
+    }
+    const walls = buildWalls(scene.wallSegs);
+    for (const m of walls.meshes) g.add(m);
+    if (walls.signTexture) this.neighbourSignTextures.push(walls.signTexture);
+    for (const m of buildCeilings(scene.floorPatches, scene.ceilingM, scene.ceilingVoids)) g.add(m);
+    // The neighbour's LUMINAIRES, but not its lights. The fittings are emissive
+    // geometry, so they cost nothing against the forward-rendering light budget
+    // while making the level read as lit — without them an atrium is a hole onto
+    // a dark floor, which is less convincing than no atrium at all. Discarding
+    // `lights` is the whole point: a second floor's worth of real lights would
+    // blow the budget for a level you are only glimpsing.
+    const { meshes: fittings } = buildLighting(scene.floorPatches, scene.ceilingM, (p) =>
+      Math.min(ceilingSpecFor(p.category, p.id).preferredM, scene.ceilingM),
+    );
+    for (const m of fittings) g.add(m);
+    this.neighbourGroup.add(g);
+  }
+
+  /** Park the view at a CCTV pose (feed mode). Applies the stored angle
+   *  conventions exactly: heading from +x CCW, tilt BELOW horizontal, roll CW
+   *  along the view direction — the same poseQuaternion the selection gizmo uses,
+   *  so the feed and the frustum can never disagree about where a camera looks.
+   *  The vertical FOV drives the projection, which is what makes the framing
+   *  honest rather than decorative. */
+  setFeedPose(pose: SceneCameraPose | null): void {
+    this.feedPose = pose;
+    if (!pose) return;
+    this.camera.position.copy(v3(pose.at[0], pose.at[1], pose.mountM));
+    this.camera.quaternion.copy(poseQuaternion(pose.headingDeg, pose.tiltDeg, pose.rollDeg));
+    // A dome sees everything below it; there is no meaningful single frame, so
+    // show the widest honest view rather than pretending it has a heading.
+    this.camera.fov = pose.kind === "dome" ? 110 : Math.min(140, Math.max(20, pose.vfovDeg));
+    this.camera.updateProjectionMatrix();
+  }
+
+  /**
+   * FEED WALL: park N views on one renderer and draw them as scissored tiles.
+   *
+   * ONE renderer, not one per camera. Each WebGLRenderer is its own GL context
+   * and browsers cap those around a dozen — a 4x4 wall of separate contexts would
+   * blow the cap and start silently killing the oldest, which here would include
+   * the MapLibre map underneath. Tiles share this renderer's single scene, so the
+   * world is built once no matter how many cameras are on the wall.
+   */
+  setFeedPoses(poses: SceneCameraPose[]): void {
+    this.feedPoses = poses;
+    if (poses.length > 0) this.setFeedPose(poses[0]);
+  }
+
   setSelectedCamera(id: string | null): void {
     this.selectedId = id;
     this.applySelection();
@@ -725,6 +893,40 @@ export class WalkRenderer {
   setCoverageMode(mode: CoverageMode): void {
     this.coverageMode = mode;
     this.recomputeCoverage();
+  }
+
+  /**
+   * PHOTO MODE. Render one frame at cinematic fidelity and hand back a PNG blob.
+   *
+   * Nothing is animated while this runs, so the frame budget that governs the
+   * interactive path does not apply — the renderer is temporarily pushed to a
+   * supersampled pixel ratio and 4096² coverage shadow maps, one frame is drawn
+   * through the bloom composer, the canvas is read back, and every setting is
+   * restored. The HUD is DOM and never appears in the WebGL canvas, so there is
+   * nothing to hide.
+   *
+   * `preserveDrawingBuffer` is not set on the context (it costs every frame), so
+   * the read-back has to happen in the SAME task as the draw — before the browser
+   * clears the buffer at the next composite. Hence the synchronous
+   * render-then-toBlob, with the restore in a finally so a failed capture can't
+   * strand the renderer at 3x pixel ratio.
+   */
+  async capturePhoto(): Promise<Blob | null> {
+    const prevQuality = this.quality;
+    const prevManual = this.manualQuality;
+    try {
+      if (prevQuality !== "cinematic") this.applyQuality("cinematic");
+      // Draw immediately rather than waiting for the next tick, so the read-back
+      // below sees this frame.
+      this.renderFrame();
+      const canvas = this.renderer.domElement;
+      return await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((b) => resolve(b), "image/png");
+      });
+    } finally {
+      if (prevQuality !== "cinematic") this.applyQuality(prevQuality);
+      this.manualQuality = prevManual;
+    }
   }
 
   /** Public quality control (the HUD button). A manual choice latches
@@ -741,19 +943,31 @@ export class WalkRenderer {
   /** Device pixel ratio per quality. Low renders at 1× (≈4× fewer fragments than
    *  a 2× display) — the single biggest fill-rate lever on the GTX 1650. */
   private pixelRatioForQuality(q: RenderQuality): number {
-    return q === "low" ? 1 : Math.min(window.devicePixelRatio, 2);
+    if (q === "low") return 1;
+    // Cinematic supersamples: render well above display resolution and let the
+    // downscale do the anti-aliasing. Plain SSAA is unglamorous but it is the
+    // single largest quality-per-line win available for a still — it cleans every
+    // edge, every thin mullion and every specular sparkle at once, which no
+    // post-process AA does as well. Capped at 3 so a 4K display doesn't try to
+    // allocate a 12K drawing buffer.
+    if (q === "cinematic") return Math.min(window.devicePixelRatio * 2, 3);
+    return Math.min(window.devicePixelRatio, 2);
   }
 
   /** Coverage shadow-map resolution per quality. Low uses 1024² (≈4× cheaper per
    *  shadow render than 2048²) while KEEPING shadows so coverage stays
    *  occlusion-honest — up to 9 of these render every frame. */
   private shadowMapSizeForQuality(): number {
-    return this.quality === "low" ? 1024 : 2048;
+    if (this.quality === "low") return 1024;
+    return this.quality === "cinematic" ? 4096 : 2048;
   }
 
   private applyQuality(q: RenderQuality): void {
     if (this.quality === q) return;
     this.quality = q;
+    // Ambient occlusion is the most expensive pass in the chain (a full
+    // depth+normal prepass plus a denoise), so Low sheds it entirely.
+    this.pipeline?.setAoEnabled(q !== "low");
     // Low mode must shed the DOMINANT costs, not just bloom: drop pixel ratio
     // (main lever) and shrink the coverage shadow maps. Bloom is additionally
     // skipped by the tick() render-path branch. High restores full fidelity.
@@ -858,6 +1072,7 @@ export class WalkRenderer {
     if (this.controls.isLocked) this.controls.unlock();
     this.controls.dispose();
     this.clearGroup(this.worldGroup);
+    this.clearGroup(this.neighbourGroup);
     this.clearCameraBodies(); // shared geo/mat — don't dispose per body
     this.clearGroup(this.frustumGroup);
     this.clearGroup(this.coverageGroup);
@@ -867,10 +1082,6 @@ export class WalkRenderer {
     this.domeCamGeo.dispose();
     this.camMat.dispose();
     this.camSelMat.dispose();
-    // Free the shared procedural materials/textures + the emissive panel material
-    // exactly once. clearGroup skips shared materials by design (they survive
-    // every rebuild), so this is the only place they're released.
-    this.panelMat.dispose();
     // R3 shared prop resources (stool geometry + material) — freed once here; the
     // per-rebuild stool InstancedMesh buffers were released by clearGroup.
     this.stoolGeo.dispose();
@@ -886,6 +1097,18 @@ export class WalkRenderer {
     // Free the cached canonical fixture geometries + their shared body/emissive
     // materials exactly once (clearGroup skips these userData.shared resources).
     disposeFixtureModels();
+    // Phase A: the cached luminaire geometries + housing/lit-face materials, and
+    // the PMREM environment target. Same contract — shared, so freed only here.
+    disposeLighting();
+    disposeEnvironment();
+    disposeArchitecture();
+    disposeCeilings();
+    for (const t of this.neighbourSignTextures) t.dispose();
+    this.neighbourSignTextures = [];
+    disposeVertical();
+    disposeProps();
+    this.signTexture?.dispose();
+    this.signTexture = null;
     // R4: free the bloom composer + all its passes/render targets before the
     // renderer (UnrealBloomPass owns a mip chain of targets that would otherwise
     // leak on every walk-mode teardown).
@@ -909,27 +1132,27 @@ export class WalkRenderer {
   private rebuildWorld(scene: Scene3D): void {
     this.clearGroup(this.worldGroup);
     const g = this.worldGroup;
-    // Recede-able emissive accents are re-collected each rebuild (the shared
-    // materials persist; the meshes don't). applyWorldDim at the end applies the
-    // current focus state to the freshly built lights/emissive/fog.
-    this.worldEmissive = [];
 
-    // Troweled-concrete ground under everything. PlaneGeometry UVs are 0..1;
-    // rescale them to metres so the shared concrete texture tiles at real-world
-    // scale like the metre-UV floor/prism geometry.
-    const groundGeo = new THREE.PlaneGeometry(2400, 2400);
-    const guv = groundGeo.attributes.uv;
-    for (let i = 0; i < guv.count; i++) guv.setXY(i, guv.getX(i) * 2400, guv.getY(i) * 2400);
-    guv.needsUpdate = true;
-    const ground = new THREE.Mesh(groundGeo, getMaterial("concrete"));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.04;
+    // Troweled-concrete ground under everything, built as a ring rather than a
+    // PlaneGeometry so an atrium can be punched through it. It sits only 4 cm under
+    // the slab, so without the cut it is the FIRST thing visible through a void —
+    // an atrium that reads as a shallow grey tray instead of an opening onto the
+    // level below. ShapeGeometry emits UVs equal to the vertex metre coordinates,
+    // which is exactly the metre-scale tiling the old plane had to rescale for.
+    const GROUND_HALF = 1200;
+    const groundRing: MetreXY[] = [
+      [-GROUND_HALF, -GROUND_HALF],
+      [GROUND_HALF, -GROUND_HALF],
+      [GROUND_HALF, GROUND_HALF],
+      [-GROUND_HALF, GROUND_HALF],
+    ];
+    const ground = new THREE.Mesh(flatGeo(groundRing, -0.04, scene.voids), getMaterial("concrete"));
     ground.receiveShadow = true;
     g.add(ground);
 
     // Footprint slab (concrete beneath the unit floors).
     if (scene.footprintRing) {
-      const slab = new THREE.Mesh(flatGeo(scene.footprintRing, 0), getMaterial("concrete"));
+      const slab = new THREE.Mesh(flatGeo(scene.footprintRing, 0, scene.voids), getMaterial("concrete"));
       slab.receiveShadow = true;
       g.add(slab);
     }
@@ -939,7 +1162,10 @@ export class WalkRenderer {
     // into gaming-carpet / F&B-wood / BOH-concrete.
     for (const patch of scene.floorPatches) {
       if (patch.ring.length < 3) continue;
-      const mesh = new THREE.Mesh(flatGeo(patch.ring, 0.02), materialForCategory(patch.category, patch.id));
+      const mesh = new THREE.Mesh(
+        flatGeo(patch.ring, 0.02, scene.voids),
+        materialForCategory(patch.category, patch.id),
+      );
       mesh.receiveShadow = true;
       g.add(mesh);
     }
@@ -950,7 +1176,7 @@ export class WalkRenderer {
     // Extruded prisms, merged per kind, each drawn with a shared material:
     //  · circulation/lobby low slabs → the category's stone/carpet floor material
     //  · structural columns/obstacles → concrete
-    this.addPrismGroup(scene.slabPrisms, (k) => materialForCategory(k as Category), g);
+    this.addPrismGroup(scene.slabPrisms, (k) => materialForCategory(k as Category), g, scene.voids);
     this.addPrismGroup(scene.structurePrisms, () => getMaterial("concrete"), g);
 
     // Fixtures — R2: detailed parametric models, instanced per kind (one or two
@@ -960,119 +1186,78 @@ export class WalkRenderer {
     // R3 props: stools ringed around the card tables (one InstancedMesh total).
     this.addStools(scene, g);
 
+    // Phase D set dressing (props.ts): ceiling services on the grid, amenity
+    // cabinets/pylons/exit signs from the venue's OWN amenity points, bins, and
+    // queue stanchions at counters. All derived from existing data, all instanced.
+    for (const m of buildProps(
+      scene.floorPatches,
+      scene.amenities,
+      scene.fixturePrisms,
+      (p) => Math.min(ceilingSpecFor(p.category, p.id).preferredM, scene.ceilingM),
+      (p) => ceilingSpecFor(p.category, p.id).system !== "exposed",
+    ).meshes) {
+      g.add(m);
+    }
+
     // Ceiling — acoustic tile (DoubleSide baked into the material). castShadow OFF
     // so coverage lights aren't killed by the plane they hang from (spike-proven).
+    // Ceilings (ceilings.ts). The footprint plane is now only the STRUCTURAL
+    // soffit — a concrete deck closing the box — and each unit builds its own
+    // finished ceiling below it at a height chosen for what the space is, with a
+    // bulkhead closing the step. A single tile plane across the whole footprint
+    // gave every venue the same ceiling and, worse, the same section: floor at 0,
+    // ceiling at H, nothing in between anywhere.
     if (scene.footprintRing) {
-      const ceil = new THREE.Mesh(flatGeo(scene.footprintRing, scene.ceilingM + 0.02), getMaterial("ceilingTile"));
-      ceil.castShadow = false;
-      g.add(ceil);
-      this.addCeilingPanels(scene, g);
+      const deck = new THREE.Mesh(
+        flatGeo(scene.footprintRing, scene.ceilingM + 0.02, scene.ceilingVoids),
+        getDeckMaterial(),
+      );
+      deck.castShadow = false;
+      g.add(deck);
     }
+    for (const m of buildCeilings(scene.floorPatches, scene.ceilingM, scene.ceilingVoids)) g.add(m);
 
+    // Stair flights + lift doors (vertical.ts). Stair and elevator units used to
+    // render as ordinary rooms — a stairwell with a flat floor.
+    for (const m of buildVertical(scene.floorPatches, scene.ceilingM).meshes) g.add(m);
+
+    // Base rig + visible luminaires + bounded zone lights (lighting.ts). This also
+    // supersedes the old emissive ceiling-panel grid and the pit pendants: the
+    // fittings ARE the panels now, and the gaming zone's weight-1.0 pendants win
+    // the real-light budget where the pit lights used to be hand-placed.
     this.addHouseLights(scene, g);
-    // R3 atmosphere: pit pendants (bounded warm PointLights) + neon signage
-    // valances (emissive geometry, no light objects).
-    this.addPitLights(scene, g);
+    // Neon signage valances (emissive geometry, no light objects).
     this.addSignage(scene, g);
-
-    // Apply the current camera-primary recede state to the freshly built lights,
-    // emissive accents and fog (persists across a world-only edit while focused).
-    this.applyWorldDim();
   }
 
-  /** Sparse grid of small emissive quads on the ceiling so it reads as lit — no
-   *  light objects (that's R3), just bright geometry. Merged into one mesh under
-   *  the shared emissive panel material; capped at MAX_CEILING_PANELS. */
-  private addCeilingPanels(scene: Scene3D, group: THREE.Group): void {
-    const ring = scene.footprintRing;
-    if (!ring) return;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const [x, y] of ring) {
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-    }
-    const spanX = Math.max(maxX - minX, 1);
-    const spanY = Math.max(maxY - minY, 1);
-    const step = Math.max(CEILING_PANEL_STEP_M, Math.sqrt((spanX * spanY) / MAX_CEILING_PANELS));
-    const hy = scene.ceilingM - 0.03;
-    const quads: THREE.BufferGeometry[] = [];
-    for (let x = minX + step / 2; x <= maxX && quads.length < MAX_CEILING_PANELS; x += step) {
-      for (let y = minY + step / 2; y <= maxY && quads.length < MAX_CEILING_PANELS; y += step) {
-        if (!pointInRing([x, y], ring)) continue;
-        const q = new THREE.PlaneGeometry(0.7, 1.3);
-        q.rotateX(Math.PI / 2); // face down (−Y)
-        q.translate(x, hy, -y); // model (x,y) → three (x, ·, −y)
-        quads.push(q);
-      }
-    }
-    if (quads.length === 0) return;
-    const merged = mergeGeometries(quads, false);
-    quads.forEach((q) => q.dispose());
-    if (!merged) return;
-    const mesh = new THREE.Mesh(merged, this.panelMat);
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    group.add(mesh);
-    // Recede-able: the ceiling glow dims with the world when a camera is focused.
-    this.worldEmissive.push({ mat: this.panelMat, base: PANEL_EMISSIVE_I });
-  }
-
+  /** Walls, delegated to architecture.ts: hole-free walls stay instanced per
+   *  finish, walls carrying an opening are built as spans around the hole, and
+   *  every opening gets its furniture (lining + leaf, or mullions + glazing + a
+   *  lettered signage band). Also emits the baseboard and cornice trim.
+   *
+   *  The sign atlas texture is per-rebuild, so it is stashed and disposed with the
+   *  rest of the world on the next rebuild — clearGroup only frees geometry and
+   *  non-shared materials, and a CanvasTexture referenced by a material's
+   *  emissiveMap would otherwise leak one 2048² texture per rebuild. */
   private addWalls(scene: Scene3D, group: THREE.Group): void {
-    const segs = scene.wallSegs;
-    if (segs.length === 0) return;
-    // Wall boxes (unit box scaled to len × height × thickness) and a matching
-    // baseboard box (short, slightly proud of the wall face) share one per-segment
-    // transform — one InstancedMesh each, both with shared materials.
-    const wallProto = new THREE.BoxGeometry(1, 1, WALL_THICKNESS_M);
-    const baseProto = new THREE.BoxGeometry(1, 1, WALL_THICKNESS_M * 1.15);
-    const walls = new THREE.InstancedMesh(wallProto, getMaterial("wallPaint"), segs.length);
-    const bases = new THREE.InstancedMesh(baseProto, getMaterial("woodPanel"), segs.length);
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
-    let n = 0;
-    for (const s of segs) {
-      const dx = s.b[0] - s.a[0];
-      const dy = s.b[1] - s.a[1];
-      const len = Math.hypot(dx, dy);
-      if (len < 1e-6) continue;
-      const top = s.topM;
-      const cx = (s.a[0] + s.b[0]) / 2;
-      const cy = (s.a[1] + s.b[1]) / 2;
-      // model heading atan2(dy,dx); in three (-y) space the yaw about +Y matches.
-      q.setFromAxisAngle(up, Math.atan2(dy, dx));
-      m.compose(v3(cx, cy, top / 2), q, new THREE.Vector3(len, top, 1));
-      walls.setMatrixAt(n, m);
-      m.compose(v3(cx, cy, BASEBOARD_H / 2), q, new THREE.Vector3(len, BASEBOARD_H, 1));
-      bases.setMatrixAt(n, m);
-      n++;
-    }
-    walls.count = n;
-    bases.count = n;
-    walls.instanceMatrix.needsUpdate = true;
-    bases.instanceMatrix.needsUpdate = true;
-    walls.castShadow = true;
-    walls.receiveShadow = true;
-    bases.castShadow = true;
-    bases.receiveShadow = true;
-    group.add(walls, bases);
+    if (scene.wallSegs.length === 0) return;
+    const { meshes, signTexture } = buildWalls(scene.wallSegs);
+    for (const m of meshes) group.add(m);
+    this.signTexture?.dispose();
+    this.signTexture = signTexture;
   }
 
   private addPrismGroup(
     prisms: ScenePrism[],
     matFor: (kind: string) => THREE.MeshStandardMaterial,
     group: THREE.Group,
+    holes: MetreXY[][] = [],
   ): void {
     const byKind = new Map<string, THREE.BufferGeometry[]>();
     for (const p of prisms) {
       if (p.topM <= p.baseM || p.ring.length < 3) continue;
       const arr = byKind.get(p.kind) ?? [];
-      arr.push(prismGeo(p.ring, p.baseM, p.topM));
+      arr.push(prismGeo(p.ring, p.baseM, p.topM, holes));
       byKind.set(p.kind, arr);
     }
     for (const [kind, geos] of byKind) {
@@ -1163,6 +1348,18 @@ export class WalkRenderer {
       q.setFromAxisAngle(up, frame.angleRad);
       m.compose(pos, q, scl);
       body.setMatrixAt(n, m);
+      // Per-instance tint. A bank of 40 slot cabinets rendered from one canonical
+      // model is 40 pixel-identical clones, and the eye reads a repeating field
+      // faster than it reads any single object in it — the clone pattern was more
+      // visible than the model detail. A small deterministic value/warmth shift per
+      // fixture id breaks it up at zero geometry cost (instanceColor MULTIPLIES the
+      // material, so this modulates the baked vertex colours rather than replacing
+      // them). Keyed by id, so a rebuild never reshuffles the pattern.
+      const h1 = hash01(p.id);
+      const h2 = hash01(`${p.id}:w`);
+      const v = 0.88 + h1 * 0.24; // value
+      const warm = (h2 - 0.5) * 0.06; // warm/cool drift
+      body.setColorAt(n, TINT.setRGB(v + warm, v, v - warm));
       if (emissive) emissive.setMatrixAt(n, m);
       n++;
     }
@@ -1174,6 +1371,7 @@ export class WalkRenderer {
     }
     body.count = n;
     body.instanceMatrix.needsUpdate = true;
+    if (body.instanceColor) body.instanceColor.needsUpdate = true;
     body.castShadow = true;
     body.receiveShadow = true;
     group.add(body);
@@ -1436,8 +1634,6 @@ export class WalkRenderer {
         mesh.castShadow = false;
         mesh.receiveShadow = false;
         group.add(mesh);
-        // Recede-able: dims with the world when a camera is focused.
-        this.worldEmissive.push({ mat, base: FX_BOTTLE_I });
       }
     }
   }
@@ -1456,109 +1652,27 @@ export class WalkRenderer {
     group.add(mesh);
   }
 
+  /** The whole lighting layer, delegated to lighting.ts: the always-on base rig,
+   *  the VISIBLE fittings (instanced per kind + colour temperature, laid out on
+   *  each room's own grid and aligned to its principal axis), and the bounded set
+   *  of real lights that shade the space — each taking its host zone's colour
+   *  temperature so a 2700 K bar and a 5000 K plant room read as different places.
+   *
+   *  Replaces the old rig wholesale. That one placed 8 INVISIBLE PointLights on a
+   *  footprint-wide grid that ignored rooms entirely, so every space in the venue
+   *  was lit identically by nothing the player could see. */
   private addHouseLights(scene: Scene3D, group: THREE.Group): void {
-    // Rebalanced for ACES tone mapping (which darkens/desaturates the raw image):
-    // raised so the space isn't muddy, but kept cool + dim so the green coverage
-    // cones and camera bodies stay the brightest, most saturated things in frame.
-    // Every recede-able light stamps its full intensity in userData.baseIntensity
-    // so applyWorldDim can scale it and restore it exactly (camera-primary focus).
-    const ambient = new THREE.AmbientLight(0x8090b0, 1.4);
-    ambient.userData.baseIntensity = 1.4;
-    const hemi = new THREE.HemisphereLight(0x46506e, 0x14161a, 1.9);
-    hemi.userData.baseIntensity = 1.9;
-    group.add(ambient, hemi);
-    // Soft overhead "house lighting" fill — a straight-down DirectionalLight has
-    // no distance falloff, so it lights every floor evenly and makes the floor
-    // materials actually read (the warm PointLights below sit just under the
-    // ceiling and only pool light directly beneath each). No shadow: the shadow
-    // budget belongs to the coverage cones. Kept cool + moderate so cameras/cones
-    // stay the brightest, most saturated things in frame (camera-primary).
-    const fill = new THREE.DirectionalLight(0xbcc6e0, 2.0);
-    fill.userData.baseIntensity = 2.0;
-    fill.position.set(0, 10, 0);
-    fill.target.position.set(0, 0, 0);
-    group.add(fill, fill.target);
-
-    const ring = scene.footprintRing;
-    const pts = ring ?? scene.floorPatches.flatMap((p) => p.ring);
-    if (pts.length === 0) return;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const [x, y] of pts) {
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-    }
-    // Sit the warm downlights lower than flush-to-ceiling so they wash the FLOOR,
-    // not just blast the ceiling tile 0.3 m above them.
-    const h = Math.min(scene.ceilingM - 0.3, scene.ceilingM * 0.7);
-    // Widen the grid step on large floors so the bounded light budget spreads
-    // evenly across the whole footprint instead of clustering in the min-corner
-    // (a plain cap fills row-major and bottom-left-biases). sqrt(area/budget)
-    // yields ≈budget cells; the HOUSE_LIGHT_STEP_M floor keeps small rooms from
-    // over-lighting. Range-55 lights overlap generously at these spacings.
-    const spanX = Math.max(maxX - minX, 1);
-    const spanY = Math.max(maxY - minY, 1);
-    const step = Math.max(HOUSE_LIGHT_STEP_M, Math.sqrt((spanX * spanY) / MAX_HOUSE_LIGHTS));
-    // Inverse-square-ish falloff means lifting a light from 2.24 m to 4.9 m costs
-    // the floor most of its light. Compensate by the same decay exponent so floor
-    // illuminance holds roughly constant as ceilings rise (1× at the 3.2 m default
-    // — legacy venues unchanged), capped so a freak ceiling can't blow out bloom.
-    const DECAY = 1.25;
-    const boost = Math.min(
-      HOUSE_LIGHT_MAX_BOOST,
-      Math.max(1, Math.pow(h / HOUSE_LIGHT_TUNED_H, DECAY)),
+    for (const o of buildBaseRig()) group.add(o);
+    // Fittings mount to each space's FINISHED ceiling (ceilings.ts), not the
+    // level's structural one — otherwise every shop and corridor light sits above
+    // its own ceiling tile, invisible, lighting the back of the plane. Passed as a
+    // callback rather than imported inside lighting.ts, because ceilings.ts
+    // already depends on lighting.ts for zone colour temperature.
+    const { meshes, lights } = buildLighting(scene.floorPatches, scene.ceilingM, (p) =>
+      Math.min(ceilingSpecFor(p.category, p.id).preferredM, scene.ceilingM),
     );
-    const intensity = 55 * boost;
-    const range = Math.max(60, h * 12);
-    let placed = 0;
-    for (let x = minX + step / 2; x <= maxX && placed < MAX_HOUSE_LIGHTS; x += step) {
-      for (let y = minY + step / 2; y <= maxY && placed < MAX_HOUSE_LIGHTS; y += step) {
-        if (ring && !pointInRing([x, y], ring)) continue;
-        const p = new THREE.PointLight(0xffd9a0, intensity, range, DECAY);
-        p.userData.baseIntensity = intensity;
-        p.position.copy(v3(x, y, h));
-        group.add(p);
-        placed++;
-      }
-    }
-  }
-
-  /** Pit pendants: cluster the gaming-table fixtures into pit regions (grid-bucket
-   *  their centroids at PIT_GRID_M) and drop ONE warm, shadow-free PointLight over
-   *  each of the densest MAX_PIT_LIGHTS pits at PIT_LIGHT_H, so the tables pool in
-   *  light as the room's focus. Bounded + shadow-free — merged into the forward
-   *  light budget (see MAX_HOUSE_LIGHTS). No-op on floors with no tables. */
-  private addPitLights(scene: Scene3D, group: THREE.Group): void {
-    const buckets = new Map<string, { x: number; y: number; n: number }>();
-    for (const p of scene.fixturePrisms) {
-      if (!PIT_TABLE_KINDS.has(p.kind as FixtureKind)) continue;
-      const c = centroid(p.ring);
-      if (!c) continue;
-      const key = `${Math.floor(c[0] / PIT_GRID_M)}:${Math.floor(c[1] / PIT_GRID_M)}`;
-      const b = buckets.get(key);
-      if (b) {
-        b.x += c[0];
-        b.y += c[1];
-        b.n++;
-      } else {
-        buckets.set(key, { x: c[0], y: c[1], n: 1 });
-      }
-    }
-    if (buckets.size === 0) return;
-    // Densest pits first, so a floor with more clusters than the cap lights the
-    // busiest tables rather than whichever bucket hashed first.
-    const pits = [...buckets.values()].sort((a, b) => b.n - a.n).slice(0, MAX_PIT_LIGHTS);
-    const h = Math.min(PIT_LIGHT_H, scene.ceilingM - 0.2);
-    for (const pit of pits) {
-      const light = new THREE.PointLight(PIT_LIGHT_COLOR, PIT_LIGHT_INTENSITY, PIT_LIGHT_RANGE, PIT_LIGHT_DECAY);
-      light.userData.baseIntensity = PIT_LIGHT_INTENSITY;
-      light.position.copy(v3(pit.x / pit.n, pit.y / pit.n, h));
-      group.add(light);
-    }
+    for (const m of meshes) group.add(m);
+    for (const l of lights) group.add(l);
   }
 
   /** Neon signage: a thin emissive valance along the top of every functional
@@ -1605,7 +1719,6 @@ export class WalkRenderer {
       mesh.castShadow = false;
       mesh.receiveShadow = false;
       group.add(mesh);
-      this.worldEmissive.push({ mat, base: SIGNAGE_EMISSIVE_I });
     }
   }
 
@@ -1667,34 +1780,6 @@ export class WalkRenderer {
     group.add(stools);
   }
 
-  /** Camera-primary world-recede. Scales every recede-able light to its stored
-   *  base × the focus factor, deepens the fog, and dims the signage/ceiling
-   *  emissive — or restores all three exactly when unfocused. Cheap: property
-   *  writes only, no rebuild, no allocation. The coverage spotlights and camera-
-   *  body emissive are out of scope and stay full. */
-  private applyWorldDim(): void {
-    const lf = this.focused ? FOCUS_LIGHT_SCALE : 1;
-    // Every stamped light is a DIRECT child of worldGroup, so a shallow walk
-    // suffices (this runs per-tick during a pose drag — no deep traverse).
-    for (const o of this.worldGroup.children) {
-      const base = o.userData.baseIntensity;
-      if (typeof base === "number" && (o as THREE.Light).isLight) {
-        (o as THREE.Light).intensity = base * lf;
-      }
-    }
-    const ef = this.focused ? FOCUS_EMISSIVE_SCALE : 1;
-    for (const e of this.worldEmissive) e.mat.emissiveIntensity = e.base * ef;
-    const fog = this.scene.fog;
-    if (fog instanceof THREE.FogExp2) {
-      fog.density = BASE_FOG_DENSITY * (this.focused ? FOCUS_FOG_SCALE : 1);
-    }
-  }
-
-  /** Toggle the world-recede on (a camera is selected) or off, then apply it. */
-  private setFocus(on: boolean): void {
-    this.focused = on;
-    this.applyWorldDim();
-  }
 
   private rebuildCameraBodies(scene: Scene3D): void {
     this.clearCameraBodies();
@@ -1781,9 +1866,8 @@ export class WalkRenderer {
 
   private applySelection(): void {
     this.clearGroup(this.frustumGroup);
-    // Camera-primary: a selected camera makes the rest of the world recede (dim
-    // lights, deepen fog, dim signage) so the lit cone + emphasized body dominate.
-    this.setFocus(this.selectedId != null);
+    // VENUE-PRIMARY: selecting a camera no longer dims the building. Emphasis is
+    // carried entirely by the camera's own body material and its gizmo.
     // Emphasise the selected camera body by swapping its shared material pointer
     // to the bright selection material (mutating emissiveIntensity would hit the
     // ONE shared base material and light every camera). Cheap: a pointer swap
@@ -1862,7 +1946,21 @@ export class WalkRenderer {
   }
 
   private addCoverageLight(pose: SceneCameraPose): void {
-    const spot = new THREE.SpotLight(0x39ff88, 30, pose.rangeM, 0.5, 0.3, 0);
+    // VENUE-PRIMARY re-tune, solved rather than guessed — same trap as the house
+    // rig, one step worse. `decay: 0` means NO distance falloff, so within the cone
+    // irradiance IS the intensity, and a lit floor of albedo A returns
+    // intensity·A/π. The shipped value of 30 therefore returned ≈2.9 linear: nearly
+    // 3× overexposed on its own, invisible only because the old rig dimmed the
+    // whole world to 40% around it. Raising it for a bright venue (the obvious
+    // move, and wrong) turned `nearby 8` into a solid green screen.
+    //
+    // Target instead: the cone should ADD roughly a third of a stop over the lit
+    // floor, so it reads as coverage tinting a space you can still see, and eight
+    // overlapping cones stay legible as eight cones.
+    //     intensity = L_target · π / A_ref = 0.42 · π / 0.3 ≈ 4.4
+    // Decay stays 0 on purpose: coverage is a binary "seen / not seen" claim, so
+    // the far edge of a sightline must read exactly as strongly as the near edge.
+    const spot = new THREE.SpotLight(0x39ff88, 4.4, pose.rangeM, 0.5, 0.22, 0);
     spot.castShadow = true;
     const sm = this.shadowMapSizeForQuality();
     spot.shadow.mapSize.set(sm, sm);
@@ -1896,7 +1994,13 @@ export class WalkRenderer {
     this.raf = requestAnimationFrame(this.tick);
     const dt = Math.min(this.clock.getDelta(), 0.05);
 
-    if (this.controls.isLocked) {
+    if (this.opts.feed) {
+      const p = this.feedPoses.length > 1 ? null : this.feedPose;
+      if (p) {
+        this.camera.position.copy(v3(p.at[0], p.at[1], p.mountM));
+        this.camera.quaternion.copy(poseQuaternion(p.headingDeg, p.tiltDeg, p.rollDeg));
+      }
+    } else if (this.controls.isLocked) {
       const fast = this.keys.has("ControlLeft") || this.keys.has("ControlRight");
       const sp = fast ? RUN_SPEED : WALK_SPEED;
       const f = (this.keys.has("KeyW") ? 1 : 0) - (this.keys.has("KeyS") ? 1 : 0);
@@ -1931,9 +2035,62 @@ export class WalkRenderer {
       this.sampleAutoQuality(dt);
     }
 
-    if (this.quality === "high" && this.pipeline) this.pipeline.render();
-    else this.renderer.render(this.scene, this.camera);
+    this.renderFrame();
   };
+
+  /** Draw one frame on the current quality's path. Split out of tick() so photo
+   *  mode can force a draw and read the canvas back in the same task. */
+  private renderFrame(): void {
+    if (this.opts.feed && this.feedPoses.length > 1) {
+      this.renderTiles();
+      return;
+    }
+    if (this.quality !== "low" && this.pipeline) this.pipeline.render();
+    else this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Draw one tile per pose across the canvas, row-major. Scissor is what keeps
+   *  each tile's clear from wiping its neighbours; without it every tile after
+   *  the first draws onto a canvas the previous one just cleared. The composer is
+   *  bypassed deliberately — it owns full-canvas render targets and has no
+   *  concept of a viewport, so bloom/AO would smear across tile boundaries. */
+  private renderTiles(): void {
+    const n = this.feedPoses.length;
+    const cols = Math.ceil(Math.sqrt(n));
+    const rows = Math.ceil(n / cols);
+    const size = this.renderer.getSize(new THREE.Vector2());
+    const tw = Math.floor(size.x / cols);
+    const th = Math.floor(size.y / rows);
+
+    this.renderer.setScissorTest(true);
+    this.renderer.setViewport(0, 0, size.x, size.y);
+    this.renderer.setScissor(0, 0, size.x, size.y);
+    this.renderer.clear();
+
+    const prevAspect = this.camera.aspect;
+    const prevFov = this.camera.fov;
+    for (let i = 0; i < n; i++) {
+      const p = this.feedPoses[i];
+      const cx = i % cols;
+      // WebGL's viewport origin is BOTTOM-left while a UI grid reads top-left,
+      // so the row is flipped or tile 1 renders in the wrong corner.
+      const cy = rows - 1 - Math.floor(i / cols);
+      this.renderer.setViewport(cx * tw, cy * th, tw, th);
+      this.renderer.setScissor(cx * tw, cy * th, tw, th);
+      this.camera.position.copy(v3(p.at[0], p.at[1], p.mountM));
+      this.camera.quaternion.copy(poseQuaternion(p.headingDeg, p.tiltDeg, p.rollDeg));
+      this.camera.aspect = tw / Math.max(1, th);
+      this.camera.fov = p.kind === "dome" ? 110 : Math.min(140, Math.max(20, p.vfovDeg));
+      this.camera.updateProjectionMatrix();
+      this.renderer.render(this.scene, this.camera);
+    }
+
+    this.renderer.setScissorTest(false);
+    this.renderer.setViewport(0, 0, size.x, size.y);
+    this.camera.aspect = prevAspect;
+    this.camera.fov = prevFov;
+    this.camera.updateProjectionMatrix();
+  }
 
   /** One-shot auto quality fallback. While locked at High (real in-scene load),
    *  collect frame times past a warmup window; once the sample window fills,

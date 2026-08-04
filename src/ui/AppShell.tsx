@@ -16,11 +16,13 @@ import { selectableUnits } from "../building";
 // init-effect cleanup calls map.remove(), destroying the MapLibre instance. The
 // walk view mounts as an absolutely-positioned sibling OVER the (still-mounted) map.
 const WalkView = lazy(() => import("../editor3d/WalkView"));
+const FeedWall = lazy(() => import("../editor3d/FeedWall"));
 
 export default function AppShell() {
   const building = useStore((s) => s.building);
   const mode = useStore((s) => s.mode);
   const walkMode = useStore((s) => s.walkMode);
+  const feedWall = useStore((s) => s.feedWall);
   const selectedId = useStore((s) => s.selectedId);
   const startId = useStore((s) => s.startId);
   const goalId = useStore((s) => s.goalId);
@@ -95,6 +97,11 @@ export default function AppShell() {
         {walkMode && (
           <Suspense fallback={null}>
             <WalkView />
+          </Suspense>
+        )}
+        {feedWall && (
+          <Suspense fallback={null}>
+            <FeedWall />
           </Suspense>
         )}
       </div>
