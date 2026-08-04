@@ -3226,7 +3226,87 @@ button.wide.ghost {
   padding: 3px 8px;
   cursor: pointer;
 }
-.feedwall-stage { position: relative; flex: 1; min-height: 0; }
+.feedwall-body { display: flex; flex: 1; min-height: 0; }
+.feedwall-stage { position: relative; flex: 1; min-width: 0; min-height: 0; }
+
+/* Left rail: every wall this building can show. Auto room groups come from the
+   map, saved walls are the operator's own. One click to switch. */
+.feedwall-rail {
+  flex: 0 0 210px;
+  overflow-y: auto;
+  background: var(--panel, #0d1117);
+  border-right: 1px solid var(--line);
+  font: 11px/1.4 var(--mono, ui-monospace, monospace);
+  padding-bottom: 8px;
+}
+.feedwall-rail-head {
+  padding: 7px 10px 6px;
+  color: var(--accent, #39ff88);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 10px;
+  position: sticky;
+  top: 0;
+  background: var(--panel, #0d1117);
+  border-bottom: 1px solid var(--line);
+}
+.feedwall-rail-sep {
+  padding: 9px 10px 3px;
+  color: var(--muted, #7d8590);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+.feedwall-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: #b9c2cc;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.feedwall-rail-item:hover { background: rgba(255, 255, 255, 0.04); color: #e6ebf0; }
+.feedwall-rail-item.on {
+  background: rgba(57, 255, 136, 0.08);
+  border-left-color: var(--accent, #39ff88);
+  color: #e6ebf0;
+}
+.fwr-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fwr-n { color: var(--muted, #7d8590); font-variant-numeric: tabular-nums; }
+.feedwall-rail-add {
+  display: block;
+  width: calc(100% - 20px);
+  margin: 10px;
+  padding: 5px;
+  background: transparent;
+  border: 1px dashed var(--line);
+  color: var(--muted, #7d8590);
+  font: inherit;
+  cursor: pointer;
+}
+.feedwall-rail-add:hover { color: #e6ebf0; border-color: var(--accent, #39ff88); }
+
+.feedwall-wallname { color: #e6ebf0; }
+.feedwall-solo-name { color: var(--accent, #39ff88); font-size: 13px; letter-spacing: 0.1em; }
+.feedwall-solo-ctx { color: var(--muted, #7d8590); }
+.feedwall-pager { display: flex; align-items: center; gap: 4px; }
+.feedwall-pager button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: #b9c2cc;
+  padding: 1px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.feedwall-pager button:disabled { opacity: 0.35; cursor: default; }
+.feedwall-pageno { color: var(--muted, #7d8590); font-variant-numeric: tabular-nums; }
 .feedwall-canvas { position: absolute; inset: 0; }
 .feedwall-canvas canvas { display: block; width: 100% !important; height: 100% !important; }
 .feedwall-grid {
@@ -3236,10 +3316,18 @@ button.wide.ghost {
   gap: 0;
   pointer-events: none;
 }
+/* Tiles take the pointer so a double-click can fullscreen one; the grid itself
+   stays transparent and the tags stay decorative. Nothing else in the wall wants
+   canvas clicks (onPickCamera is a no-op here). */
 .feedwall-tile {
   position: relative;
   border: 1px solid rgba(255, 255, 255, 0.14);
+  pointer-events: auto;
+  cursor: zoom-in;
 }
+.feedwall-tile:hover { border-color: rgba(255, 255, 255, 0.4); }
+.feedwall-tile.solo { cursor: zoom-out; border-color: transparent; }
+.feedwall-tile.solo:hover { border-color: rgba(255, 255, 255, 0.25); }
 .feedwall-tag {
   position: absolute;
   left: 6px;
