@@ -1,4 +1,4 @@
-import { Box, Footprints, Grid3x3, Ruler } from "lucide-react";
+import { Box, Footprints, Grid3x3, LayoutGrid, Ruler } from "lucide-react";
 import { useStore } from "../store";
 import LayersControl from "./LayersControl";
 
@@ -14,6 +14,8 @@ export default function ViewControls() {
   const view3d = useStore((s) => s.view3d);
   const setView3d = useStore((s) => s.setView3d);
   const walkMode = useStore((s) => s.walkMode);
+  const feedWall = useStore((s) => s.feedWall);
+  const setFeedWall = useStore((s) => s.setFeedWall);
   const setWalkMode = useStore((s) => s.setWalkMode);
 
   return (
@@ -49,6 +51,13 @@ export default function ViewControls() {
         onClick={() => setWalkMode(!walkMode)}
       >
         <Footprints size={15} />
+      </button>
+      <button
+        className={feedWall ? "active" : ""}
+        title="Feed wall (operator view)"
+        onClick={() => setFeedWall(!feedWall)}
+      >
+        <LayoutGrid size={15} />
       </button>
       <div className="unittoggle">
         <button className={unit === "m" ? "active" : ""} onClick={() => setUnit("m")}>

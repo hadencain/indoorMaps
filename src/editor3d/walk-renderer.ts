@@ -644,6 +644,7 @@ export class WalkRenderer {
   private readonly coverageLights = new Map<string, THREE.SpotLight>();
   private raf: number | null = null;
   private feedPose: SceneCameraPose | null = null;
+  private feedPoses: SceneCameraPose[] = [];
 
   // R4 quality valve. `quality` selects the render path in tick(): "high" runs the
   // bloom composer, "low" a plain forward render. The pipeline is built once and
@@ -867,6 +868,20 @@ export class WalkRenderer {
     // show the widest honest view rather than pretending it has a heading.
     this.camera.fov = pose.kind === "dome" ? 110 : Math.min(140, Math.max(20, pose.vfovDeg));
     this.camera.updateProjectionMatrix();
+  }
+
+  /**
+   * FEED WALL: park N views on one renderer and draw them as scissored tiles.
+   *
+   * ONE renderer, not one per camera. Each WebGLRenderer is its own GL context
+   * and browsers cap those around a dozen — a 4x4 wall of separate contexts would
+   * blow the cap and start silently killing the oldest, which here would include
+   * the MapLibre map underneath. Tiles share this renderer's single scene, so the
+   * world is built once no matter how many cameras are on the wall.
+   */
+  setFeedPoses(poses: SceneCameraPose[]): void {
+    this.feedPoses = poses;
+    if (poses.length > 0) this.setFeedPose(poses[0]);
   }
 
   setSelectedCamera(id: string | null): void {
@@ -1980,7 +1995,7 @@ export class WalkRenderer {
     const dt = Math.min(this.clock.getDelta(), 0.05);
 
     if (this.opts.feed) {
-      const p = this.feedPose;
+      const p = this.feedPoses.length > 1 ? null : this.feedPose;
       if (p) {
         this.camera.position.copy(v3(p.at[0], p.at[1], p.mountM));
         this.camera.quaternion.copy(poseQuaternion(p.headingDeg, p.tiltDeg, p.rollDeg));
@@ -2026,8 +2041,55 @@ export class WalkRenderer {
   /** Draw one frame on the current quality's path. Split out of tick() so photo
    *  mode can force a draw and read the canvas back in the same task. */
   private renderFrame(): void {
+    if (this.opts.feed && this.feedPoses.length > 1) {
+      this.renderTiles();
+      return;
+    }
     if (this.quality !== "low" && this.pipeline) this.pipeline.render();
     else this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Draw one tile per pose across the canvas, row-major. Scissor is what keeps
+   *  each tile's clear from wiping its neighbours; without it every tile after
+   *  the first draws onto a canvas the previous one just cleared. The composer is
+   *  bypassed deliberately — it owns full-canvas render targets and has no
+   *  concept of a viewport, so bloom/AO would smear across tile boundaries. */
+  private renderTiles(): void {
+    const n = this.feedPoses.length;
+    const cols = Math.ceil(Math.sqrt(n));
+    const rows = Math.ceil(n / cols);
+    const size = this.renderer.getSize(new THREE.Vector2());
+    const tw = Math.floor(size.x / cols);
+    const th = Math.floor(size.y / rows);
+
+    this.renderer.setScissorTest(true);
+    this.renderer.setViewport(0, 0, size.x, size.y);
+    this.renderer.setScissor(0, 0, size.x, size.y);
+    this.renderer.clear();
+
+    const prevAspect = this.camera.aspect;
+    const prevFov = this.camera.fov;
+    for (let i = 0; i < n; i++) {
+      const p = this.feedPoses[i];
+      const cx = i % cols;
+      // WebGL's viewport origin is BOTTOM-left while a UI grid reads top-left,
+      // so the row is flipped or tile 1 renders in the wrong corner.
+      const cy = rows - 1 - Math.floor(i / cols);
+      this.renderer.setViewport(cx * tw, cy * th, tw, th);
+      this.renderer.setScissor(cx * tw, cy * th, tw, th);
+      this.camera.position.copy(v3(p.at[0], p.at[1], p.mountM));
+      this.camera.quaternion.copy(poseQuaternion(p.headingDeg, p.tiltDeg, p.rollDeg));
+      this.camera.aspect = tw / Math.max(1, th);
+      this.camera.fov = p.kind === "dome" ? 110 : Math.min(140, Math.max(20, p.vfovDeg));
+      this.camera.updateProjectionMatrix();
+      this.renderer.render(this.scene, this.camera);
+    }
+
+    this.renderer.setScissorTest(false);
+    this.renderer.setViewport(0, 0, size.x, size.y);
+    this.camera.aspect = prevAspect;
+    this.camera.fov = prevFov;
+    this.camera.updateProjectionMatrix();
   }
 
   /** One-shot auto quality fallback. While locked at High (real in-scene load),

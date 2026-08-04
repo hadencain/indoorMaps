@@ -302,6 +302,8 @@ interface State {
    *  NOT in the persisted DISPLAY_KEY payload — reopening the app never drops
    *  you into the 3D walk view. Available in both edit and display modes. */
   walkMode: boolean;
+  /** Operator feed wall overlay (N camera views on one screen). */
+  feedWall: boolean;
   // The patrol route currently emphasized on the map (others dimmed). Session-only.
   highlightedPatrolId: string | null;
   selectedId: string | null;
@@ -364,6 +366,7 @@ interface State {
   /** Toggle the first-person walk editor. Entering also clears the transient
    *  inspect probe (it has no 3D representation and would be stale on return). */
   setWalkMode: (on: boolean) => void;
+  setFeedWall: (on: boolean) => void;
   setHighlightedPatrol: (id: string | null) => void;
   setDraftCategory: (c: Category) => void;
   setOrdinal: (o: number) => void;
@@ -556,6 +559,7 @@ export const useStore = create<State>((set, get) => {
     amenityFilter: DISPLAY0.amenityFilter,
     view3d: DISPLAY0.view3d,
     walkMode: false,
+    feedWall: false,
     highlightedPatrolId: null,
     selectedId: null,
     selectedIds: [],
@@ -750,7 +754,11 @@ export const useStore = create<State>((set, get) => {
     // Session-only (never persisted). Entering clears the transient probe — a
     // click-to-camera overlay has no representation in the 3D walk view and
     // would be stale on return. UI side effect stays a plain set (no commit).
-    setWalkMode: (on) => set(on ? { walkMode: true, probe: null } : { walkMode: false }),
+    setWalkMode: (on) => set(on ? { walkMode: true, probe: null, feedWall: false } : { walkMode: false }),
+    // The wall owns the screen: walk mode and the wall are both full-surface
+    // renderers, and running them together means two GL contexts drawing the
+    // same world for no reason.
+    setFeedWall: (on) => set(on ? { feedWall: true, walkMode: false, probe: null } : { feedWall: false }),
     setHighlightedPatrol: (id) => set((s) => ({ highlightedPatrolId: s.highlightedPatrolId === id ? null : id })),
     setDraftCategory: (c) => set({ draftCategory: c }),
     // Floor change clears floor-scoped transient state: a probe/selected camera
