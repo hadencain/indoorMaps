@@ -4,7 +4,7 @@ import { distM } from "../../geo";
 import { formatLength } from "../../format";
 import { rankCamerasForPoint } from "../../coverage";
 import { useVisibility } from "../visibility";
-import FeedPlaceholder from "./FeedPlaceholder";
+import Feed from "./Feed";
 
 /**
  * Click-to-camera preview (inspect / display). The covering-camera ranking is
@@ -72,7 +72,7 @@ export default function InspectPanel() {
 
       {selected && (
         <>
-          <FeedPlaceholder camera={selected} />
+          <Feed camera={selected} />
           <div className="readout mono" style={{ marginTop: 10 }}>
             <div>
               {selected.name} <span className="best-view">BEST VIEW · {pct(anchorId)}</span>

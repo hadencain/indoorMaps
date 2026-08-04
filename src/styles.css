@@ -1940,6 +1940,12 @@ button.wide.ghost {
   display: block;
   background: #05070a;
 }
+/* Pinned to the painted picture inside .wiz-imgbox (object-fit: contain
+   letterboxes), so calibration marks sit on the pixels they measured. */
+.wiz-calpaint {
+  position: absolute;
+  pointer-events: none;
+}
 .wiz-calsvg {
   position: absolute;
   inset: 0;
@@ -2833,6 +2839,21 @@ button.wide.ghost {
   z-index: 6;
   font-size: 12px;
   /* Must clear the shortcuts band (bottom: 16px, up to two wrapped lines). */
+  /* The card sits ON the map. Only its controls may take the pointer — the body
+     must never swallow a draw aimed at the plan underneath it. */
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.setup-guide button {
+  pointer-events: auto;
+}
+/* Armed drawing tool: fade out of the way and stop taking clicks entirely, so
+   the lower-left corner of the plan is both visible and traceable. */
+.setup-guide.yielding {
+  opacity: 0.16;
+}
+.setup-guide.yielding button {
+  pointer-events: none;
 }
 .setup-guide-head {
   display: flex;
@@ -3205,7 +3226,87 @@ button.wide.ghost {
   padding: 3px 8px;
   cursor: pointer;
 }
-.feedwall-stage { position: relative; flex: 1; min-height: 0; }
+.feedwall-body { display: flex; flex: 1; min-height: 0; }
+.feedwall-stage { position: relative; flex: 1; min-width: 0; min-height: 0; }
+
+/* Left rail: every wall this building can show. Auto room groups come from the
+   map, saved walls are the operator's own. One click to switch. */
+.feedwall-rail {
+  flex: 0 0 210px;
+  overflow-y: auto;
+  background: var(--panel, #0d1117);
+  border-right: 1px solid var(--line);
+  font: 11px/1.4 var(--mono, ui-monospace, monospace);
+  padding-bottom: 8px;
+}
+.feedwall-rail-head {
+  padding: 7px 10px 6px;
+  color: var(--accent, #39ff88);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 10px;
+  position: sticky;
+  top: 0;
+  background: var(--panel, #0d1117);
+  border-bottom: 1px solid var(--line);
+}
+.feedwall-rail-sep {
+  padding: 9px 10px 3px;
+  color: var(--muted, #7d8590);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+.feedwall-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: #b9c2cc;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.feedwall-rail-item:hover { background: rgba(255, 255, 255, 0.04); color: #e6ebf0; }
+.feedwall-rail-item.on {
+  background: rgba(57, 255, 136, 0.08);
+  border-left-color: var(--accent, #39ff88);
+  color: #e6ebf0;
+}
+.fwr-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fwr-n { color: var(--muted, #7d8590); font-variant-numeric: tabular-nums; }
+.feedwall-rail-add {
+  display: block;
+  width: calc(100% - 20px);
+  margin: 10px;
+  padding: 5px;
+  background: transparent;
+  border: 1px dashed var(--line);
+  color: var(--muted, #7d8590);
+  font: inherit;
+  cursor: pointer;
+}
+.feedwall-rail-add:hover { color: #e6ebf0; border-color: var(--accent, #39ff88); }
+
+.feedwall-wallname { color: #e6ebf0; }
+.feedwall-solo-name { color: var(--accent, #39ff88); font-size: 13px; letter-spacing: 0.1em; }
+.feedwall-solo-ctx { color: var(--muted, #7d8590); }
+.feedwall-pager { display: flex; align-items: center; gap: 4px; }
+.feedwall-pager button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: #b9c2cc;
+  padding: 1px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.feedwall-pager button:disabled { opacity: 0.35; cursor: default; }
+.feedwall-pageno { color: var(--muted, #7d8590); font-variant-numeric: tabular-nums; }
 .feedwall-canvas { position: absolute; inset: 0; }
 .feedwall-canvas canvas { display: block; width: 100% !important; height: 100% !important; }
 .feedwall-grid {
@@ -3215,10 +3316,175 @@ button.wide.ghost {
   gap: 0;
   pointer-events: none;
 }
+/* Tiles take the pointer so a double-click can fullscreen one; the grid itself
+   stays transparent and the tags stay decorative. Nothing else in the wall wants
+   canvas clicks (onPickCamera is a no-op here). */
 .feedwall-tile {
   position: relative;
   border: 1px solid rgba(255, 255, 255, 0.14);
+  pointer-events: auto;
+  cursor: zoom-in;
 }
+.feedwall-tile:hover { border-color: rgba(255, 255, 255, 0.4); }
+
+/* PTZ virtual joystick: crosshair at centre, drag to slew, wheel to zoom. The
+   native cursor is hidden and replaced by an arrow that points the way the
+   camera is about to move. */
+.ptzjoy {
+  position: absolute;
+  inset: 0;
+  cursor: none;
+  touch-action: none;
+  z-index: 1;
+}
+.ptzjoy-cross {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.7;
+}
+.ptzjoy-cross line { stroke: #39ff88; stroke-width: 0.35; vector-effect: non-scaling-stroke; }
+.ptzjoy-cross circle { fill: #39ff88; }
+.ptzjoy-arrow {
+  position: absolute;
+  pointer-events: none;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
+}
+.ptzjoy-arrow path { fill: #39ff88; stroke: #05070a; stroke-width: 1.2; }
+.ptzjoy.slewing .ptzjoy-arrow path { fill: #ffb54d; }
+/* Operator keypad readout: digits as typed, then what they resolved to. */
+.feedwall-dial {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: rgba(5, 7, 10, 0.88);
+  border: 1px solid var(--accent, #39ff88);
+  font: 13px/1.4 var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.1em;
+  color: #e6ebf0;
+  pointer-events: none;
+  z-index: 3;
+}
+.feedwall-dial.bad { border-color: #ff6b6b; }
+.fwd-label, .fwd-hint { color: var(--muted, #7d8590); font-size: 10px; letter-spacing: 0.18em; }
+.fwd-digits { font-size: 20px; color: var(--accent, #39ff88); font-variant-numeric: tabular-nums; }
+.fwd-msg { color: #e6ebf0; }
+
+/* Call-up number badge on a tile, and beside the name in fullscreen. */
+.feedwall-num {
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  min-width: 18px;
+  padding: 1px 5px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--accent, #39ff88);
+  font: 10px/1.5 var(--mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  pointer-events: none;
+}
+.feedwall-num.solo {
+  position: static;
+  font-size: 12px;
+  padding: 1px 7px;
+}
+
+/* PTZ preset strip: recall by click or Ctrl+<slot>. */
+.feedwall-presets {
+  position: absolute;
+  left: 10px;
+  /* Clears .feedwall-tag (left 6, bottom 5) — the strip used to sit on top of
+     the camera's own name label. */
+  bottom: 32px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 70%;
+  padding: 6px 8px;
+  background: rgba(5, 7, 10, 0.82);
+  border: 1px solid var(--line);
+  font: 11px/1.4 var(--mono, ui-monospace, monospace);
+  z-index: 3;
+}
+.fwp-head {
+  color: var(--muted, #7d8590);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-right: 2px;
+}
+.fwp-item { display: flex; align-items: stretch; }
+.fwp-recall {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: #b9c2cc;
+  padding: 3px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.fwp-recall:hover { border-color: var(--accent, #39ff88); color: #e6ebf0; }
+.fwp-item.home .fwp-recall { border-color: rgba(57, 255, 136, 0.45); color: #d7f5e4; }
+.fwp-slot {
+  color: var(--accent, #39ff88);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.fwp-del {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-left: 0;
+  color: var(--muted, #7d8590);
+  padding: 3px 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.fwp-del:hover { color: #ff6b6b; border-color: #ff6b6b; }
+.fwp-empty { color: var(--muted, #7d8590); font-style: italic; }
+.fwp-name-input {
+  background: #05070a;
+  border: 1px solid var(--accent, #39ff88);
+  color: #e6ebf0;
+  font: inherit;
+  padding: 1px 4px;
+  width: 110px;
+}
+.fwp-name-input.new { padding: 3px 8px; }
+.fwp-add {
+  background: transparent;
+  border: 1px dashed var(--line);
+  color: var(--muted, #7d8590);
+  padding: 3px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.fwp-add:hover { color: #e6ebf0; border-color: var(--accent, #39ff88); }
+
+.ptzjoy-hint {
+  position: absolute;
+  right: 8px;
+  top: 7px;
+  padding: 2px 7px;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--muted, #7d8590);
+  font: 10px/1.5 var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+.feedwall-tile.solo { cursor: zoom-out; border-color: transparent; }
+.feedwall-tile.solo:hover { border-color: rgba(255, 255, 255, 0.25); }
 .feedwall-tag {
   position: absolute;
   left: 6px;
@@ -3228,4 +3494,49 @@ button.wide.ghost {
   color: #d7dde3;
   font: 10px/1.5 var(--mono, ui-monospace, monospace);
   letter-spacing: 0.05em;
+}
+
+/* Feed-wall plan strip: the INDEX, not the subject. Drag to place a followed
+   subject; the wall reorders live, which is the camera handoff. */
+.feedwall-plan {
+  flex: 0 0 168px;
+  width: 100%;
+  background: #080b0f;
+  border-top: 1px solid var(--line);
+  cursor: crosshair;
+  touch-action: none;
+}
+.fwp-unit { fill: #1a222c; stroke: #2b3644; stroke-width: 0.35; }
+.fwp-corridor, .fwp-lobby { fill: #232e3a; }
+.fwp-outside { fill: #0d1218; }
+.fwp-cam { fill: #4a5666; }
+.fwp-cam.sees { fill: #39ff88; }
+.fwp-subject { fill: #ffb54d; stroke: #0b0e12; stroke-width: 0.4; }
+.feedwall-tile.best { border-color: #39ff88; box-shadow: inset 0 0 0 1px #39ff88; }
+.feedwall-follow {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted, #7d8590);
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.feedwall-follow.on { color: #ffb54d; border-color: #ffb54d; }
+.feedwall-blind {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  justify-items: center;
+  background: rgba(5, 7, 10, 0.92);
+  pointer-events: none;
+}
+.feedwall-blind-tag {
+  color: #ff6b6b;
+  font: 13px/1.4 var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.18em;
+}
+.feedwall-blind-sub {
+  color: var(--muted, #7d8590);
+  font: 11px/1.4 var(--mono, ui-monospace, monospace);
 }

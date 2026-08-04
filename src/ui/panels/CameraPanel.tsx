@@ -6,8 +6,9 @@ import { polygonArea } from "../../geo";
 import { formatArea } from "../../format";
 import { unitsCoveredByCamera } from "../../security/coverage-link";
 import { doriBand, doriRangeM, pxPerMetreAt } from "../../coverage";
+import { CAMERA_MODELS, findModel, modelLabel, modelRangeM } from "../../camera-models";
 import SearchBox from "../SearchBox";
-import FeedPlaceholder from "./FeedPlaceholder";
+import Feed from "./Feed";
 import type { Camera, CameraKind } from "../../types";
 
 const M_TO_FT = 3.280839895;
@@ -36,9 +37,12 @@ export default function CameraPanel() {
   const runSuggestCameras = useStore((s) => s.runSuggestCameras);
   const acceptAllSuggestions = useStore((s) => s.acceptAllSuggestions);
   const clearSuggestions = useStore((s) => s.clearSuggestions);
+  const applyModelToUnrated = useStore((s) => s.applyModelToUnrated);
   const [targetPct, setTargetPct] = useState(90);
   const [maxNew, setMaxNew] = useState(40);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   const { polys: visPolys, coverage } = useVisibility();
+  const unratedCount = building.cameras.filter((c) => c.ordinal === ordinal && !c.resolutionMP).length;
 
   // Derived spaces this camera sees (same-ordinal, from occlusion geometry).
   const covered = useMemo(
@@ -141,6 +145,47 @@ export default function CameraPanel() {
           )}
         </div>
 
+        {/* The measured onboarding gap: auto-suggest places cameras in two
+            clicks but leaves them UNRATED (no resolution -> no DORI), and a
+            per-camera dropdown is still N picks for N cameras. One pick here
+            rates every unrated camera of that kind on the floor, one undo. */}
+        {unratedCount > 0 && (
+          <div className="suggest-sec">
+            <div className="panel-subtitle">Rate unrated cameras</div>
+            <p className="hint">
+              {unratedCount} camera{unratedCount === 1 ? "" : "s"} on {level} have no
+              resolution, so DORI can&rsquo;t rate their usable range. Pick the model
+              they are (or closest to):
+            </p>
+            <select
+              value=""
+              onChange={(e) => {
+                const m = findModel(e.target.value);
+                if (!m) return;
+                const n = applyModelToUnrated(ordinal, m.kind, {
+                  model: modelLabel(m),
+                  fovDeg: m.fovDeg,
+                  resolutionMP: m.resolutionMP,
+                  rangeM: modelRangeM(m),
+                });
+                setBulkMsg(
+                  n === 0
+                    ? `No unrated ${m.kind} cameras on this floor`
+                    : `${n} ${m.kind} camera${n === 1 ? "" : "s"} rated as ${modelLabel(m)}`,
+                );
+              }}
+            >
+              <option value="">— pick a model to apply —</option>
+              {CAMERA_MODELS.map((m) => (
+                <option key={modelLabel(m)} value={modelLabel(m)}>
+                  {modelLabel(m)} · {m.kind} · {m.resolutionMP} MP
+                </option>
+              ))}
+            </select>
+            {bulkMsg && <p className="mono suggest-readout">{bulkMsg}</p>}
+          </div>
+        )}
+
         {building.cameras.some((c) => c.ordinal === ordinal) && (
           <div style={{ marginTop: 12 }}>
             <SearchBox placeholder="Search cameras…" />
@@ -182,7 +227,7 @@ export default function CameraPanel() {
       <div className="panel-title">Camera</div>
 
       {/* Inert feed placeholder: presents as clickable, performs NO network I/O. */}
-      <FeedPlaceholder camera={selected} />
+      <Feed camera={selected} />
 
       <label>Name</label>
       <input
@@ -310,9 +355,34 @@ export default function CameraPanel() {
       </select>
 
       <label>Make / model</label>
+      {/* Catalogue pick: ONE selection fills model, kind, FOV, resolution, and
+          a range derived from those specs by the app's own DORI math — the
+          measured onboarding gap was cameras staying unrated because four
+          fields per camera never got typed. One undo entry (single patch). */}
+      <select
+        value={findModel(selected.model ?? "") ? selected.model : ""}
+        onChange={(e) => {
+          const m = findModel(e.target.value);
+          if (!m) return;
+          updateCamera(selected.id, {
+            model: modelLabel(m),
+            kind: m.kind,
+            fovDeg: m.fovDeg,
+            resolutionMP: m.resolutionMP,
+            rangeM: modelRangeM(m),
+          });
+        }}
+      >
+        <option value="">— pick from catalogue (fills specs) —</option>
+        {CAMERA_MODELS.map((m) => (
+          <option key={modelLabel(m)} value={modelLabel(m)}>
+            {modelLabel(m)} · {m.kind} · {m.resolutionMP} MP
+          </option>
+        ))}
+      </select>
       <input
         value={selected.model ?? ""}
-        placeholder="Axis P3265-LVE"
+        placeholder="or type any model…"
         onChange={(e) => updateCamera(selected.id, { model: e.target.value || undefined })}
       />
 

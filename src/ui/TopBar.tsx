@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, Undo2, Redo2, Pencil, MonitorPlay, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Undo2, Redo2, Pencil, MonitorPlay, LayoutGrid, Plus, Trash2 } from "lucide-react";
 import { useStore } from "../store";
 import { DEMOS } from "../demos";
 import { propertyNameFor } from "../properties";
@@ -124,8 +124,11 @@ export default function TopBar() {
         <button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")} title="Authoring — draw & edit the map">
           <Pencil size={13} /> Edit
         </button>
-        <button className={mode === "display" ? "active" : ""} onClick={() => setMode("display")} title="Operator display — read-only, click-to-camera">
+        <button className={mode === "display" ? "active" : ""} onClick={() => setMode("display")} title="Display — read-only map, click-to-camera">
           <MonitorPlay size={13} /> Display
+        </button>
+        <button className={mode === "operator" ? "active" : ""} onClick={() => setMode("operator")} title="Operator — feed wall first, plan as index">
+          <LayoutGrid size={13} /> Operator
         </button>
       </div>
       {mode === "edit" && (

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useStore, ALL_AMENITY_KINDS } from "../../store";
 import type { AmenityKind, LayerVisibility } from "../../types";
-import FeedPlaceholder from "./FeedPlaceholder";
+import Feed from "./Feed";
 import { useVisibility } from "../visibility";
 import { unitsSeenByCameraRing } from "../../security/coverage-link";
 import { AmenityIcon } from "../amenity-icons";
@@ -43,7 +43,7 @@ function CameraView({ id }: { id: string }) {
         ← All cameras
       </button>
       <div className="panel-title">{cam.name}</div>
-      <FeedPlaceholder camera={cam} />
+      <Feed camera={cam} />
       <div className="readout mono" style={{ marginTop: 10 }}>
         <div>{kindLabel} · {cam.rangeM} m range</div>
         <div className="probe-stream">{cam.streamRef ? cam.streamRef : "no stream set"}</div>

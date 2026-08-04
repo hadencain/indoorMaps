@@ -4,8 +4,25 @@ import { useStore } from "../store";
 import type { RasterUnderlay } from "../types";
 
 /** Fraction-of-image point [0..1, 0..1] — resize-proof; converted to natural
- *  pixels only when measuring. */
+ *  pixels only when measuring. Fractions are of the PAINTED picture, never of
+ *  the element box (see paintedRect). */
 type FracPt = [number, number];
+
+/** Where the floorplan is actually painted inside its <img>, in box-local px.
+ *  `object-fit: contain` letterboxes, so the element box is not the picture:
+ *  a 2240x1520 plan in a 606x380 box paints 560 wide with 23px bars either
+ *  side. Normalising a calibration click against the box instead of the
+ *  picture stretches every measurement by the letterbox ratio — an 8% silent
+ *  scale error on this fixture, and a different error on every window width. */
+function paintedRect(img: HTMLImageElement, box: HTMLElement) {
+  const ir = img.getBoundingClientRect();
+  const br = box.getBoundingClientRect();
+  if (!img.naturalWidth || !img.naturalHeight) return null;
+  const s = Math.min(ir.width / img.naturalWidth, ir.height / img.naturalHeight);
+  const w = img.naturalWidth * s;
+  const h = img.naturalHeight * s;
+  return { left: ir.left - br.left + (ir.width - w) / 2, top: ir.top - br.top + (ir.height - h) / 2, w, h };
+}
 
 const FT_PER_M = 3.28084;
 /** Calibration fallback when the user skips drawing a line. */
@@ -29,6 +46,10 @@ export default function NewPropertyWizard({ onClose }: Props) {
   const [lenUnit, setLenUnit] = useState<"m" | "ft">("m");
   const [readErr, setReadErr] = useState<string | null>(null);
   const imgBoxRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  // Painted-picture rect, box-local. Re-measured on load and on resize because
+  // `contain` re-letterboxes whenever the dialog changes width.
+  const [paint, setPaint] = useState<{ left: number; top: number; w: number; h: number } | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -37,6 +58,19 @@ export default function NewPropertyWizard({ onClose }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const measure = useCallback(() => {
+    const i = imgRef.current;
+    const b = imgBoxRef.current;
+    setPaint(i && b ? paintedRect(i, b) : null);
+  }, []);
+
+  useEffect(() => {
+    if (step !== 2) return;
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [step, img, measure]);
 
   const readFile = useCallback(async (file: File) => {
     setReadErr(null);
@@ -74,11 +108,13 @@ export default function NewPropertyWizard({ onClose }: Props) {
 
   const placePoint = (e: React.MouseEvent) => {
     const box = imgBoxRef.current;
-    if (!box) return;
+    // Measure lazily too: a click can beat the load/resize effect on a cached image.
+    const rect = paint ?? (imgRef.current && box ? paintedRect(imgRef.current, box) : null);
+    if (!box || !rect) return;
     const r = box.getBoundingClientRect();
     const p: FracPt = [
-      Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-      Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+      Math.min(1, Math.max(0, (e.clientX - r.left - rect.left) / rect.w)),
+      Math.min(1, Math.max(0, (e.clientY - r.top - rect.top) / rect.h)),
     ];
     setPts((cur) => (cur.length >= 2 ? [p] : [...cur, p]));
   };
@@ -162,21 +198,37 @@ export default function NewPropertyWizard({ onClose }: Props) {
               door bay, a parking row, a dimension line — then enter that length.
             </p>
             <div className="wiz-imgbox" ref={imgBoxRef} onClick={placePoint}>
-              <img src={img.dataUrl} alt="floorplan" className="wiz-calimg" draggable={false} />
-              <svg className="wiz-calsvg" viewBox="0 0 100 100" preserveAspectRatio="none">
-                {pts.length === 2 && (
-                  <line
-                    x1={pts[0][0] * 100}
-                    y1={pts[0][1] * 100}
-                    x2={pts[1][0] * 100}
-                    y2={pts[1][1] * 100}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                )}
-              </svg>
-              {pts.map((p, i) => (
-                <span key={i} className="wiz-caldot" style={{ left: `${p[0] * 100}%`, top: `${p[1] * 100}%` }} />
-              ))}
+              <img
+                ref={imgRef}
+                src={img.dataUrl}
+                alt="floorplan"
+                className="wiz-calimg"
+                draggable={false}
+                onLoad={measure}
+              />
+              {/* Overlay is pinned to the PAINTED picture, not the element box,
+                  so the dots land where the click was measured. */}
+              {paint && (
+                <div
+                  className="wiz-calpaint"
+                  style={{ left: paint.left, top: paint.top, width: paint.w, height: paint.h }}
+                >
+                  <svg className="wiz-calsvg" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    {pts.length === 2 && (
+                      <line
+                        x1={pts[0][0] * 100}
+                        y1={pts[0][1] * 100}
+                        x2={pts[1][0] * 100}
+                        y2={pts[1][1] * 100}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    )}
+                  </svg>
+                  {pts.map((p, i) => (
+                    <span key={i} className="wiz-caldot" style={{ left: `${p[0] * 100}%`, top: `${p[1] * 100}%` }} />
+                  ))}
+                </div>
+              )}
             </div>
             <div className="wiz-cal-row">
               <label className="wiz-label">That line is</label>

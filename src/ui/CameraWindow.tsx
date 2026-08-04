@@ -1,29 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Camera } from "../types";
 import type maplibregl from "maplibre-gl";
 import { useStore } from "../store";
 import { m2ll } from "../geo";
 import { rankCamerasForPoint } from "../coverage";
 import { useVisibility } from "./visibility";
-import { Suspense, lazy } from "react";
-import FeedPlaceholder from "./panels/FeedPlaceholder";
-
-// three.js only loads if a camera window is actually opened.
-const CameraFeed = lazy(() => import("../editor3d/CameraFeed"));
-
-/** The anchored camera's synthetic feed, with the inert placeholder as the
- *  fallback while the 3D chunk loads (and for an offline/planned device, which
- *  should not pretend to show a picture). */
-function Feed({ camera }: { camera: Camera }) {
-  if (camera.status === "offline" || camera.status === "fault" || camera.status === "planned") {
-    return <FeedPlaceholder camera={camera} />;
-  }
-  return (
-    <Suspense fallback={<FeedPlaceholder camera={camera} />}>
-      <CameraFeed camera={camera} />
-    </Suspense>
-  );
-}
+import Feed from "./panels/Feed";
 import { panStep, zoomStep, tiltStep } from "../security/ptz";
 
 /** Session-remembered window width (px) — survives re-spawns, never persisted. */

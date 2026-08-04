@@ -32,16 +32,20 @@ export default function StatusBar() {
   const floorName = building.levels.find((l) => l.ordinal === ordinal)?.name ?? `L${ordinal}`;
   const camCount = building.cameras.filter((c) => c.ordinal === ordinal).length;
 
-  if (mode === "display") {
+  if (mode === "display" || mode === "operator") {
     return (
       <footer className="statusbar mono">
-        <span className="st-tool">display</span>
+        <span className="st-tool">{mode}</span>
         <span className="st-sep">·</span>
         <span>
           {floorName} · {camCount} cameras
           {showCoverage && coverage ? ` · coverage ${(coverage.coveragePct * 100).toFixed(0)}%` : ""}
         </span>
-        <span className="st-hint">{HINTS.inspect}</span>
+        <span className="st-hint">
+          {mode === "operator"
+            ? "type a camera number + Enter · double-click a tile to fullscreen · H = home"
+            : HINTS.inspect}
+        </span>
       </footer>
     );
   }

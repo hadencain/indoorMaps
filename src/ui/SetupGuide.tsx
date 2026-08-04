@@ -14,6 +14,7 @@ export default function SetupGuide() {
   const dismissGuide = useStore((s) => s.dismissGuide);
   const setTool = useStore((s) => s.setTool);
   const setDraftCategory = useStore((s) => s.setDraftCategory);
+  const activeTool = useStore((s) => s.activeTool);
 
   const isUserProperty = userProperties.some((u) => u.id === propertyId);
   const stages = useMemo(() => guideStages(building), [building]);
@@ -31,8 +32,15 @@ export default function SetupGuide() {
     // underlay/floors: no tool — the instruction names the affordance.
   };
 
+  // The card floats over the map's lower-left. While a drawing tool is armed it
+  // has to yield: it used to eat the drag outright, so a room traced under it
+  // produced no unit and no error — the guide telling you to trace rooms was
+  // blocking the corner of the plan it was pointing at. Yielding = see-through
+  // AND click-through, restored the moment the tool goes back to select.
+  const drawing = activeTool === "rect" || activeTool === "polygon" || activeTool === "vertex";
+
   return (
-    <div className="setup-guide">
+    <div className={`setup-guide${drawing ? " yielding" : ""}`}>
       <div className="setup-guide-head">
         <span>Setup guide</span>
         <button className="del" title="Dismiss (Data → Setup guide re-opens)" onClick={() => dismissGuide(propertyId)}>

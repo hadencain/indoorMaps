@@ -167,6 +167,14 @@ export interface Camera {
    *  behaviour only — never geometry. Optional + additive: persistence
    *  stays v3. */
   mount?: "ceiling" | "wall" | "column";
+  /** Operator call-up number, unique across the WHOLE building (not per floor,
+   *  so typing it can cross floors and "42" always means one camera). Assigned
+   *  once and then never reshuffled — an operator memorises numbers, so a delete
+   *  must not silently renumber everything after it. Optional + additive:
+   *  persistence stays v3; buildings without numbers get them on first use. */
+  opNumber?: number;
+  /** Saved PTZ positions, slot 1 always Home. PTZ only — nothing else moves. */
+  presets?: CameraPreset[];
   /** Vertical field of view in degrees. Present ⇒ overrides the derivation
    *  (tiltBand in coverage.ts consumes it for the 2D tilt band, the 3D frustum
    *  will too); absent ⇒ derived from `fovDeg` at a 16:9 sensor aspect (see
@@ -375,6 +383,30 @@ export interface CameraView {
   id: string;
   name: string;
   cameraIds: string[];
+}
+
+/** A saved PTZ aim. Exactly the four values the joystick drives — enough to put
+ *  a camera back on a shot, and nothing that would make a preset go stale if the
+ *  building around it is edited. */
+export interface PtzAim {
+  heading: number;
+  tiltDeg: number;
+  fovDeg: number;
+  rangeM: number;
+}
+
+/** A named PTZ position, recalled from the operator keypad.
+ *
+ *  SLOT 1 IS ALWAYS "Home" and is captured automatically the first time an
+ *  operator moves a camera — it records the aim as authored, which is otherwise
+ *  destroyed on first drag (operator PTZ mutates the real camera, a trade-off
+ *  taken deliberately in security/ptz.ts). Without that snapshot there is no
+ *  "original position" left to go back to. */
+export interface CameraPreset extends PtzAim {
+  id: string;
+  name: string;
+  /** 1–9. Recalled with Ctrl+<slot>. Slot 1 is reserved for Home. */
+  slot: number;
 }
 
 export interface Building {
