@@ -140,6 +140,27 @@ describe("floorHealth", () => {
 });
 
 describe("reviewFloor", () => {
+  it("collapses doorless rooms to one advisory on a coverage-model floor", () => {
+    // No openings, no corridor anywhere: the wayfinding machinery is not in
+    // use, so N per-room warnings would be the checklist crying wolf.
+    const b = makeBuilding([roomA, roomB], []);
+    const issues = reviewFloor(b, 0);
+    expect(issues.filter((i) => i.id.startsWith("doorless:"))).toHaveLength(0);
+    const collapsed = issues.find((i) => i.id === "doorless-floor:0");
+    expect(collapsed?.severity).toBe("info");
+    expect(collapsed?.message).toMatch(/2 rooms have no doors/);
+    expect(collapsed?.message).toMatch(/coverage model/);
+  });
+
+  it("keeps per-room doorless warnings once circulation is being authored", () => {
+    // One door exists on the floor => the author is wiring circulation, and a
+    // doorless room is back to being a real defect.
+    const b = makeBuilding([roomA, roomB, corridor], [hallDoor]);
+    const issues = reviewFloor(b, 0);
+    expect(issues.some((i) => i.id === "doorless:a" && i.severity === "warn")).toBe(true);
+    expect(issues.some((i) => i.id === "doorless-floor:0")).toBe(false);
+  });
+
   it("orders errors before warns before infos", () => {
     // roomA + unnamed roomB-shaped unit with sharedDoor but NO corridor ->
     // missing-corridor error; unnamed unit is also doorless/unnamed/vacant.

@@ -2092,6 +2092,10 @@ export class WalkRenderer {
     this.renderer.setScissorTest(true);
     this.renderer.setViewport(0, 0, size.x, size.y);
     this.renderer.setScissor(0, 0, size.x, size.y);
+    // A pose count that doesn't fill the grid (3 tiles in a 2x2) leaves the
+    // remainder showing this clear — stage-black, not default white, or the
+    // empty quadrant reads as a dead feed.
+    this.renderer.setClearColor(0x05070a, 1);
     this.renderer.clear();
 
     const prevAspect = this.camera.aspect;

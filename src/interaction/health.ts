@@ -169,17 +169,42 @@ export function reviewFloor(building: Building, ordinal: number): ReviewIssue[] 
     }
   }
 
-  for (const unitId of health.doorlessRoomIds) {
-    const u = unitsById.get(unitId);
-    const name = u && u.name.trim() ? u.name : "Unnamed unit";
+  // Doorless rooms: a wayfinding defect only where wayfinding is being built.
+  // A floor with NO openings and NO corridor is the coverage-model shape — an
+  // operator tracing rooms to hang cameras on — and eight separate warnings
+  // shouting "routing can't reach it" at that user is the checklist crying
+  // wolf about a feature they are not using. Collapse to ONE advisory line.
+  // The moment ANY door or corridor exists on the floor, circulation is being
+  // authored and a doorless room is back to being a real per-room warning.
+  const floorUnitIds = new Set(units.map((u) => u.id));
+  const circulationStarted =
+    building.openings.some((o) => floorUnitIds.has(o.unit)) ||
+    units.some((u) => u.category === "corridor");
+  if (!circulationStarted && health.doorlessRoomIds.length > 0) {
+    const first = unitsById.get(health.doorlessRoomIds[0]);
     issues.push({
-      id: `doorless:${unitId}`,
-      severity: "warn",
-      message: `${name} has no door — routing can't reach it`,
-      unitId,
-      at: u ? polygonCentroid(u.polygon) : undefined,
+      id: `doorless-floor:${ordinal}`,
+      severity: "info",
+      message:
+        `${health.doorlessRoomIds.length} room${health.doorlessRoomIds.length === 1 ? " has" : "s have"} ` +
+        `no doors — fine for a coverage model; add a corridor and doors to enable wayfinding`,
+      unitId: first?.id,
+      at: first ? polygonCentroid(first.polygon) : undefined,
       ordinal,
     });
+  } else {
+    for (const unitId of health.doorlessRoomIds) {
+      const u = unitsById.get(unitId);
+      const name = u && u.name.trim() ? u.name : "Unnamed unit";
+      issues.push({
+        id: `doorless:${unitId}`,
+        severity: "warn",
+        message: `${name} has no door — routing can't reach it`,
+        unitId,
+        at: u ? polygonCentroid(u.polygon) : undefined,
+        ordinal,
+      });
+    }
   }
 
   for (const openingId of health.oneSidedDoorIds) {

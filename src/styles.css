@@ -1967,6 +1967,28 @@ button.wide.ghost {
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
+/* CSV schedule preview: sniffed column mapping + first rows. */
+.csv-mapping {
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.csv-map-row { display: flex; gap: 8px; }
+.csv-map-row.dim { color: var(--muted, #7d8590); }
+.csv-field { width: 84px; color: var(--accent, #39ff88); }
+.csv-arrow { color: var(--muted, #7d8590); }
+.csv-preview {
+  border: 1px solid var(--line);
+  border-top: 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.7;
+  max-height: 130px;
+  overflow-y: auto;
+}
+.csv-prev-row.dim { color: var(--muted, #7d8590); }
+
 .wiz-cal-row {
   display: flex;
   align-items: center;
@@ -3396,6 +3418,63 @@ button.wide.ghost {
   position: static;
   font-size: 12px;
   padding: 1px 7px;
+}
+
+/* Saved-wall editor: membership list + add-from-floor picker. */
+.feedwall-editor {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  bottom: 10px;
+  width: 290px;
+  overflow-y: auto;
+  background: rgba(5, 7, 10, 0.94);
+  border: 1px solid var(--line);
+  font: 11px/1.5 var(--mono, ui-monospace, monospace);
+  padding: 8px 10px;
+  z-index: 4;
+}
+.fwe-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--accent, #39ff88);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.fwe-sec {
+  color: var(--muted, #7d8590);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin: 10px 0 4px;
+}
+.fwe-empty { color: var(--muted, #7d8590); font-style: italic; }
+.fwe-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.fwe-num { width: 30px; color: var(--accent, #39ff88); font-variant-numeric: tabular-nums; text-align: right; }
+.fwe-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b9c2cc; }
+.fwe-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted, #7d8590);
+  padding: 0 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.fwe-btn:hover:not(:disabled) { color: #e6ebf0; border-color: var(--accent, #39ff88); }
+.fwe-btn:disabled { opacity: 0.3; cursor: default; }
+.fwe-btn.add:hover { color: var(--accent, #39ff88); }
+.fwe-btn.danger:hover { color: #ff6b6b; border-color: #ff6b6b; }
+.fwe-filter {
+  width: 100%;
+  background: #05070a;
+  border: 1px solid var(--line);
+  color: #e6ebf0;
+  font: inherit;
+  padding: 3px 6px;
+  margin-bottom: 4px;
 }
 
 /* PTZ preset strip: recall by click or Ctrl+<slot>. */

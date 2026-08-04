@@ -11,14 +11,22 @@
 // the feed is that scene from that pose. No network, no stream — it is a
 // simulated view, and `streamRef` remains the hook for a real one.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useStore } from "../store";
 import { build3dScene } from "../scene/scene-build";
 import { WalkRenderer } from "./walk-renderer";
+import PtzJoystick from "./PtzJoystick";
 import type { Camera } from "../types";
 
-export default function CameraFeed({ camera }: { camera: Camera }) {
+/** `ptzControl` opts this surface into the virtual joystick for PTZ cameras —
+ *  the same crosshair/drag/wheel control the wall's fullscreen feed uses, so a
+ *  camera is driven the same way wherever it is met. Live poses go straight to
+ *  this feed's own renderer (no store write per frame, no scene rebuild); the
+ *  aim commits once per gesture through setCameraAim, which also captures Home
+ *  on the first move. */
+export default function CameraFeed({ camera, ptzControl = false }: { camera: Camera; ptzControl?: boolean }) {
   const building = useStore((s) => s.building);
+  const setCameraAim = useStore((s) => s.setCameraAim);
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<WalkRenderer | null>(null);
 
@@ -45,17 +53,25 @@ export default function CameraFeed({ camera }: { camera: Camera }) {
   // whenever the pose changes. Both come from build3dScene, so the feed sees the
   // same resolved pose (defaults applied, mount clamped) the 3D gizmo does —
   // there is no second interpretation of the camera record to drift out of sync.
+  const scene = useMemo(() => build3dScene(building, camera.ordinal), [building, camera.ordinal]);
+  const pose = useMemo(() => scene.cameras.find((c) => c.id === camera.id) ?? null, [scene, camera.id]);
   useEffect(() => {
     const r = rendererRef.current;
     if (!r) return;
-    const scene = build3dScene(building, camera.ordinal);
     r.setScene(scene);
-    r.setFeedPose(scene.cameras.find((c) => c.id === camera.id) ?? null);
-  }, [building, camera.ordinal, camera.id]);
+    r.setFeedPose(pose);
+  }, [scene, pose]);
 
   return (
     <div className="camera-feed live">
       <div className="camera-feed-canvas" ref={mountRef} />
+      {ptzControl && camera.kind === "ptz" && pose && (
+        <PtzJoystick
+          pose={pose}
+          onLive={(live) => rendererRef.current?.setFeedPose(live)}
+          onCommit={(patch) => setCameraAim(camera.id, patch)}
+        />
+      )}
       <div className="camera-feed-scan" aria-hidden />
       <div className="camera-feed-corner">
         {camera.id}

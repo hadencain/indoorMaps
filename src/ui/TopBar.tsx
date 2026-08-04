@@ -5,7 +5,9 @@ import { DEMOS } from "../demos";
 import { propertyNameFor } from "../properties";
 import NewPropertyWizard from "./NewPropertyWizard";
 import DxfImportDialog from "./DxfImportDialog";
+import CsvImportDialog from "./CsvImportDialog";
 import { parseDxfText, type DxfParseResult } from "../dxf";
+import { parseCameraCsv, type CameraCsvResult } from "../camera-csv";
 
 export default function TopBar() {
   const levels = useStore((s) => s.building.levels);
@@ -16,6 +18,7 @@ export default function TopBar() {
   const [propOpen, setPropOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [dxfDialog, setDxfDialog] = useState<{ raw: string; initial: DxfParseResult } | null>(null);
+  const [csvDialog, setCsvDialog] = useState<CameraCsvResult | null>(null);
   // Two-step delete: first click arms, second click deletes (no blocking confirm()).
   const [armedDelete, setArmedDelete] = useState<string | null>(null);
   const mode = useStore((s) => s.mode);
@@ -29,6 +32,10 @@ export default function TopBar() {
   const addLevel = useStore((s) => s.addLevel);
   const reopenGuide = useStore((s) => s.reopenGuide);
   const planWidth = useStore((s) => s.planWidth);
+  const setLevelCeiling = useStore((s) => s.setLevelCeiling);
+  const activeCeiling = useStore(
+    (s) => s.building.levels.find((l) => l.ordinal === s.ordinal)?.ceilingM ?? 3.2,
+  );
   const setPlanWidth = useStore((s) => s.setPlanWidth);
   const importSvgText = useStore((s) => s.importSvgText);
   const importRasterFile = useStore((s) => s.importRasterFile);
@@ -120,6 +127,7 @@ export default function TopBar() {
           onClose={() => setDxfDialog(null)}
         />
       )}
+      {csvDialog && <CsvImportDialog result={csvDialog} onClose={() => setCsvDialog(null)} />}
       <div className="modetoggle" role="group" aria-label="Mode">
         <button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")} title="Authoring — draw & edit the map">
           <Pencil size={13} /> Edit
@@ -176,6 +184,22 @@ export default function TopBar() {
                   />{" "}
                   m
                 </div>
+                {/* Per-floor ceiling, reachable WITHOUT entering the 3D walk
+                    editor — it drives camera mount heights and the 3D model,
+                    and an onboarding operator sets it once while tracing. */}
+                <div className="dm-row" title="Ceiling height of the active floor (drives 3D + camera mounts)">
+                  <span>Ceiling · {levels.find((l) => l.ordinal === ordinal)?.name ?? `L${ordinal}`}</span>
+                  <input
+                    type="number"
+                    className="numin"
+                    min={2.2}
+                    max={8}
+                    step={0.1}
+                    value={activeCeiling}
+                    onChange={(e) => setLevelCeiling(ordinal, Number(e.target.value) || activeCeiling)}
+                  />{" "}
+                  m
+                </div>
                 <label className="dm-item">
                   Import SVG…
                   <input
@@ -199,6 +223,26 @@ export default function TopBar() {
                       const f = e.target.files?.[0];
                       e.target.value = "";
                       if (f) await importRasterFile(f);
+                    }}
+                  />
+                </label>
+                <label className="dm-item">
+                  Import camera schedule (CSV)…
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    hidden
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!f) return;
+                      const r = parseCameraCsv(await f.text());
+                      if (!r.ok) {
+                        useStore.setState({ importMsg: `Schedule import failed: ${r.error}` });
+                      } else {
+                        setOpen(false);
+                        setCsvDialog(r.result);
+                      }
                     }}
                   />
                 </label>
