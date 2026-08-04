@@ -20,13 +20,13 @@ const CameraFeed = lazy(() => import("../../editor3d/CameraFeed"));
  * and matches how `status` is defined — absent means unknown, never "online" —
  * so an unaudited or failed camera must never present a picture.
  */
-export default function Feed({ camera }: { camera: Camera }) {
+export default function Feed({ camera, ptzControl = false }: { camera: Camera; ptzControl?: boolean }) {
   if (camera.status === "offline" || camera.status === "fault" || camera.status === "planned") {
     return <FeedPlaceholder camera={camera} />;
   }
   return (
     <Suspense fallback={<FeedPlaceholder camera={camera} />}>
-      <CameraFeed camera={camera} />
+      <CameraFeed camera={camera} ptzControl={ptzControl} />
     </Suspense>
   );
 }

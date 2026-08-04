@@ -350,9 +350,14 @@ export default function CameraWindow({ map }: { map: maplibregl.Map }) {
         </div>
 
         <div className="camwin-body">
-          <Feed camera={anchor} />
+          <Feed camera={anchor} ptzControl />
 
-          {anchor.kind === "ptz" && (
+          {/* The button pad remains ONLY where the joystick cannot exist: a
+              placeholder feed (offline/fault/planned) has no picture to drag
+              on, but a planned camera still needs aiming. A live PTZ gets the
+              same joystick as the wall — one control, one idiom. */}
+          {anchor.kind === "ptz" &&
+            (anchor.status === "offline" || anchor.status === "fault" || anchor.status === "planned") && (
             <div className="ptz-pad">
               <span className="ptz-label">Pan</span>
               <HoldButton

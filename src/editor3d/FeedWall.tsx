@@ -47,6 +47,9 @@ export default function FeedWall() {
   const ordinal = useStore((s) => s.ordinal);
   const setFeedWall = useStore((s) => s.setFeedWall);
   const addCameraView = useStore((s) => s.addCameraView);
+  const addCameraToView = useStore((s) => s.addCameraToView);
+  const removeCameraFromView = useStore((s) => s.removeCameraFromView);
+  const moveCameraInView = useStore((s) => s.moveCameraInView);
   const setOrdinal = useStore((s) => s.setOrdinal);
   const mode = useStore((s) => s.mode);
   const setMode = useStore((s) => s.setMode);
@@ -65,6 +68,10 @@ export default function FeedWall() {
   const renameCameraPreset = useStore((s) => s.renameCameraPreset);
   const [wallId, setWallId] = useState<string>("all");
   const [page, setPage] = useState(0);
+  /** Saved-wall editor: membership managed from INSIDE the wall, so "+ New
+   *  wall" stops dead-ending into the camera inspector. */
+  const [editingWall, setEditingWall] = useState(false);
+  const [editFilter, setEditFilter] = useState("");
   // Fullscreen a single camera. Double-click a tile to enter, double-click the
   // picture (or Esc) to come back to the wall you were on.
   const [soloId, setSoloId] = useState<string | null>(null);
@@ -199,6 +206,12 @@ export default function FeedWall() {
   }, [building.cameras, building.units, building.levels, ordinal, views]);
 
   const activeWall = walls.find((w) => w.id === wallId) ?? walls[0];
+  const editableViewId = activeWall?.id.startsWith("saved:") ? activeWall.id.slice(6) : null;
+  const editableView = editableViewId ? views.find((v) => v.id === editableViewId) ?? null : null;
+  useEffect(() => {
+    setEditingWall(false);
+    setEditFilter("");
+  }, [wallId]);
 
   // Which cameras are on the wall, in order. Preset order is preserved — it is
   // the order the operator built the route in, which is the whole point of a
@@ -448,6 +461,15 @@ export default function FeedWall() {
                 </button>
               </span>
             )}
+            {editableView && !subject && (
+              <button
+                className={editingWall ? "feedwall-follow on" : "feedwall-follow"}
+                onClick={() => setEditingWall((v) => !v)}
+                title="Add or remove this wall's cameras"
+              >
+                {editingWall ? "done editing" : "edit wall"}
+              </button>
+            )}
             <button
               className={subject ? "feedwall-follow on" : "feedwall-follow"}
               onClick={stopShadow}
@@ -590,6 +612,92 @@ export default function FeedWall() {
             ) : (
               <span className="fwd-msg">{dialMsg}</span>
             )}
+          </div>
+        )}
+
+        {/* SAVED-WALL EDITOR: membership managed here, where the operator IS,
+            instead of a detour through the camera inspector. Members keep the
+            view's insertion order (route order) and can be nudged; the add
+            list is this floor's cameras, call-up number first because that is
+            how an operator thinks of them. */}
+        {editingWall && editableView && !soloId && (
+          <div className="feedwall-editor">
+            <div className="fwe-head">
+              Editing · {editableView.name}
+              <button className="del" title="Done" onClick={() => setEditingWall(false)}>
+                ✕
+              </button>
+            </div>
+            <div className="fwe-sec">In this wall ({editableView.cameraIds.length})</div>
+            {editableView.cameraIds.length === 0 && <div className="fwe-empty">empty — add cameras below</div>}
+            {editableView.cameraIds.map((cid, i) => {
+              const c = building.cameras.find((x) => x.id === cid);
+              if (!c) return null;
+              return (
+                <div className="fwe-row" key={cid}>
+                  <span className="fwe-num">{c.opNumber ?? "—"}</span>
+                  <span className="fwe-name">{c.name}</span>
+                  <button
+                    className="fwe-btn"
+                    disabled={i === 0}
+                    title="Earlier in the wall"
+                    onClick={() => moveCameraInView(editableView.id, cid, -1)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="fwe-btn"
+                    disabled={i === editableView.cameraIds.length - 1}
+                    title="Later in the wall"
+                    onClick={() => moveCameraInView(editableView.id, cid, 1)}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    className="fwe-btn danger"
+                    title="Remove from this wall"
+                    onClick={() => removeCameraFromView(editableView.id, cid)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+            <div className="fwe-sec">
+              Add from {building.levels.find((l) => l.ordinal === ordinal)?.name ?? `L${ordinal}`}
+            </div>
+            <input
+              className="fwe-filter"
+              placeholder="filter by name or number…"
+              value={editFilter}
+              onChange={(e) => setEditFilter(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+            />
+            <div className="fwe-addlist">
+              {building.cameras
+                .filter(
+                  (c) =>
+                    c.ordinal === ordinal &&
+                    !editableView.cameraIds.includes(c.id) &&
+                    (editFilter.trim() === "" ||
+                      c.name.toLowerCase().includes(editFilter.trim().toLowerCase()) ||
+                      String(c.opNumber ?? "").startsWith(editFilter.trim())),
+                )
+                .slice(0, 40)
+                .map((c) => (
+                  <div className="fwe-row" key={c.id}>
+                    <span className="fwe-num">{c.opNumber ?? "—"}</span>
+                    <span className="fwe-name">{c.name}</span>
+                    <button
+                      className="fwe-btn add"
+                      title="Add to this wall"
+                      onClick={() => addCameraToView(editableView.id, c.id)}
+                    >
+                      +
+                    </button>
+                  </div>
+                ))}
+            </div>
           </div>
         )}
 
