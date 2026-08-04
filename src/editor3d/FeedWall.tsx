@@ -14,6 +14,7 @@ import { pointInRing, rankCamerasForPoint } from "../coverage";
 import { polygonArea } from "../geo";
 import { useVisibility } from "../ui/visibility";
 import { WalkRenderer } from "./walk-renderer";
+import PtzJoystick from "./PtzJoystick";
 import type { MetreXY } from "../types";
 
 /** Tiles per page. Past this the tiles are too small to read AND each one still
@@ -38,6 +39,7 @@ export default function FeedWall() {
   const ordinal = useStore((s) => s.ordinal);
   const setFeedWall = useStore((s) => s.setFeedWall);
   const addCameraView = useStore((s) => s.addCameraView);
+  const updateCamera = useStore((s) => s.updateCamera);
   const [wallId, setWallId] = useState<string>("all");
   const [page, setPage] = useState(0);
   // Fullscreen a single camera. Double-click a tile to enter, double-click the
@@ -370,6 +372,23 @@ export default function FeedWall() {
                 onDoubleClick={() => setSoloId(soloId ? null : p.id)}
                 title={soloId ? "Double-click to go back to the wall" : `Double-click to fullscreen ${p.name}`}
               >
+                {/* PTZ in fullscreen gets the joystick an operator expects:
+                    crosshair, drag-to-slew, wheel-to-zoom. Nested INSIDE the tile
+                    so the double-click that leaves fullscreen still bubbles. */}
+                {soloId && p.kind === "ptz" && (
+                  <PtzJoystick
+                    pose={p}
+                    onLive={(live) => rendererRef.current?.setFeedPose(live)}
+                    onCommit={(patch) =>
+                      updateCamera(p.id, {
+                        heading: patch.heading,
+                        tiltDeg: patch.tiltDeg,
+                        fovDeg: patch.fovDeg,
+                        rangeM: patch.rangeM,
+                      })
+                    }
+                  />
+                )}
                 <span className="feedwall-tag">
                   {subject ? `${i + 1}. ` : ""}
                   {p.name}

@@ -645,6 +645,11 @@ export class WalkRenderer {
   private raf: number | null = null;
   private feedPose: SceneCameraPose | null = null;
   private feedPoses: SceneCameraPose[] = [];
+  /** Camera bodies by camera id, so a feed can hide the one it is looking out
+   *  of. Rebuilt alongside camBodyGroup. */
+  private readonly camBodyById = new Map<string, THREE.Object3D>();
+  /** The body currently hidden because we are rendering from inside it. */
+  private ownBodyHidden: THREE.Object3D | null = null;
 
   // R4 quality valve. `quality` selects the render path in tick(): "high" runs the
   // bloom composer, "low" a plain forward render. The pipeline is built once and
@@ -861,6 +866,11 @@ export class WalkRenderer {
    *  honest rather than decorative. */
   setFeedPose(pose: SceneCameraPose | null): void {
     this.feedPose = pose;
+    // Single-pose feed (fullscreen): keep this camera's own housing hidden for
+    // as long as we are inside it. Multi-tile draws handle it per tile instead,
+    // in renderTiles — a persistent hide there would blank tile 1's camera out
+    // of every OTHER tile's picture too.
+    if (this.opts.feed) this.hideOwnBody(pose && this.feedPoses.length <= 1 ? pose.id : null);
     if (!pose) return;
     this.camera.position.copy(v3(pose.at[0], pose.at[1], pose.mountM));
     this.camera.quaternion.copy(poseQuaternion(pose.headingDeg, pose.tiltDeg, pose.rollDeg));
@@ -1794,6 +1804,7 @@ export class WalkRenderer {
       }
       body.userData.cameraId = pose.id;
       this.camBodyGroup.add(body);
+      this.camBodyById.set(pose.id, body);
     }
     this.addCameraRods(scene);
   }
@@ -1840,6 +1851,22 @@ export class WalkRenderer {
       if ((c as THREE.InstancedMesh).isInstancedMesh) (c as THREE.InstancedMesh).dispose();
       this.camBodyGroup.remove(c);
     }
+    this.camBodyById.clear();
+    // The hidden body was just removed; drop the stale handle or the NEXT hide
+    // would "restore" a mesh that no longer belongs to the scene.
+    this.ownBodyHidden = null;
+  }
+
+  /** Hide the body of the camera we are rendering out of — otherwise the feed
+   *  is looking at the inside of its own housing, which fills the middle of the
+   *  picture with a green blob exactly where the PTZ crosshair sits. Pass null
+   *  to restore. Idempotent: safe to call every frame. */
+  private hideOwnBody(id: string | null): void {
+    const next = id ? this.camBodyById.get(id) ?? null : null;
+    if (next === this.ownBodyHidden) return;
+    if (this.ownBodyHidden) this.ownBodyHidden.visible = true;
+    if (next) next.visible = false;
+    this.ownBodyHidden = next;
   }
 
   private spawn(scene: Scene3D): void {
@@ -2082,8 +2109,11 @@ export class WalkRenderer {
       this.camera.aspect = tw / Math.max(1, th);
       this.camera.fov = p.kind === "dome" ? 110 : Math.min(140, Math.max(20, p.vfovDeg));
       this.camera.updateProjectionMatrix();
+      // Each tile hides only ITS OWN housing, for its own draw.
+      this.hideOwnBody(p.id);
       this.renderer.render(this.scene, this.camera);
     }
+    this.hideOwnBody(null);
 
     this.renderer.setScissorTest(false);
     this.renderer.setViewport(0, 0, size.x, size.y);
