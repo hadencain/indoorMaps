@@ -5,7 +5,9 @@ import { DEMOS } from "../demos";
 import { propertyNameFor } from "../properties";
 import NewPropertyWizard from "./NewPropertyWizard";
 import DxfImportDialog from "./DxfImportDialog";
+import CsvImportDialog from "./CsvImportDialog";
 import { parseDxfText, type DxfParseResult } from "../dxf";
+import { parseCameraCsv, type CameraCsvResult } from "../camera-csv";
 
 export default function TopBar() {
   const levels = useStore((s) => s.building.levels);
@@ -16,6 +18,7 @@ export default function TopBar() {
   const [propOpen, setPropOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [dxfDialog, setDxfDialog] = useState<{ raw: string; initial: DxfParseResult } | null>(null);
+  const [csvDialog, setCsvDialog] = useState<CameraCsvResult | null>(null);
   // Two-step delete: first click arms, second click deletes (no blocking confirm()).
   const [armedDelete, setArmedDelete] = useState<string | null>(null);
   const mode = useStore((s) => s.mode);
@@ -120,6 +123,7 @@ export default function TopBar() {
           onClose={() => setDxfDialog(null)}
         />
       )}
+      {csvDialog && <CsvImportDialog result={csvDialog} onClose={() => setCsvDialog(null)} />}
       <div className="modetoggle" role="group" aria-label="Mode">
         <button className={mode === "edit" ? "active" : ""} onClick={() => setMode("edit")} title="Authoring — draw & edit the map">
           <Pencil size={13} /> Edit
@@ -199,6 +203,26 @@ export default function TopBar() {
                       const f = e.target.files?.[0];
                       e.target.value = "";
                       if (f) await importRasterFile(f);
+                    }}
+                  />
+                </label>
+                <label className="dm-item">
+                  Import camera schedule (CSV)…
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    hidden
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!f) return;
+                      const r = parseCameraCsv(await f.text());
+                      if (!r.ok) {
+                        useStore.setState({ importMsg: `Schedule import failed: ${r.error}` });
+                      } else {
+                        setOpen(false);
+                        setCsvDialog(r.result);
+                      }
                     }}
                   />
                 </label>

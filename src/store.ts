@@ -37,6 +37,8 @@ import { buildingToGeoJSON, geoJSONToBuilding } from "./imdf";
 import { buildingToIMDFArchive } from "./imdfArchive";
 import { zipStore } from "./zip";
 import { buildSecurityReport } from "./report";
+import { modelLabel, modelRangeM } from "./camera-models";
+import type { CameraScheduleRow } from "./camera-csv";
 import { buildCameraIndex, indexStats } from "./security/coverage-link";
 import { suggestCameras, type Suggestion, type SuggestStats } from "./security/suggest";
 import { buildGraph } from "./graph";
@@ -493,6 +495,18 @@ interface State {
     kind: CameraKind,
     patch: { model: string; fovDeg: number; resolutionMP: number; rangeM: number },
   ) => number;
+  /** Import an integrator's camera schedule. Rows matching an existing camera
+   *  by name (case-insensitive, any floor) ENRICH it; the rest are created on
+   *  the active floor — at the row's x/y when it has one, else on a staging
+   *  line south of the floor so unpositioned cameras LOOK unpositioned. One
+   *  undo entry for the whole file. */
+  importCameraSchedule: (rows: CameraScheduleRow[]) => {
+    created: number;
+    enriched: number;
+    rated: number;
+    staged: number;
+    numberCollisions: number;
+  };
   addCameraToView: (viewId: string, camId: string) => void;
   removeCameraFromView: (viewId: string, camId: string) => void;
   moveCameraInView: (viewId: string, camId: string, dir: -1 | 1) => void;
@@ -1570,6 +1584,99 @@ export const useStore = create<State>((set, get) => {
           c.id === id ? { ...c, presets: (c.presets ?? []).filter((p) => p.id !== presetId) } : c,
         ),
       })),
+
+    importCameraSchedule: (rows) => {
+      const s = get();
+      const ord = s.ordinal;
+      const summary = { created: 0, enriched: 0, rated: 0, staged: 0, numberCollisions: 0 };
+
+      // Staging line: 4 m south of the floor's geometry, cameras every 3 m.
+      // Falls back to the origin corner on an empty floor.
+      let minX = Infinity;
+      let minY = Infinity;
+      for (const u of s.building.units)
+        if (u.ordinal === ord)
+          for (const [x, y] of u.polygon) {
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+          }
+      if (!Number.isFinite(minX)) {
+        minX = 0;
+        minY = 0;
+      }
+
+      commit((b) => {
+        const cameras = [...b.cameras];
+        const byName = new Map(cameras.map((c, i) => [c.name.trim().toLowerCase(), i]));
+        const takenNumbers = new Set(cameras.map((c) => c.opNumber).filter((n): n is number => n != null));
+        let stagedIdx = 0;
+
+        for (const row of rows) {
+          // The schedule is the authority a bid is built on: present fields
+          // overwrite, absent fields leave the camera alone.
+          const specPatch = row.spec
+            ? {
+                model: modelLabel(row.spec),
+                kind: row.spec.kind,
+                fovDeg: row.spec.fovDeg,
+                resolutionMP: row.spec.resolutionMP,
+                rangeM: modelRangeM(row.spec),
+              }
+            : row.model
+              ? { model: row.model }
+              : {};
+          if (row.spec) summary.rated++;
+
+          let opNumber: number | undefined;
+          if (row.opNumber != null) {
+            if (takenNumbers.has(row.opNumber)) summary.numberCollisions++;
+            else {
+              opNumber = row.opNumber;
+              takenNumbers.add(row.opNumber);
+            }
+          }
+
+          const extras = {
+            ...(row.mountM != null ? { mountM: row.mountM } : {}),
+            ...(row.ipAddress ? { ipAddress: row.ipAddress } : {}),
+            ...(row.serial ? { serial: row.serial } : {}),
+            ...(row.streamRef ? { streamRef: row.streamRef } : {}),
+            ...(row.notes ? { notes: row.notes } : {}),
+            ...(opNumber != null ? { opNumber } : {}),
+          };
+
+          const hit = byName.get(row.name.trim().toLowerCase());
+          if (hit !== undefined) {
+            // A collision against the matched camera's OWN number is not a
+            // collision at all — undo the count above if it was self-owned.
+            if (row.opNumber != null && cameras[hit].opNumber === row.opNumber) summary.numberCollisions--;
+            cameras[hit] = { ...cameras[hit], ...specPatch, ...extras };
+            summary.enriched++;
+          } else {
+            const placed = row.x != null && row.y != null;
+            if (!placed) {
+              summary.staged++;
+            }
+            const at: MetreXY = placed
+              ? [row.x as number, row.y as number]
+              : [minX + stagedIdx++ * 3, minY - 4];
+            cameras.push({
+              id: `cam-${Date.now()}-${camSeq++}`,
+              ordinal: ord,
+              at,
+              name: row.name,
+              ...CAM_DEFAULTS,
+              ...specPatch,
+              ...extras,
+            });
+            byName.set(row.name.trim().toLowerCase(), cameras.length - 1);
+            summary.created++;
+          }
+        }
+        return { ...b, cameras };
+      });
+      return summary;
+    },
 
     applyModelToUnrated: (ordinal, kind, patch) => {
       const hit = get().building.cameras.filter(

@@ -1967,6 +1967,28 @@ button.wide.ghost {
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
+/* CSV schedule preview: sniffed column mapping + first rows. */
+.csv-mapping {
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.csv-map-row { display: flex; gap: 8px; }
+.csv-map-row.dim { color: var(--muted, #7d8590); }
+.csv-field { width: 84px; color: var(--accent, #39ff88); }
+.csv-arrow { color: var(--muted, #7d8590); }
+.csv-preview {
+  border: 1px solid var(--line);
+  border-top: 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.7;
+  max-height: 130px;
+  overflow-y: auto;
+}
+.csv-prev-row.dim { color: var(--muted, #7d8590); }
+
 .wiz-cal-row {
   display: flex;
   align-items: center;
