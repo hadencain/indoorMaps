@@ -32,6 +32,10 @@ export default function TopBar() {
   const addLevel = useStore((s) => s.addLevel);
   const reopenGuide = useStore((s) => s.reopenGuide);
   const planWidth = useStore((s) => s.planWidth);
+  const setLevelCeiling = useStore((s) => s.setLevelCeiling);
+  const activeCeiling = useStore(
+    (s) => s.building.levels.find((l) => l.ordinal === s.ordinal)?.ceilingM ?? 3.2,
+  );
   const setPlanWidth = useStore((s) => s.setPlanWidth);
   const importSvgText = useStore((s) => s.importSvgText);
   const importRasterFile = useStore((s) => s.importRasterFile);
@@ -177,6 +181,22 @@ export default function TopBar() {
                     min={1}
                     value={planWidth}
                     onChange={(e) => setPlanWidth(Number(e.target.value))}
+                  />{" "}
+                  m
+                </div>
+                {/* Per-floor ceiling, reachable WITHOUT entering the 3D walk
+                    editor — it drives camera mount heights and the 3D model,
+                    and an onboarding operator sets it once while tracing. */}
+                <div className="dm-row" title="Ceiling height of the active floor (drives 3D + camera mounts)">
+                  <span>Ceiling · {levels.find((l) => l.ordinal === ordinal)?.name ?? `L${ordinal}`}</span>
+                  <input
+                    type="number"
+                    className="numin"
+                    min={2.2}
+                    max={8}
+                    step={0.1}
+                    value={activeCeiling}
+                    onChange={(e) => setLevelCeiling(ordinal, Number(e.target.value) || activeCeiling)}
                   />{" "}
                   m
                 </div>

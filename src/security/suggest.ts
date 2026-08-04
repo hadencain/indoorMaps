@@ -10,8 +10,8 @@
 //     no footprint yet — the coverage grid then falls back to the union of its
 //     eligible units.
 //   - No demo artifacts: no fake RTSP streamRefs, kind is honest "fixed".
-import { collectWalls, computeVisibility, pointInRing } from "../coverage";
-import type { Segment } from "../coverage";
+import { collectWalls, computeCoverage, computeVisibility, pointInRing } from "../coverage";
+import type { Segment, VisibilityPolygon } from "../coverage";
 import { bbox, polygonArea } from "../geo";
 import type { Building, Camera, MetreXY } from "../types";
 
@@ -25,7 +25,13 @@ export interface Suggestion {
 }
 
 export interface SuggestStats {
-  /** Single-cover % of the floor grid before/after (projected) the plan. */
+  /** Coverage % before / after (projected) the plan — computed with the SAME
+   *  polygon-union area math as the coverage layer's readout (computeCoverage),
+   *  not the planner's search grid. The grid samples cell centres, which counts
+   *  a half-covered cell as covered and once overstated a projection by eight
+   *  points (94% projected, 86% delivered) — a credibility problem when the
+   *  number is read out in a sales meeting. The grid remains the greedy
+   *  search's heuristic; it no longer makes claims. */
   beforePct: number;
   afterPct: number;
   cornerCount: number;
@@ -105,10 +111,6 @@ export function suggestCameras(
     const ring = computeVisibility(cam, walls);
     if (ring.length >= 3) rings.push(ring);
   }
-  const baseCounts = coverCounts(pts, rings);
-  let baseCovered = 0;
-  for (const c of baseCounts) if (c >= 1) baseCovered++;
-  const beforePct = baseCovered / pts.length;
 
   const out: Suggestion[] = [];
   let seq = 1;
@@ -259,14 +261,23 @@ export function suggestCameras(
     }
   }
 
-  const finalCounts = coverCounts(pts, rings);
-  let covered = 0;
-  for (const c of finalCounts) if (c >= 1) covered++;
+  // Report with the layer's own math so "projected" and the readout after
+  // Accept-all are the SAME number by construction.
+  const toVis = (ring: MetreXY[], i: number): VisibilityPolygon => ({
+    cameraId: `proj-${i}`,
+    ordinal,
+    ring,
+  });
+  const existingVis = existing
+    .map((cam) => computeVisibility(cam, walls))
+    .filter((r) => r.length >= 3)
+    .map(toVis);
+  const projectedVis = [...existingVis, ...out.map((sg, i) => toVis(sg.ring, 1000 + i))];
   return {
     suggestions: out,
     stats: {
-      beforePct,
-      afterPct: covered / pts.length,
+      beforePct: computeCoverage(b, ordinal, existingVis).coveragePct,
+      afterPct: computeCoverage(b, ordinal, projectedVis).coveragePct,
       cornerCount,
       fillCount,
     },
