@@ -39,7 +39,15 @@ export default function FeedWall() {
   const ordinal = useStore((s) => s.ordinal);
   const setFeedWall = useStore((s) => s.setFeedWall);
   const addCameraView = useStore((s) => s.addCameraView);
-  const updateCamera = useStore((s) => s.updateCamera);
+  const setOrdinal = useStore((s) => s.setOrdinal);
+  const ensureCameraNumbers = useStore((s) => s.ensureCameraNumbers);
+  const setCameraAim = useStore((s) => s.setCameraAim);
+  const saveCameraPreset = useStore((s) => s.saveCameraPreset);
+  const deleteCameraPreset = useStore((s) => s.deleteCameraPreset);
+  const recallCameraPreset = useStore((s) => s.recallCameraPreset);
+  /** Digits typed for a camera call-up, VMS style: 4 2 Enter. */
+  const [dial, setDial] = useState("");
+  const [dialMsg, setDialMsg] = useState<string | null>(null);
   const [wallId, setWallId] = useState<string>("all");
   const [page, setPage] = useState(0);
   // Fullscreen a single camera. Double-click a tile to enter, double-click the
@@ -155,21 +163,102 @@ export default function FeedWall() {
   }, [scene.cameras, soloId, subject, ranked, wallCams, safePage]);
 
   const soloCam = soloId ? scene.cameras.find((c) => c.id === soloId) ?? null : null;
+  const numberById = useMemo(
+    () => new Map(building.cameras.map((c) => [c.id, c.opNumber])),
+    [building.cameras],
+  );
 
-  // Esc backs out one level: solo -> wall -> exit is left to the button, because
-  // an operator hitting Esc to leave a fullscreen feed must not also drop the
-  // whole wall.
+  // Numbers are assigned once, when the operator surface that uses them opens.
+  useEffect(() => { ensureCameraNumbers(); }, [ensureCameraNumbers]);
+
+  const soloCamRecord = soloId ? building.cameras.find((c) => c.id === soloId) ?? null : null;
+  const presets = useMemo(
+    () => [...(soloCamRecord?.presets ?? [])].sort((a, b) => a.slot - b.slot),
+    [soloCamRecord],
+  );
+
+  /** Call up a camera by its site-wide number, crossing floors if needed. */
+  const callUp = useCallback(
+    (num: number) => {
+      const cam = building.cameras.find((c) => c.opNumber === num);
+      if (!cam) {
+        setDialMsg(`No camera ${num}`);
+        return;
+      }
+      if (cam.ordinal !== ordinal) setOrdinal(cam.ordinal);
+      setSubject(null);
+      setSoloId(cam.id);
+      setDialMsg(`${num} · ${cam.name}`);
+    },
+    [building.cameras, ordinal, setOrdinal],
+  );
+
+  // Operator keypad. Digits dial, Enter calls up, Esc backs out one level at a
+  // time (dial first, then fullscreen — never the whole wall, or an operator
+  // clearing a mistyped number would lose the screen).
   useEffect(() => {
-    if (!soloId) return;
     const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+
+      // Ctrl+<1-9> recalls a preset slot; slot 1 is always Home.
+      if ((e.ctrlKey || e.metaKey) && /^[1-9]$/.test(e.key)) {
+        if (!soloId) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const slot = Number(e.key);
+        const p = (building.cameras.find((c) => c.id === soloId)?.presets ?? []).find((x) => x.slot === slot);
+        if (!p) { setDialMsg(`No preset ${slot}`); return; }
+        recallCameraPreset(soloId, slot);
+        setDialMsg(`${slot} · ${p.name}`);
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      // `H` = Home. Ctrl+1 is what an operator asks for, but Chrome reserves
+      // Ctrl+1..8 for tab switching and a page cannot always intercept it, so
+      // Home also has a plain key that nothing can swallow.
+      if ((e.key === "h" || e.key === "H") && soloId) {
+        e.preventDefault();
+        const p = (building.cameras.find((c) => c.id === soloId)?.presets ?? []).find((x) => x.slot === 1);
+        if (!p) { setDialMsg("No home set yet"); return; }
+        recallCameraPreset(soloId, 1);
+        setDialMsg("1 · Home");
+        return;
+      }
+      if (/^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        setDialMsg(null);
+        setDial((d) => (d + e.key).slice(0, 5));
+        return;
+      }
+      if (e.key === "Backspace" && dial) {
+        e.preventDefault();
+        setDial((d) => d.slice(0, -1));
+        return;
+      }
+      if (e.key === "Enter" && dial) {
+        e.preventDefault();
+        callUp(Number(dial));
+        setDial("");
+        return;
+      }
       if (e.key === "Escape") {
         e.stopPropagation();
-        setSoloId(null);
+        if (dial) setDial("");
+        else if (soloId) setSoloId(null);
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [soloId]);
+  }, [soloId, dial, callUp, building.cameras, recallCameraPreset]);
+
+  // The call-up readout is a confirmation, not a log — let it fade.
+  useEffect(() => {
+    if (!dialMsg) return;
+    const t = window.setTimeout(() => setDialMsg(null), 2600);
+    return () => window.clearTimeout(t);
+  }, [dialMsg]);
 
   useEffect(() => {
     const el = mountRef.current;
@@ -240,9 +329,14 @@ export default function FeedWall() {
         <span className="feedwall-title">{soloCam ? "CAMERA" : "FEED WALL"}</span>
         {soloCam ? (
           <>
+            {soloCamRecord?.opNumber != null && (
+              <span className="feedwall-num solo">{soloCamRecord.opNumber}</span>
+            )}
             <span className="feedwall-solo-name">{soloCam.name}</span>
             <span className="feedwall-solo-ctx">{activeWall?.name}</span>
-            <span className="feedwall-count">double-click the picture or press Esc to go back</span>
+            <span className="feedwall-count">
+              type a number + Enter to call up · Esc to go back
+            </span>
             <button className="feedwall-follow" onClick={() => setSoloId(null)}>
               Back to wall
             </button>
@@ -334,6 +428,69 @@ export default function FeedWall() {
 
       <div className="feedwall-stage">
         <div className="feedwall-canvas" ref={mountRef} />
+
+        {/* Keypad readout. Shows the digits as they are typed and then what the
+            call-up resolved to, so a mistyped number is visible BEFORE Enter. */}
+        {(dial || dialMsg) && (
+          <div className={`feedwall-dial${dialMsg && /^No /.test(dialMsg) ? " bad" : ""}`}>
+            {dial ? (
+              <>
+                <span className="fwd-label">CALL</span>
+                <span className="fwd-digits">{dial}</span>
+                <span className="fwd-hint">Enter</span>
+              </>
+            ) : (
+              <span className="fwd-msg">{dialMsg}</span>
+            )}
+          </div>
+        )}
+
+        {/* PRESETS: only for a PTZ in fullscreen — nothing else has an aim the
+            operator can move, so nothing else has one worth saving. */}
+        {soloCam && soloCam.kind === "ptz" && (
+          <div className="feedwall-presets">
+            <span className="fwp-head">Presets</span>
+            {presets.map((p) => (
+              <span key={p.id} className={`fwp-item${p.slot === 1 ? " home" : ""}`}>
+                <button
+                  className="fwp-recall"
+                  onClick={() => {
+                    recallCameraPreset(soloCam.id, p.slot);
+                    setDialMsg(`${p.slot} · ${p.name}`);
+                  }}
+                  title={
+                    p.slot === 1
+                      ? "Home — the aim this camera was authored with (Ctrl+1, or H)"
+                      : `Recall "${p.name}" (Ctrl+${p.slot})`
+                  }
+                >
+                  <span className="fwp-slot">{p.slot}</span>
+                  {p.name}
+                </button>
+                {p.slot !== 1 && (
+                  <button
+                    className="fwp-del"
+                    title={`Delete "${p.name}"`}
+                    onClick={() => deleteCameraPreset(soloCam.id, p.id)}
+                  >
+                    ✕
+                  </button>
+                )}
+              </span>
+            ))}
+            {presets.length === 0 && <span className="fwp-empty">move the camera to set Home</span>}
+            <button
+              className="fwp-add"
+              title="Save the current aim as a preset"
+              onClick={() => {
+                const slot = saveCameraPreset(soloCam.id, "");
+                setDialMsg(slot ? `saved preset ${slot}` : "all nine slots are full");
+              }}
+            >
+              + Save this shot
+            </button>
+          </div>
+        )}
         {/* A followed subject standing where nothing sees it must SAY so. The wall
             otherwise just empties, which reads as a broken screen rather than as
             the finding it actually is — "no camera covers this" is the single most
@@ -379,14 +536,10 @@ export default function FeedWall() {
                   <PtzJoystick
                     pose={p}
                     onLive={(live) => rendererRef.current?.setFeedPose(live)}
-                    onCommit={(patch) =>
-                      updateCamera(p.id, {
-                        heading: patch.heading,
-                        tiltDeg: patch.tiltDeg,
-                        fovDeg: patch.fovDeg,
-                        rangeM: patch.rangeM,
-                      })
-                    }
+                    // setCameraAim, not updateCamera: it snapshots the authored
+                    // aim into preset slot 1 (Home) on the FIRST move, which is
+                    // the only moment the original is still recoverable.
+                    onCommit={(patch) => setCameraAim(p.id, patch)}
                   />
                 )}
                 <span className="feedwall-tag">
@@ -394,6 +547,11 @@ export default function FeedWall() {
                   {p.name}
                   {score != null ? ` · ${Math.round(score * 100)}%` : ""}
                 </span>
+                {/* The call-up number, shown ON the tile — an operator cannot
+                    dial a camera whose number they have to go and look up. */}
+                {!soloId && numberById.get(p.id) != null && (
+                  <span className="feedwall-num">{numberById.get(p.id)}</span>
+                )}
               </div>
             );
           })}
