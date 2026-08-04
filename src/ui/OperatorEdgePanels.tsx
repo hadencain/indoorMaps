@@ -12,7 +12,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import FeedPlaceholder from "./panels/FeedPlaceholder";
+import Feed from "./panels/Feed";
 import { useStore, ALL_AMENITY_KINDS } from "../store";
 import { m2ll } from "../geo";
 import { panStep, zoomStep, tiltStep } from "../security/ptz";
@@ -559,7 +559,7 @@ function ViewWall({ map, viewId, onClose }: { map: maplibregl.Map; viewId: strin
               onClick={() => jump(c)}
               onKeyDown={(e) => e.key === "Enter" && jump(c)}
             >
-              <FeedPlaceholder camera={c} />
+              <Feed camera={c} />
               <div className="viewwall-cap">
                 <span className="vlabel">{c.name}</span>
                 <span className="edge-row-meta">{levelName(c.ordinal)}</span>

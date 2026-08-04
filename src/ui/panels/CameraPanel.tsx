@@ -7,7 +7,7 @@ import { formatArea } from "../../format";
 import { unitsCoveredByCamera } from "../../security/coverage-link";
 import { doriBand, doriRangeM, pxPerMetreAt } from "../../coverage";
 import SearchBox from "../SearchBox";
-import FeedPlaceholder from "./FeedPlaceholder";
+import Feed from "./Feed";
 import type { Camera, CameraKind } from "../../types";
 
 const M_TO_FT = 3.280839895;
@@ -182,7 +182,7 @@ export default function CameraPanel() {
       <div className="panel-title">Camera</div>
 
       {/* Inert feed placeholder: presents as clickable, performs NO network I/O. */}
-      <FeedPlaceholder camera={selected} />
+      <Feed camera={selected} />
 
       <label>Name</label>
       <input
